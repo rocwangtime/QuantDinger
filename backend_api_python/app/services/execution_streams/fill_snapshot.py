@@ -62,6 +62,15 @@ def complete_snapshot(event):
 
     if float(event.get("cumulative_quantity") or 0) > 0 and float(event.get("cumulative_average_price") or 0) > 0:
         return event
+    if (
+        str(event.get("exchange_id") or "").lower() == "futu"
+        and str(event.get("exchange_fill_id") or "")
+        and float(event.get("quantity") or 0) > 0
+        and float(event.get("price") or 0) > 0
+    ):
+        # TradeDealHandler supplies the executed quantity and price directly.
+        # FutuClient has no generic wait_for_fill implementation to consult.
+        return event
     owner = (event.get("exchange_id"), event.get("credential_id"), event.get("market_type"))
     key = (*owner, event.get("symbol"), event.get("exchange_order_id"))
     now = time.monotonic()

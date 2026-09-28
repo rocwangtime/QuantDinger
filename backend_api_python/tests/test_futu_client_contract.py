@@ -324,10 +324,54 @@ def test_parse_futu_order_snapshot_uses_cumulative_fill_and_average_price():
 
     assert first.exchange_fill_id == ""
     assert first.price == 349.2
+    assert first.cumulative_average_price == 349.2
     assert first.quantity == 0
     assert first.cumulative_quantity == 20
     assert first.is_cumulative
     assert first.event_key() != second.event_key()
+
+
+def test_futu_order_limit_price_is_not_execution_evidence():
+    from app.services.execution_streams.normalizers import parse_futu_deal
+
+    event = parse_futu_deal({
+        "code": "US.SPY",
+        "order_id": "OID-3",
+        "price": 700,
+        "dealt_qty": 1,
+        "dealt_avg_price": 0,
+        "order_status": "FILLED_ALL",
+    })[0]
+
+    assert event.price == 0
+    assert event.cumulative_average_price == 0
+    assert event.cumulative_quantity == 1
+
+
+def test_futu_trade_deal_with_executed_price_needs_no_rest_snapshot(monkeypatch):
+    from app.services.execution_streams.fill_snapshot import complete_snapshot
+    from app.services.execution_streams.normalizers import parse_futu_deal
+
+    event = parse_futu_deal({
+        "code": "US.SPY",
+        "order_id": "OID-4",
+        "deal_id": "DEAL-4",
+        "qty": 1,
+        "price": 699.5,
+        "dealt_qty": 1,
+        "order_status": "FILLED_ALL",
+    })[0]
+    def unexpected_query(*_args, **_kwargs):
+        raise AssertionError("Futu deal must not require a generic REST fill query")
+
+    monkeypatch.setattr(
+        "app.services.grid.exchange_orders.wait_grid_market_fill",
+        unexpected_query,
+    )
+    snapshot = complete_snapshot(event.__dict__)
+
+    assert snapshot["quantity"] == 1
+    assert snapshot["price"] == 699.5
 
 
 @patch("app.services.futu_trading.client._ensure_futu")

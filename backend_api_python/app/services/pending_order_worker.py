@@ -891,6 +891,10 @@ class PendingOrderWorker(
         exchange_config = resolve_exchange_config(sc.get("exchange_config") or {}, user_id=int(sc.get("user_id") or 1))
         if str(exchange_config.get("exchange_id") or "").strip().lower() != "futu":
             return False
+        market_category = sc.get("market_category") or (sc.get("trading_config") or {}).get("market_category") or "USStock"
+        if market_category != "USStock":
+            logger.error("Futu fill sync rejected non-US strategy market: pending_id=%s", order_id)
+            return False
 
         client = None
         try:
@@ -937,17 +941,14 @@ class PendingOrderWorker(
 
             raw_json = json.dumps(result.raw or {}, ensure_ascii=False)
             cumulative_commission, commission_ccy = _commission_snapshot(result.raw)
-            commission_delta = max(0.0, cumulative_commission - _previous_commission(row))
 
             # Derive the recordable delta from the durable trade ledger, not
             # only pending_orders.filled. If trade persistence succeeded but
             # the pending-order snapshot failed, a retry must not book it twice.
-            delta = self._unrecorded_pending_fill(
-                order_id,
-                cumulative_filled,
-                fail_closed=True,
-                include_stream_events=True,
-            )
+            delta = self._unrecorded_pending_fill(order_id, cumulative_filled, fail_closed=True)
+            if delta > FUTU_FILL_DELTA_EPSILON and cumulative_avg <= 0:
+                logger.warning("Futu fill sync awaiting broker price: pending_id=%s filled=%s", order_id, cumulative_filled)
+                return False
             if delta > FUTU_FILL_DELTA_EPSILON and cumulative_avg > 0:
                 delta_avg = cumulative_avg
                 if previous_filled > 0 and previous_avg > 0:
@@ -957,17 +958,11 @@ class PendingOrderWorker(
 
                 signal_type = payload.get("signal_type") or row.get("signal_type")
                 symbol = payload.get("symbol") or row.get("symbol")
-                market_category = str(
-                    sc.get("market_category")
-                    or (sc.get("trading_config") or {}).get("market_category")
-                    or "HKStock"
-                )
-                market_type_for_client = "HKStock" if market_category == "HKStock" else "USStock"
                 from app.services.live_trading.fee_quote import fee_to_quote
                 commission_quote = fee_to_quote(
                     client,
                     symbol=str(symbol or ""),
-                    fee=commission_delta,
+                    fee=cumulative_commission,
                     fee_ccy=commission_ccy,
                     fill_price=delta_avg,
                 )
@@ -977,13 +972,16 @@ class PendingOrderWorker(
                     signal_type=str(signal_type or ""),
                     filled=float(delta),
                     avg_price=float(delta_avg),
+                    cumulative_filled=cumulative_filled,
+                    cumulative_average_price=cumulative_avg,
                     exchange_config=exchange_config,
-                    market_type=market_type_for_client,
+                    market_type="USStock",
                     order_id=order_id,
                     fill_source="worker_futu_fill_sync",
-                    commission=commission_delta,
+                    commission=cumulative_commission,
                     commission_ccy=commission_ccy,
                     commission_quote=commission_quote,
+                    cumulative_commission_quote=commission_quote,
                     close_reason=trade_close_reason_from_payload(payload, str(signal_type or "")),
                     strategy_run_id=int(payload.get("strategy_run_id") or row.get("strategy_run_id") or 0),
                     order_intent_id=int(payload.get("order_intent_id") or row.get("order_intent_id") or 0),
@@ -3399,20 +3397,17 @@ class PendingOrderWorker(
                 fill_price=avg_price,
             )
 
-            if avg_price <= 0 and ref_price > 0 and filled > 0:
-                avg_price = ref_price
-
-            executed_at = int(time.time())
             self._mark_sent(
                 order_id=order_id,
                 note="futu_order_sent",
                 exchange_id="futu",
                 exchange_order_id=exchange_order_id,
                 exchange_response_json=json.dumps(result.raw or {}, ensure_ascii=False),
-                filled=filled,
-                avg_price=avg_price,
-                executed_at=executed_at if filled > 0 else None,
-                final_filled=is_final_fill(amount, filled, avg_price, result.status),
+                filled=0.0,
+                avg_price=0.0,
+                executed_at=None,
+                # Keep the row retryable until the trade ledger is reconciled.
+                final_filled=False,
                 client_order_id=client_remark,
             )
             _console_print(
@@ -3424,7 +3419,7 @@ class PendingOrderWorker(
                 recordable_filled = self._unrecorded_pending_fill(
                     order_id,
                     filled,
-                    include_stream_events=True,
+                    fail_closed=True,
                 )
                 if recordable_filled > 0 and avg_price > 0:
                     profit, matched_entry = persist_strategy_fill(
@@ -3433,6 +3428,8 @@ class PendingOrderWorker(
                         signal_type=str(signal_type),
                         filled=float(recordable_filled),
                         avg_price=float(avg_price),
+                        cumulative_filled=filled,
+                        cumulative_average_price=avg_price,
                         exchange_config=exchange_config,
                         market_type=str(market_type_for_client or "HKStock"),
                         order_id=int(order_id),
@@ -3440,6 +3437,7 @@ class PendingOrderWorker(
                         commission=commission,
                         commission_ccy=commission_ccy,
                         commission_quote=commission_quote,
+                        cumulative_commission_quote=commission_quote,
                         close_reason=trade_close_reason_from_payload(payload, str(signal_type)),
                         strategy_run_id=int(payload.get("strategy_run_id") or order_row.get("strategy_run_id") or 0),
                         order_intent_id=int(payload.get("order_intent_id") or order_row.get("order_intent_id") or 0),

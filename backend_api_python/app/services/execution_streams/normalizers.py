@@ -405,7 +405,6 @@ def parse_futu_deal(payload: Dict[str, Any]) -> List[ExecutionEvent]:
         price = as_float(
             payload.get("dealt_avg_price")
             or payload.get("avg_price")
-            or payload.get("price")
         )
     else:
         # TradeDealHandler rows carry a stable deal_id and per-deal qty/price.
@@ -456,6 +455,7 @@ def parse_futu_deal(payload: Dict[str, Any]) -> List[ExecutionEvent]:
             price=price,
             quantity=abs(qty),
             cumulative_quantity=abs(cumulative_qty),
+            cumulative_average_price=price if is_order_snapshot else 0.0,
             is_cumulative=is_order_snapshot,
             fee_status="pending",
             occurred_at=occurred_at,
