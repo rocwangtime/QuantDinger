@@ -222,6 +222,12 @@ def resolve_exchange_config(exchange_config: Dict[str, Any], user_id: int = 1) -
         "use_testnet", "is_testnet", "isTestnet", "sandbox", "paper_trading", "paperTrading",
         "base_url", "baseUrl", "futures_base_url", "futuresBaseUrl",
     }
+    if str(merged.get("exchange_id") or "").lower() == "futu":
+        credential_owned_keys.update({
+            "futu_host", "futu_port", "host", "port", "trade_env", "trade_market", "tradeMarket",
+            "security_firm", "securityFirm", "acc_id", "accId", "unlock_password", "unlockPassword",
+            "is_encrypt", "isEncrypt",
+        })
 
     # Overlay strategy-level settings, excluding credential-owned and revenue fields.
     for k, v in strip_partner_config(exchange_config).items():
@@ -290,4 +296,3 @@ def coalesce_exchange_config_from_payload(payload: Dict[str, Any]) -> Dict[str, 
             ex_cfg["credential_id"] = cred
 
     return ex_cfg
-
