@@ -1,0 +1,8 @@
+# Low-memory server build: use a locally verified Vue dist/ artifact.
+# Run `pnpm build` in the sibling QuantDinger-Vue checkout before syncing it.
+services:
+  frontend:
+    build:
+      dockerfile: Dockerfile.futu-paper
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/health"]
