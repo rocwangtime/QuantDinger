@@ -30,4 +30,19 @@ OpenD 登录并通过 `127.0.0.1:11111` 探测后，另行启动 `--profile loca
 
 创建富途凭证时填写 `host.docker.internal:11112`、`trade_env=demo`、`trade_market=US`、探测获得的模拟 `acc_id`。Web 页面连接只是诊断会话；自动策略使用单独保存的加密交易凭证。将 [`futu_us_paper_roundtrip.py`](../trading/futu_us_paper_roundtrip.py) 粘贴进策略 IDE，先验证并回测，再部署为模拟盘。它在一个 SPY 分钟线上只尝试买卖各一次、只下明确价格的限价单，并持久化运行状态；若订单未成交、被拒或行情中断，不会无限重试，需在富途和 Web 中人工检查并停止部署。第一笔务必有人值守，核对模拟账户和数量为 1 股。
 
+## 后续改用 GitHub 发布（尚未切换当前部署）
+
+服务器已能通过 HTTPS 读取 GitHub 仓库，并能连接 `ghcr.io`；但还没有下载过本项目的新镜像。后端代码可推送到用户的 `rocwangtime/QuantDinger` 分支；前端当前工作树的远端仍是 `OpenByteInc/QuantDinger-Vue`，因此须先明确用户自己的前端 fork 或其他有写权限的仓库。不要把服务器 `.env`、OpenD 登录文件、交易密码或验证码推送到 GitHub。
+
+两个仓库已有手动触发的 GitHub Actions 镜像发布工作流。推送代码并确认 CI 构建通过后，使用工作流生成的对应 commit 镜像，优先以镜像 digest 固定版本。服务器 Git 拉取后，将后端与前端完整镜像引用写入**仅服务器本地**的项目根 `.env`：`FUTU_BACKEND_IMAGE_REF`、`FUTU_FRONTEND_IMAGE_REF`。叠加 [`docker-compose.futu-paper.images.yml`](../../docker-compose.futu-paper.images.yml) 后，应用服务不再在 2 GB 服务器上构建源码，也不需要同步前端 `dist/`：
+
+```bash
+sudo docker compose -f docker-compose.yml -f docker-compose.futu-paper.yml -f docker-compose.futu-paper.images.yml \
+  pull migration backend trading-worker celery-worker celery-beat frontend
+sudo docker compose -f docker-compose.yml -f docker-compose.futu-paper.yml -f docker-compose.futu-paper.images.yml \
+  up -d --no-build postgres redis redis-jobs migration backend trading-worker celery-worker celery-beat frontend
+```
+
+首次切换应保留已有的数据库卷和服务器私密配置，先在模拟盘停单窗口操作，并逐项确认镜像来源、健康状态、账户环境和回滚版本。私有 GHCR 镜像需要服务器单独获得只读拉取权限；不要将访问令牌放进仓库或聊天。[GitHub Container Registry 文档](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)。
+
 验收以富途模拟账户订单与持仓为准：买卖闭环后比对订单 ID、累计成交数量、均价与最终持仓；重启交易工作进程、断开重连 OpenD、重放重复订单累计回报，平台成交数量不能增加。富途模拟盘不提供逐笔成交查询，所以 Web 的“推导成交”不是券商逐笔成交历史。
