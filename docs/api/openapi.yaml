@@ -6768,9 +6768,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/HumanSuccessEnvelope'
       summary: Connect to FutuOpenD (diagnostics only — no orders placed).
-      description: 'Body: host, port, trade_env (demo|live), trade_market (HK|US),
+      description: 'Body: host, port, trade_env=demo, trade_market=US,
 
-        security_firm, acc_id, unlock_password (optional).'
+        security_firm, and an explicitly selected SIMULATE acc_id. Live trading,
+
+        HK trading, and unlock passwords are rejected.'
       tags:
       - Futu
       operationId: postApiFutuConnect
@@ -6810,8 +6812,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HumanSuccessEnvelope'
-      summary: Connect (or reuse session) and return permissions / account probe (no
-        orders).
+      summary: Open a fresh diagnostic connection and return US paper account permissions
+        (no orders).
       tags:
       - Futu
       operationId: postApiFutuProbe
@@ -6875,6 +6877,26 @@ paths:
       - Futu
       operationId: getApiFutuOrders
       summary: Get Api Futu Orders
+      x-visibility: internal
+  /api/futu/fills:
+    get:
+      responses:
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      tags:
+      - Futu
+      operationId: getApiFutuFills
+      summary: Get platform-recorded fills inferred from SIMULATE order updates, not broker deal history.
       x-visibility: internal
   /api/futu/quote:
     get:
