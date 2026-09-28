@@ -46,3 +46,12 @@ sudo docker compose -f docker-compose.yml -f docker-compose.futu-paper.yml -f do
 首次切换应保留已有的数据库卷和服务器私密配置，先在模拟盘停单窗口操作，并逐项确认镜像来源、健康状态、账户环境和回滚版本。私有 GHCR 镜像需要服务器单独获得只读拉取权限；不要将访问令牌放进仓库或聊天。[GitHub Container Registry 文档](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)。
 
 验收以富途模拟账户订单与持仓为准：买卖闭环后比对订单 ID、累计成交数量、均价与最终持仓；重启交易工作进程、断开重连 OpenD、重放重复订单累计回报，平台成交数量不能增加。富途模拟盘不提供逐笔成交查询，所以 Web 的“推导成交”不是券商逐笔成交历史。
+
+策略买卖均完成、富途订单已显示最终状态后，运行只读核对命令（使用已部署的新后端镜像及实际策略 ID）：
+
+```bash
+sudo docker compose -f docker-compose.yml -f docker-compose.futu-paper.yml -f docker-compose.futu-paper.server.yml \
+  exec -T backend python -m app.commands.futu_paper_acceptance --strategy-id <策略ID>
+```
+
+命令从服务器本地加密凭证解析 SIMULATE 账户，不接受或输出登录密码、交易密码、令牌或账户 ID；它要求恰好一笔 SPY 买入和一笔卖出，每笔 1 股，逐笔比对富途与平台的订单 ID、累计数量、均价和平台成交记录，并要求双方最终 SPY 持仓为零。任一证据缺失时返回失败，不能把“无记录”当作通过。完成交易进程重启、OpenD 断线重连与重复回报重放后须再次运行，确认仍然通过且成交行数不增加；还要在富途牛牛模拟账户界面人工核对订单。若账户原先持有 SPY，应先停止验收并另选干净的模拟账户，不能误把外部持仓计入策略闭环。
