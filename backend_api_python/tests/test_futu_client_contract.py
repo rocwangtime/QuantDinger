@@ -162,6 +162,23 @@ def test_position_query_error_cannot_masquerade_as_flat_account(_ensure):
 
 
 @patch("app.services.futu_trading.client._ensure_futu", return_value=_FakeFT)
+def test_opend_status_fails_closed_after_disconnect(_ensure):
+    client, quote, _trade = _client_with_mocks()
+    assert client.get_connection_status()["connected"] is True
+
+    quote.get_global_state.return_value = (_FakeFT.RET_ERROR, "connection lost")
+    failed = client.get_connection_status()
+    assert failed["connected"] is False
+    assert failed["opend_connected"] is False
+    assert failed["opend_error"] == "FUTU_OPEND_STATUS_UNAVAILABLE"
+
+    quote.get_global_state.return_value = (_FakeFT.RET_OK, {"trd_logined": False})
+    logged_out = client.get_connection_status()
+    assert logged_out["connected"] is False
+    assert logged_out["opend_connected"] is False
+
+
+@patch("app.services.futu_trading.client._ensure_futu", return_value=_FakeFT)
 def test_orders_reject_market_and_hk(_ensure):
     client, _quote, trade = _client_with_mocks()
     assert "FUTU_LIMIT_ORDERS_ONLY" in client.place_market_order("AAPL", "buy", 1).message

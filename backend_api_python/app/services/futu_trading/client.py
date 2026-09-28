@@ -282,14 +282,23 @@ class FutuClient:
         try:
             ft = _ensure_futu()
             ret, data = self._quote_ctx.get_global_state()
-            if ret == ft.RET_OK and isinstance(data, dict):
-                status["opend"] = {
-                    "quote_login": data.get("qot_logined") or data.get("market_sz"),
-                    "trade_login": data.get("trd_logined"),
-                    "server_ver": data.get("server_ver"),
-                    "login_user_id": data.get("login_user_id"),
-                }
+            if ret != ft.RET_OK or not isinstance(data, dict):
+                status["connected"] = False
+                status["opend_connected"] = False
+                status["opend_error"] = "FUTU_OPEND_STATUS_UNAVAILABLE"
+                return status
+            status["opend"] = {
+                "quote_login": data.get("qot_logined") or data.get("market_sz"),
+                "trade_login": data.get("trd_logined"),
+                "server_ver": data.get("server_ver"),
+                "login_user_id": data.get("login_user_id"),
+            }
+            if data.get("trd_logined") is False or data.get("trd_logined") == 0:
+                status["connected"] = False
+                status["opend_connected"] = False
         except Exception as exc:
+            status["connected"] = False
+            status["opend_connected"] = False
             status["opend_error"] = str(exc)
         return status
 
