@@ -610,8 +610,8 @@ class FutuClient:
                     trd_env=self._trd_env(ft),
                     acc_id=self._acc_id_arg(),
                 )
-                if ret != ft.RET_OK:
-                    return {"success": False, "error": str(data)}
+                if ret != ft.RET_OK or data is None or len(data) == 0:
+                    return {"success": False, "error": "FUTU_ACCOUNT_QUERY_FAILED"}
                 row = data.iloc[0] if hasattr(data, "iloc") and len(data) else data
                 summary = account_row_to_dict(row)
                 return {
@@ -689,6 +689,7 @@ class FutuClient:
             ft = _ensure_futu()
             account_id = self._acc_id_arg()
             rows_by_id: Dict[str, Dict[str, Any]] = {}
+            successful_queries = 0
             for method_name in ("history_order_list_query", "order_list_query"):
                 query = getattr(self._trade_ctx, method_name, None)
                 if not callable(query):
@@ -697,6 +698,7 @@ class FutuClient:
                 if ret != ft.RET_OK or data is None:
                     logger.warning("Futu %s unavailable", method_name)
                     continue
+                successful_queries += 1
                 records = data.to_dict("records") if hasattr(data, "to_dict") else list(data)
                 for row in records:
                     raw = order_row_to_raw(row)
@@ -719,6 +721,8 @@ class FutuClient:
                         "updatedAt": row.get("updated_time") if isinstance(row, dict) else None,
                         "remark": raw.get("remark"),
                     }
+            if successful_queries == 0:
+                raise RuntimeError("FUTU_ORDER_QUERY_FAILED")
             return sorted(
                 rows_by_id.values(), key=lambda row: str(row.get("updatedAt") or row.get("submittedAt") or ""),
                 reverse=True,

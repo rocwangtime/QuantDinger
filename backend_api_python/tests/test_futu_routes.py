@@ -1,6 +1,7 @@
 """Futu account setup routes must not reuse stale diagnostic sessions."""
 
 import inspect
+from types import SimpleNamespace
 
 from flask import g
 
@@ -44,3 +45,17 @@ def test_probe_replaces_connection_when_operator_changes_opend_host(app, monkeyp
     assert len(created) == 2
     assert created[0].disconnected is True
     assert created[1].disconnected is False
+
+
+def test_account_route_does_not_report_failed_broker_query_as_success(app, monkeypatch):
+    client = SimpleNamespace(get_account_summary=lambda: {
+        "success": False,
+        "error": "OpenD disconnected",
+    })
+    monkeypatch.setattr(futu, "_require_connected_client", lambda: (client, None))
+
+    with app.test_request_context("/api/futu/account"):
+        response, code = inspect.unwrap(futu.get_account)()
+
+    assert code == 502
+    assert response.get_json() == {"success": False, "error": "FUTU_ACCOUNT_QUERY_FAILED"}

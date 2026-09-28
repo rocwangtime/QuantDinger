@@ -253,6 +253,29 @@ def test_get_order_status_and_find_by_remark(_ensure):
 
 
 @patch("app.services.futu_trading.client._ensure_futu", return_value=_FakeFT)
+def test_account_summary_rejects_empty_broker_response(_ensure):
+    client, _quote, trade = _client_with_mocks()
+    trade.accinfo_query.return_value = (_FakeFT.RET_OK, pd.DataFrame())
+
+    summary = client.get_account_summary()
+
+    assert summary == {"success": False, "error": "FUTU_ACCOUNT_QUERY_FAILED"}
+
+
+@patch("app.services.futu_trading.client._ensure_futu", return_value=_FakeFT)
+def test_recent_orders_distinguishes_empty_history_from_query_failure(_ensure):
+    client, _quote, trade = _client_with_mocks()
+    trade.history_order_list_query.return_value = (-1, "OpenD disconnected")
+    trade.order_list_query.return_value = (-1, "OpenD disconnected")
+
+    with pytest.raises(RuntimeError, match="FUTU_ORDER_QUERY_FAILED"):
+        client.get_recent_orders()
+
+    trade.order_list_query.return_value = (_FakeFT.RET_OK, pd.DataFrame())
+    assert client.get_recent_orders() == []
+
+
+@patch("app.services.futu_trading.client._ensure_futu", return_value=_FakeFT)
 def test_get_order_status_treats_empty_query_as_failure(_ensure):
     client, _quote, trade = _client_with_mocks()
     trade.order_list_query.return_value = (_FakeFT.RET_OK, pd.DataFrame())

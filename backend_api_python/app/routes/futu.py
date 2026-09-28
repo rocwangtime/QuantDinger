@@ -207,7 +207,10 @@ def get_account():
         client, err = _require_connected_client()
         if err is not None:
             return err
-        return jsonify({"success": True, "data": client.get_account_summary()})
+        summary = client.get_account_summary()
+        if not summary.get("success"):
+            return jsonify({"success": False, "error": "FUTU_ACCOUNT_QUERY_FAILED"}), 502
+        return jsonify({"success": True, "data": summary})
     except Exception as e:
         logger.error("Futu get account failed: %s", e)
         return jsonify({"success": False, "error": str(e)}), 500
