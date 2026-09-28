@@ -34,8 +34,39 @@ permissions:
   packages: write   # needed to push to GHCR
 
 jobs:
+  paper-safety:
+    name: Verify Futu paper safety before publishing
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            backend_api_python/requirements.lock
+            backend_api_python/requirements-dev.txt
+
+      - name: Install test dependencies
+        working-directory: ./backend_api_python
+        run: python -m pip install --disable-pip-version-check -r requirements.lock -r requirements-dev.txt
+
+      - name: Check Futu SIMULATE contracts and recovery
+        working-directory: ./backend_api_python
+        run: python -m pytest tests/test_futu_*.py tests/test_execution_stream_processor.py tests/test_execution_stream_supervisor.py tests/test_live_recovery_regressions.py -m 'not integration' -q
+
+      - name: Validate pinned-image Compose override
+        env:
+          FUTU_BACKEND_IMAGE_REF: ghcr.io/example/backend@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          FUTU_FRONTEND_IMAGE_REF: ghcr.io/example/frontend@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+        run: docker compose --profile local-brokers -f docker-compose.yml -f docker-compose.futu-paper.yml -f docker-compose.futu-paper.images.yml config -q
+
   backend:
     name: Build & push backend image
+    needs: paper-safety
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
