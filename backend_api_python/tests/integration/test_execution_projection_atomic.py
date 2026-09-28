@@ -355,3 +355,64 @@ def test_missing_execution_price_does_not_reuse_previous_fill_and_can_replay(pro
     assert len(rows) == 2
     assert [float(r["price"]) for r in rows] == [100, 110]
     assert float(query("SELECT entry_price FROM qd_strategy_positions")[0]["entry_price"]) == 105
+
+
+def test_cumulative_order_average_prices_only_the_new_fill(projection):
+    processor, event, binding, query = projection
+    first = dict(event, is_cumulative=True, quantity=0, cumulative_average_price=100, price=100)
+    second = dict(first, id=12, cumulative_quantity=2, cumulative_average_price=105, price=105)
+
+    processor._process_pending_order(first, binding)
+    processor._process_pending_order(second, binding)
+    processor._process_pending_order(second, binding)
+
+    rows = query("SELECT amount, price FROM qd_strategy_trades ORDER BY id")
+    assert [(float(row["amount"]), float(row["price"])) for row in rows] == [(1, 100), (1, 110)]
+    order = query("SELECT filled, avg_price FROM pending_orders WHERE id = 1")[0]
+    assert (float(order["filled"]), float(order["avg_price"])) == (2, 105)
+
+
+def test_futu_duplicate_order_push_after_rest_fill_does_not_add_trade(projection):
+    processor, event, binding, query = projection
+    query("UPDATE pending_orders SET symbol = 'SPY', market_type = 'USStock' WHERE id = 1")
+    query("UPDATE qd_live_order_bindings SET exchange_id = 'futu', market_type = 'usstock' WHERE id = 1")
+    fill_records.persist_strategy_fill(
+        strategy_id=1,
+        symbol="SPY",
+        signal_type="open_long",
+        filled=1,
+        cumulative_filled=1,
+        cumulative_average_price=100,
+        avg_price=100,
+        exchange_config={"exchange_id": "futu", "credential_id": 1},
+        market_type="USStock",
+        order_id=1,
+        exchange_id="futu",
+        exchange_order_id="order-1",
+    )
+    order_push = dict(
+        event,
+        exchange_id="futu",
+        market_type="usstock",
+        symbol="SPY",
+        quantity=0,
+        cumulative_quantity=1,
+        cumulative_average_price=100,
+        price=100,
+        is_cumulative=True,
+        fees_cumulative=False,
+    )
+
+    processor._process_pending_order(order_push, binding)
+    processor._process_pending_order(order_push, binding)
+
+    rows = query("SELECT amount, price FROM qd_strategy_trades")
+    assert len(rows) == 1
+    assert (float(rows[0]["amount"]), float(rows[0]["price"])) == (1, 100)
+    partial = dict(order_push, id=12, cumulative_quantity=2, cumulative_average_price=105, price=105)
+    processor._process_pending_order(partial, binding)
+    processor._process_pending_order(partial, binding)
+    rows = query("SELECT amount, price FROM qd_strategy_trades ORDER BY id")
+    assert [(float(row["amount"]), float(row["price"])) for row in rows] == [(1, 100), (1, 110)]
+    order = query("SELECT filled, avg_price FROM pending_orders WHERE id = 1")[0]
+    assert (float(order["filled"]), float(order["avg_price"])) == (2, 105)

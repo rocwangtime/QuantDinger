@@ -256,18 +256,8 @@ class ExecutionEventProcessor:
             payload = self._json(pending.get("payload_json"))
             posted = posted_totals("pending_order_id", pending_id)
             previous = float(pending.get("filled") or 0.0)
-            durable_recorded = previous
-            if str(event.get("exchange_id") or "").lower() == "futu":
-                cur.execute(
-                    """
-                    SELECT COALESCE(SUM(amount), 0) AS recorded
-                    FROM qd_strategy_trades
-                    WHERE pending_order_id = %s
-                    """,
-                    (pending_id,),
-                )
-                trade_row = cur.fetchone() or {}
-                durable_recorded = max(previous, float(trade_row.get("recorded") or 0.0))
+            posted_quantity = float(posted.get("quantity") or 0.0)
+            durable_recorded = max(previous, posted_quantity)
             event_qty = max(0.0, float(event.get("quantity") or 0.0))
             cumulative = max(0.0, float(event.get("cumulative_quantity") or 0.0))
             delta, target = self._fill_progress(
@@ -277,9 +267,12 @@ class ExecutionEventProcessor:
                 cumulative=cumulative,
                 is_cumulative=bool(event.get("is_cumulative")),
             )
-            price = float(event.get("price") or pending.get("avg_price") or 0.0)
             previous_avg = float(pending.get("avg_price") or 0.0)
-            durable_avg = previous_avg or price
+            durable_avg = float(posted.get("average") or 0.0) if posted_quantity >= previous else previous_avg
+            price = float(event.get("price") or 0.0)
+            cumulative_avg = float(event.get("cumulative_average_price") or 0.0)
+            if delta > 0 and cumulative > 0 and cumulative_avg > 0:
+                _, price = cumulative_delta(durable_recorded, durable_avg, cumulative, cumulative_avg)
             if delta > 0:
                 from app.services.live_trading.fill_evidence import require_execution
                 require_execution(delta, price)
@@ -373,7 +366,6 @@ class ExecutionEventProcessor:
             market_type=market_type,
         )
         exchange_config = event.get("_exchange_config") or exchange_config
-        price = float(event.get("price") or pending.get("avg_price") or 0.0)
         with self._fee_client(event, exchange_config, market_type) as client:
             fees, commission_quote = self._fees(event, client=client, symbol=symbol, price=price)
         fees, commission_quote = self._incremental_fees(event, posted, delta, fees, commission_quote)
