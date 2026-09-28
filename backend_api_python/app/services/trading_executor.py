@@ -684,7 +684,7 @@ class TradingExecutor:
                 rest_runtime_prices = runtime_prices
                 stale_after = float(trading_config.get("price_stale_after_seconds") or 10.0)
                 if str(account_exchange or "").strip().lower() == "futu":
-                    from app.services.futu_trading.quote_feed import FutuQuoteFeed
+                    from app.services.futu_trading.quote_feed import FutuQuoteFeed, fresh_futu_quote_prices
 
                     market_price_feed = FutuQuoteFeed(
                         exchange_config=exchange_config if isinstance(exchange_config, dict) else {},
@@ -702,7 +702,7 @@ class TradingExecutor:
                         })
                         # A Futu live account must fail closed when OpenD quotes
                         # are stale; public REST prices are not executable prices.
-                        return dict(snapshot.get("prices") or {})
+                        return fresh_futu_quote_prices(snapshot)
                 else:
                     from app.services.market_price_stream import PublicMarketPriceFeed
 
@@ -805,6 +805,8 @@ class TradingExecutor:
                         if price_clock - last_price_seen_at.get(symbol_key, 0.0)
                         <= price_stale_after
                     }
+                    if account_exchange == "futu":
+                        active_prices = {key: value for key, value in active_prices.items() if key in fresh_prices}
                     if not active_prices:
                         if not stale_price_logged:
                             append_strategy_log(
@@ -1025,7 +1027,10 @@ class TradingExecutor:
                                         ),
                                     },
                                 })
-                    if not equity_stop_reason and cycle_started >= next_signal_poll:
+                    if (not equity_stop_reason and cycle_started >= next_signal_poll
+                            and (account_exchange != "futu" or all(
+                                str(member["key"]) in active_prices for member in candidates
+                            ))):
                         from app.services.market_schedule import equity_daily_execution_session
 
                         daily_policy = daily_equity_execution_policy(
