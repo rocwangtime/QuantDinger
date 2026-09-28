@@ -6,7 +6,7 @@ import math
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Any, Dict, Optional
 
 import pandas as pd
 
@@ -124,6 +124,8 @@ def _load_strategy_frame_uncached(
     exchange_id: Optional[str] = None,
     instrument_id: Optional[str] = None,
     api_family: Optional[str] = None,
+    exchange_config: Optional[Dict[str, Any]] = None,
+    strict_data_source: bool = False,
 ) -> pd.DataFrame:
     product = _resolve_catalog_product(
         market,
@@ -148,6 +150,14 @@ def _load_strategy_frame_uncached(
     limit = int(math.ceil(total_seconds / timeframe_seconds * 1.15) + 200)
     after_time = int((start_utc - timedelta(seconds=timeframe_seconds)).timestamp())
     before_time = int((provider_end_utc + timedelta(seconds=timeframe_seconds)).timestamp())
+    safe_config_scope = ""
+    if isinstance(exchange_config, dict) and str(exchange_id or "").lower() == "futu":
+        safe_config_scope = ":".join((
+            str(exchange_config.get("futu_host") or exchange_config.get("host") or ""),
+            str(exchange_config.get("futu_port") or exchange_config.get("port") or ""),
+            str(exchange_config.get("trade_market") or ""),
+            str(exchange_config.get("security_firm") or ""),
+        ))
     cache_key = ":".join((
         "session-calendar-v2",
         str(market),
@@ -157,6 +167,8 @@ def _load_strategy_frame_uncached(
         str(exchange_id or ""),
         str(instrument_id or ""),
         resolved_api_family,
+        safe_config_scope,
+        "strict" if strict_data_source else "fallback",
         start_utc.isoformat(),
         end_utc.isoformat(),
     ))
@@ -232,6 +244,9 @@ def _load_strategy_frame_uncached(
             "after_time": after_time,
             "exchange_id": exchange_id if effective_market == market else None,
             "market_type": market_type if effective_market == market else None,
+            "exchange_config": exchange_config if effective_market == market else None,
+            "allow_futu_fallback": not strict_data_source,
+            "strict_data_source": strict_data_source,
         }
         if rows is not None:
             pass
@@ -253,6 +268,10 @@ def _load_strategy_frame_uncached(
             market_type or "default",
             exc,
         )
+        if strict_data_source:
+            raise RuntimeError(
+                f"strategyV2.executionMarketDataUnavailable:{market}:{symbol}:{exc}"
+            ) from exc
         return pd.DataFrame()
     if not rows:
         return pd.DataFrame()
@@ -477,6 +496,8 @@ def load_strategy_frame(
     exchange_id: Optional[str] = None,
     instrument_id: Optional[str] = None,
     api_family: Optional[str] = None,
+    exchange_config: Optional[Dict[str, Any]] = None,
+    strict_data_source: bool = False,
 ) -> pd.DataFrame:
     """Load candles through a process-wide, incremental singleflight cache.
 
@@ -521,6 +542,8 @@ def load_strategy_frame(
         instrument_id,
         api_family,
     )
+    if exchange_id and str(exchange_id).lower() == "futu":
+        key = ":".join((key, str((exchange_config or {}).get("credential_id") or ""), "strict" if strict_data_source else "fallback"))
 
     with _lock_for_shared_frame(key):
         entry = _shared_frames.get(key)
@@ -568,6 +591,8 @@ def load_strategy_frame(
                         exchange_id=exchange_id,
                         instrument_id=instrument_id,
                         api_family=api_family,
+                        exchange_config=exchange_config,
+                        strict_data_source=strict_data_source,
                     )
                     last_failure = None
                     break

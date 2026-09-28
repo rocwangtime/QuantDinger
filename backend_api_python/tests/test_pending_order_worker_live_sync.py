@@ -93,6 +93,7 @@ def test_claim_live_sent_order_transitions_the_claimed_row(monkeypatch):
             assert "status = 'syncing'" in sql
             assert "COALESCE(filled, 0) <= 0" in sql
             assert "live_fee_sync:retry" in sql
+            assert "NOT IN ('alpaca', 'futu')" in sql
             assert params == (41, 300)
 
         def fetchone(self):
@@ -147,6 +148,42 @@ def test_fee_reconciliation_limits_each_exchange_account_batch(monkeypatch):
     worker._sync_live_sent_orders()
 
     assert synced == [1, 2]
+
+
+def test_live_sent_fetch_excludes_dedicated_broker_sync_queues(monkeypatch):
+    statements = []
+
+    class Cursor:
+        def execute(self, sql, params):
+            statements.append((sql, params))
+
+        def fetchall(self):
+            return []
+
+        def close(self):
+            return None
+
+    class Database:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def cursor(self):
+            return Cursor()
+
+        def commit(self):
+            return None
+
+    monkeypatch.setattr(worker_module, "get_db_connection", lambda: Database())
+    worker = object.__new__(worker_module.PendingOrderWorker)
+    worker._stale_processing_sec = 90
+    worker._fee_sync_retry_sec = 300
+
+    assert worker._fetch_live_sent_orders() == []
+    assert len(statements) == 2
+    assert all("NOT IN ('alpaca', 'futu')" in sql for sql, _params in statements)
 
 
 def test_live_sent_sync_finalizes_after_restart_without_duplicate_fill(monkeypatch):

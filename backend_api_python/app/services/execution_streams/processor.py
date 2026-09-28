@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from app.services.exchange_execution import load_strategy_configs, resolve_exchange_config
 from app.services.execution_streams.repository import ExecutionEventRepository
@@ -24,6 +25,8 @@ from app.services.live_trading.fill_accounting import (
 from app.services.execution_streams.fill_snapshot import prepare_event, complete_snapshot, combine_pending_snapshot
 
 logger = get_logger(__name__)
+
+_FUTU_QUOTE_FEE_CCY = {"HKD", "USD", "CNH", "CNY", "USDT", "USDC"}
 
 
 class ExecutionEventProcessor:
@@ -124,11 +127,55 @@ class ExecutionEventProcessor:
                     fee_ccy=currency,
                     fill_price=price,
                 )
+            if converted is None and client is None:
+                converted = amount
             if converted is None:
                 quote_known = False
             else:
                 quote_total += float(converted)
         return fees, quote_total if quote_known else None
+
+    def _fee_client_required(self, event: Dict[str, Any], exchange_config: Dict[str, Any]) -> bool:
+        components = self.repository.fee_components(int(event.get("id") or 0))
+        if not components:
+            return False
+        if all(row.get("quote_amount") is not None for row in components):
+            return False
+        exchange_id = str(
+            (exchange_config or {}).get("exchange_id") or event.get("exchange_id") or ""
+        ).strip().lower()
+        if exchange_id == "futu":
+            pending = [row for row in components if row.get("quote_amount") is None]
+            return not all(
+                str(row.get("currency") or "").upper() in _FUTU_QUOTE_FEE_CCY
+                for row in pending
+            )
+        return True
+
+    @contextmanager
+    def _fee_client(
+        self,
+        event: Dict[str, Any],
+        exchange_config: Dict[str, Any],
+        market_type: str,
+    ) -> Iterator[Any]:
+        if not self._fee_client_required(event, exchange_config):
+            yield None
+            return
+        client = create_client(
+            exchange_config,
+            market_type=market_type,
+            need_quote=False,
+        )
+        try:
+            yield client
+        finally:
+            disconnect = getattr(client, "disconnect", None)
+            if callable(disconnect):
+                try:
+                    disconnect()
+                except Exception:
+                    pass
 
     @staticmethod
     def _fee_storage(fees: Dict[str, float]) -> Tuple[float, str]:
@@ -138,6 +185,24 @@ class ExecutionEventProcessor:
         if fees:
             return 0.0, "MIXED"
         return 0.0, ""
+
+    @staticmethod
+    def _fill_progress(
+        *,
+        previous: float,
+        durable_recorded: float,
+        event_qty: float,
+        cumulative: float,
+        is_cumulative: bool,
+    ) -> Tuple[float, float]:
+        """Return the unrecorded delta and monotonic cumulative target."""
+        durable = max(0.0, float(previous), float(durable_recorded))
+        if is_cumulative or cumulative > 0:
+            target = max(durable, max(0.0, float(cumulative)))
+            return max(0.0, target - durable), target
+        ledger_ahead = max(0.0, durable - float(previous))
+        delta = max(0.0, max(0.0, float(event_qty)) - ledger_ahead)
+        return delta, durable + delta
 
     def _process_pending_order(self, event: Dict[str, Any], binding: Dict[str, Any]) -> None:
         sc = load_strategy_configs(int(binding.get("strategy_id") or 0))
@@ -190,26 +255,38 @@ class ExecutionEventProcessor:
                 )
             payload = self._json(pending.get("payload_json"))
             posted = posted_totals("pending_order_id", pending_id)
-            previous = posted["quantity"]
+            previous = float(pending.get("filled") or 0.0)
+            durable_recorded = previous
+            if str(event.get("exchange_id") or "").lower() == "futu":
+                cur.execute(
+                    """
+                    SELECT COALESCE(SUM(amount), 0) AS recorded
+                    FROM qd_strategy_trades
+                    WHERE pending_order_id = %s
+                    """,
+                    (pending_id,),
+                )
+                trade_row = cur.fetchone() or {}
+                durable_recorded = max(previous, float(trade_row.get("recorded") or 0.0))
             event_qty = max(0.0, float(event.get("quantity") or 0.0))
             cumulative = max(0.0, float(event.get("cumulative_quantity") or 0.0))
-            if bool(event.get("is_cumulative")) or cumulative > 0:
-                target = max(previous, cumulative)
-                delta = max(0.0, target - previous)
-            else:
-                delta = event_qty
-                target = previous + delta
-            price = float(event.get("price") or 0.0)
-            previous_avg = posted["average"]
-            if event.get("cumulative_average_price"):
-                delta, price = cumulative_delta(previous, previous_avg, cumulative, event["cumulative_average_price"])
+            delta, target = self._fill_progress(
+                previous=previous,
+                durable_recorded=durable_recorded,
+                event_qty=event_qty,
+                cumulative=cumulative,
+                is_cumulative=bool(event.get("is_cumulative")),
+            )
+            price = float(event.get("price") or pending.get("avg_price") or 0.0)
+            previous_avg = float(pending.get("avg_price") or 0.0)
+            durable_avg = previous_avg or price
             if delta > 0:
                 from app.services.live_trading.fill_evidence import require_execution
                 require_execution(delta, price)
             aggregate_avg = (
-                ((previous * previous_avg) + (delta * price)) / target
+                ((durable_recorded * durable_avg) + (delta * price)) / target
                 if target > 0 and delta > 0 and price > 0
-                else previous_avg or price
+                else durable_avg
             )
             status = str(event.get("order_status") or "")
             queue_status = "filled" if status == "filled" else "sent"
@@ -296,8 +373,9 @@ class ExecutionEventProcessor:
             market_type=market_type,
         )
         exchange_config = event.get("_exchange_config") or exchange_config
-        client = event.get("_client") or create_client(exchange_config, market_type=market_type)
-        fees, commission_quote = self._fees(event, client=client, symbol=symbol, price=price)
+        price = float(event.get("price") or pending.get("avg_price") or 0.0)
+        with self._fee_client(event, exchange_config, market_type) as client:
+            fees, commission_quote = self._fees(event, client=client, symbol=symbol, price=price)
         fees, commission_quote = self._incremental_fees(event, posted, delta, fees, commission_quote)
         commission, commission_ccy = self._fee_storage(fees)
 
@@ -548,15 +626,17 @@ class ExecutionEventProcessor:
         if not runner:
             return
         exchange_config = runner.exchange_config
-        client = event.get("_client") or create_client(
-            exchange_config, market_type=str(event.get("market_type") or "swap")
-        )
-        fees, commission_quote = self._fees(
+        with self._fee_client(
             event,
-            client=client,
-            symbol=str(event.get("symbol") or row.get("symbol") or ""),
-            price=price or float(event.get("cumulative_average_price") or 0),
-        )
+            exchange_config,
+            str(event.get("market_type") or "swap"),
+        ) as client:
+            fees, commission_quote = self._fees(
+                event,
+                client=client,
+                symbol=str(event.get("symbol") or row.get("symbol") or ""),
+                price=price or float(event.get("cumulative_average_price") or 0),
+            )
         fees, commission_quote = self._incremental_fees(event, posted, delta, fees, commission_quote)
         commission, commission_ccy = self._fee_storage(fees)
         if delta <= 1e-12:
@@ -684,6 +764,7 @@ class ExecutionEventProcessor:
                 if event.get("fee_status") in {"actual", "actual_zero"}:
                     adjust_order_fee("id", trade_id, fees, quote, event["fee_status"], update_inventory=delta <= 1e-12)
                 cur.close()
+
 
     def _process_quick_trade(self, event: Dict[str, Any], binding: Dict[str, Any]) -> None:
         trade_id = int(binding.get("owner_id") or 0)

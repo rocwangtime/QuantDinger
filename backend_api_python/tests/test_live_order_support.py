@@ -187,7 +187,7 @@ def test_all_worker_client_order_id_calls_match_helper_signature():
     ]
     supported = set(inspect.signature(make_client_order_id).parameters)
 
-    assert len(calls) == 4
+    assert len(calls) == 5  # Futu adds one venue-specific order reference.
     for call in calls:
         passed = {keyword.arg for keyword in call.keywords if keyword.arg}
         assert passed <= supported

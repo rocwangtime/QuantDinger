@@ -8,7 +8,7 @@ import os
 from time import perf_counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 import pandas as pd
 
@@ -469,21 +469,31 @@ class StrategyV2BacktestService:
         frequency: str,
         start_date: datetime,
         end_date: datetime,
+        *,
+        exchange_config: Optional[dict[str, Any]] = None,
+        strict_data_source: bool = False,
     ) -> tuple[dict[str, pd.DataFrame], list[dict[str, Any]]]:
         frames: dict[str, pd.DataFrame] = {}
         skipped: list[dict[str, Any]] = []
 
         def fetch(member: dict[str, Any]):
+            kwargs: dict[str, Any] = {
+                "market_type": member.get("market_type") or "",
+                "exchange_id": member.get("exchange_id") or "",
+                "instrument_id": member.get("instrument_id") or "",
+                "api_family": member.get("api_family") or "",
+            }
+            if exchange_config is not None:
+                kwargs["exchange_config"] = exchange_config
+            if strict_data_source:
+                kwargs["strict_data_source"] = True
             frame = self.frame_fetcher(
                 member["market"],
                 member["symbol"],
                 frequency,
                 start_date,
                 end_date,
-                market_type=member.get("market_type") or "",
-                exchange_id=member.get("exchange_id") or "",
-                instrument_id=member.get("instrument_id") or "",
-                api_family=member.get("api_family") or "",
+                **kwargs,
             )
             return member, frame
 
@@ -501,6 +511,10 @@ class StrategyV2BacktestService:
                         continue
                     frames[member["key"]] = frame
                 except Exception as exc:
+                    if strict_data_source:
+                        raise RuntimeError(
+                            f"strategyV2.executionMarketDataUnavailable:{exc}"
+                        ) from exc
                     if isinstance(exc, MarketDataUnavailableError):
                         skipped.append({
                             "symbol": member.get("key") or "",
@@ -517,6 +531,9 @@ class StrategyV2BacktestService:
         frequencies: tuple[str, ...],
         start_dates: dict[str, datetime],
         end_date: datetime,
+        *,
+        exchange_config: Optional[dict[str, Any]] = None,
+        strict_data_source: bool = False,
     ) -> tuple[dict[str, dict[str, pd.DataFrame]], list[dict[str, Any]]]:
         """Load every declared timeframe and retain only complete symbol bundles."""
         bundles: dict[str, dict[str, pd.DataFrame]] = {
@@ -525,16 +542,23 @@ class StrategyV2BacktestService:
         skipped: list[dict[str, Any]] = []
 
         def fetch(member: dict[str, Any], frequency: str):
+            kwargs: dict[str, Any] = {
+                "market_type": member.get("market_type") or "",
+                "exchange_id": member.get("exchange_id") or "",
+                "instrument_id": member.get("instrument_id") or "",
+                "api_family": member.get("api_family") or "",
+            }
+            if exchange_config is not None:
+                kwargs["exchange_config"] = exchange_config
+            if strict_data_source:
+                kwargs["strict_data_source"] = True
             frame = self.frame_fetcher(
                 member["market"],
                 member["symbol"],
                 frequency,
                 start_dates[frequency],
                 end_date,
-                market_type=member.get("market_type") or "",
-                exchange_id=member.get("exchange_id") or "",
-                instrument_id=member.get("instrument_id") or "",
-                api_family=member.get("api_family") or "",
+                **kwargs,
             )
             return member, frequency, frame
 
@@ -565,6 +589,10 @@ class StrategyV2BacktestService:
                         continue
                     bundles[frequency][member["key"]] = frame
                 except Exception as exc:
+                    if strict_data_source:
+                        raise RuntimeError(
+                            f"strategyV2.executionMarketDataUnavailable:{exc}"
+                        ) from exc
                     item: dict[str, Any] = {
                         "symbol": member.get("key") or "",
                         "frequency": frequency,

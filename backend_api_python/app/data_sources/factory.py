@@ -102,6 +102,15 @@ class DataSourceFactory:
         log_fn = getattr(logger, level, logger.warning)
         log_fn(message, *args)
 
+    @staticmethod
+    def _close_request_source(source: Optional[BaseDataSource]) -> None:
+        if source is None or not getattr(source, "close_after_request", False):
+            return
+        try:
+            source.close()
+        except Exception as exc:
+            logger.debug("Request-scoped data source close failed: %s", exc)
+
     @classmethod
     def normalize_market(cls, market: str) -> str:
         """
@@ -126,6 +135,10 @@ class DataSourceFactory:
         if raw in cls._CANONICAL_MARKETS:
             return raw
         key = raw.lower().replace(" ", "").replace("-", "_")
+        if key == "futu":
+            raise UnsupportedMarketError(
+                "futu is a broker, not a market; specify HKStock or USStock"
+            )
         if key in _MARKET_ALIASES:
             return _MARKET_ALIASES[key]
         cls._log_limited(
@@ -176,6 +189,12 @@ class DataSourceFactory:
             return cls.get_source("Forex")
         if key in ("usstock", "us_stocks", "stock", "stocks", "ibkr", "alpaca"):
             return cls.get_source("USStock")
+        if key == "futu":
+            raise UnsupportedMarketError(
+                "futu is a broker, not a market; specify HKStock or USStock"
+            )
+        if key in ("hkstock", "hk_stock"):
+            return cls.get_source("HKStock")
         # Unknown alias — log and default to Crypto (legacy behavior). Callers
         # should migrate to the explicit `get_source(market)` API.
         logger.warning(
@@ -224,6 +243,9 @@ class DataSourceFactory:
         after_time: Optional[int] = None,
         exchange_id: Optional[str] = None,
         market_type: Optional[str] = None,
+        exchange_config: Optional[Dict[str, Any]] = None,
+        allow_futu_fallback: bool = True,
+        strict_data_source: bool = False,
     ) -> List[Dict[str, Any]]:
         """
         获取K线数据的便捷方法
@@ -235,8 +257,8 @@ class DataSourceFactory:
             limit: 数据条数
             before_time: 获取此时间之前的数据
             after_time: 可选，Unix 秒，K 线 time 需 >= 此值（回测左边界）
-            exchange_id: 加密货币运行中策略 — 与策略绑定的交易所 (binance/okx/...)
-            market_type: 加密货币运行中策略 — spot 或 swap
+            exchange_id: 运行中策略绑定的交易所 (binance/okx/.../futu)
+            market_type: spot 或 swap
             
         Returns:
             K线数据列表
@@ -250,6 +272,9 @@ class DataSourceFactory:
             after_time=after_time,
             exchange_id=exchange_id,
             market_type=market_type,
+            exchange_config=exchange_config,
+            allow_futu_fallback=allow_futu_fallback,
+            strict_data_source=strict_data_source,
         )
         return rows
 
@@ -265,12 +290,22 @@ class DataSourceFactory:
         after_time: Optional[int] = None,
         exchange_id: Optional[str] = None,
         market_type: Optional[str] = None,
+        exchange_config: Optional[Dict[str, Any]] = None,
+        allow_futu_fallback: bool = True,
+        strict_data_source: bool = False,
     ) -> tuple[List[Dict[str, Any]], Optional[MarketDataFailure]]:
         """Fetch K-lines and retain a structured provider failure when rows are empty."""
         m = cls.normalize_market(market or "")
+        source = None
         try:
             assert_fd_available(f"market-data kline {m}:{symbol}")
-            source = cls._resolve_source(m, exchange_id=exchange_id, market_type=market_type)
+            source = cls._resolve_source(
+                m,
+                exchange_id=exchange_id,
+                market_type=market_type,
+                exchange_config=exchange_config,
+                allow_futu_fallback=allow_futu_fallback,
+            )
             klines = source.get_kline(symbol, timeframe, limit, before_time, after_time)
 
             klines.sort(key=lambda x: x['time'])
@@ -289,6 +324,8 @@ class DataSourceFactory:
                     )
             return klines, failure
         except ResourceExhaustedError as e:
+            if strict_data_source:
+                raise
             cls._log_limited(
                 "error",
                 f"fd-cooldown:kline:{m}:{symbol}",
@@ -307,6 +344,8 @@ class DataSourceFactory:
         except Exception as e:
             if is_fd_exhaustion(e):
                 mark_fd_exhausted(e)
+            if strict_data_source:
+                raise
             cls._log_limited(
                 "error",
                 f"kline:{m}:{symbol}:{type(e).__name__}:{str(e)[:160]}",
@@ -323,6 +362,8 @@ class DataSourceFactory:
                 symbol=symbol,
                 timeframe=timeframe,
             )
+        finally:
+            cls._close_request_source(source)
     
     @classmethod
     def _resolve_source(
@@ -331,8 +372,10 @@ class DataSourceFactory:
         *,
         exchange_id: Optional[str] = None,
         market_type: Optional[str] = None,
+        exchange_config: Optional[Dict[str, Any]] = None,
+        allow_futu_fallback: bool = True,
     ) -> BaseDataSource:
-        """Pick data source; crypto live strategies may scope to execution exchange."""
+        """Pick data source; crypto/Futu live strategies may scope to execution venue."""
         ex = (exchange_id or "").strip().lower()
         mt = (market_type or "").strip().lower()
         if mt in ("futures", "future", "perp", "perpetual"):
@@ -345,10 +388,78 @@ class DataSourceFactory:
             from app.data_sources.crypto import CryptoDataSource
 
             return CryptoDataSource.for_public_market("swap")
+        # Prefer Futu OpenD when the execution account is Futu (HK/US).
+        # On OpenD/permission failure, fall back to the public multi-source
+        # adapters unless callers disable fallback.
+        if ex == "futu" and market in ("HKStock", "USStock"):
+            from app.data_sources.futu import FutuDataSource, FutuDataSourceError
+
+            futu_source = FutuDataSource.for_exchange_config(exchange_config or {}, market=market)
+            if not allow_futu_fallback:
+                return futu_source
+
+            class _FutuWithFallback(BaseDataSource):
+                name = f"Futu+fallback/{market}"
+                close_after_request = True
+
+                def close(self) -> None:
+                    futu_source.close()
+
+                def get_ticker(self, symbol: str) -> Dict[str, Any]:
+                    try:
+                        return futu_source.get_ticker(symbol)
+                    except FutuDataSourceError as exc:
+                        logger.warning(
+                            "Futu ticker unavailable (%s); falling back to %s public source",
+                            exc,
+                            market,
+                        )
+                        ticker = cls.get_source(market).get_ticker(symbol)
+                        if isinstance(ticker, dict):
+                            ticker = dict(ticker)
+                            ticker["source"] = f"fallback:{market}"
+                            ticker["futu_error"] = str(exc)
+                        return ticker
+
+                def get_kline(
+                    self,
+                    symbol: str,
+                    timeframe: str,
+                    limit: int,
+                    before_time: Optional[int] = None,
+                    after_time: Optional[int] = None,
+                ) -> List[Dict[str, Any]]:
+                    try:
+                        return futu_source.get_kline(symbol, timeframe, limit, before_time, after_time)
+                    except FutuDataSourceError as exc:
+                        logger.warning(
+                            "Futu kline unavailable (%s); falling back to %s public source for %s",
+                            exc,
+                            market,
+                            symbol,
+                        )
+                        rows = cls.get_source(market).get_kline(
+                            symbol, timeframe, limit, before_time, after_time
+                        )
+                        for row in rows:
+                            if isinstance(row, dict):
+                                row.setdefault("source", f"fallback:{market}")
+                        return rows
+
+            return _FutuWithFallback()
         return cls.get_source(market)
 
     @classmethod
-    def get_ticker(cls, market: str, symbol: str, exchange_id: Optional[str] = None, market_type: Optional[str] = None) -> Dict[str, Any]:
+    def get_ticker(
+        cls,
+        market: str,
+        symbol: str,
+        exchange_id: Optional[str] = None,
+        market_type: Optional[str] = None,
+        exchange_config: Optional[Dict[str, Any]] = None,
+        allow_futu_fallback: bool = True,
+        strict_data_source: bool = False,
+    ) -> Dict[str, Any]:
         """
         获取实时报价的便捷方法
         
@@ -367,11 +478,20 @@ class DataSourceFactory:
             }
         """
         m = cls.normalize_market(market or "")
+        source = None
         try:
             assert_fd_available(f"market-data ticker {m}:{symbol}")
-            source = cls._resolve_source(m, exchange_id=exchange_id, market_type=market_type)
+            source = cls._resolve_source(
+                m,
+                exchange_id=exchange_id,
+                market_type=market_type,
+                exchange_config=exchange_config,
+                allow_futu_fallback=allow_futu_fallback,
+            )
             return source.get_ticker(symbol)
         except ResourceExhaustedError as e:
+            if strict_data_source:
+                raise
             cls._log_limited(
                 "error",
                 f"fd-cooldown:ticker:{m}:{symbol}",
@@ -383,6 +503,8 @@ class DataSourceFactory:
             return {'last': 0, 'symbol': symbol}
 
         except NotImplementedError:
+            if strict_data_source:
+                raise
             cls._log_limited(
                 "warning",
                 f"ticker-not-implemented:{m}",
@@ -393,6 +515,8 @@ class DataSourceFactory:
         except Exception as e:
             if is_fd_exhaustion(e):
                 mark_fd_exhausted(e)
+            if strict_data_source:
+                raise
             cls._log_limited(
                 "error",
                 f"ticker:{m}:{symbol}:{type(e).__name__}:{str(e)[:160]}",
@@ -402,6 +526,8 @@ class DataSourceFactory:
                 str(e),
             )
             return {'last': 0, 'symbol': symbol}
+        finally:
+            cls._close_request_source(source)
 
     @classmethod
     def get_tickers(
@@ -420,6 +546,7 @@ class DataSourceFactory:
         if not normalized_symbols:
             return {}
         m = cls.normalize_market(market or "")
+        source = None
         try:
             source = cls._resolve_source(
                 m,
@@ -437,6 +564,8 @@ class DataSourceFactory:
                 m,
                 exc,
             )
+        finally:
+            cls._close_request_source(source)
         return {
             symbol: cls.get_ticker(
                 m,
