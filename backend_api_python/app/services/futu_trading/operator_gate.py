@@ -238,6 +238,8 @@ def submission_permit(*, user_id: int, credential_id: int, acc_id: int, remark: 
                        JOIN qd_agent_trading_policies policy
                          ON policy.user_id = gate.user_id AND policy.broker = 'futu'
                         AND policy.account_ref = intent.account_ref
+                       JOIN qd_agent_tokens token
+                         ON token.id = intent.agent_token_id AND token.user_id = gate.user_id
                        LEFT JOIN qd_agent_trading_policies global_stop
                          ON global_stop.user_id = gate.user_id AND global_stop.broker = '*'
                         AND global_stop.account_ref = '*'
@@ -253,6 +255,8 @@ def submission_permit(*, user_id: int, credential_id: int, acc_id: int, remark: 
                          AND (intent.order_spec->>'limit_price')::numeric = %s
                          AND intent.order_spec->>'order_type' = 'limit'
                          AND intent.order_spec->>'market' = 'USStock'
+                         AND token.status = 'active' AND token.paper_only = TRUE
+                         AND (token.expires_at IS NULL OR token.expires_at > NOW())
                          AND policy.mode = 'PAPER_AUTO' AND policy.enabled_until > NOW()
                          AND COALESCE(global_stop.mode, '') <> 'EMERGENCY_STOP'""",
                     (int(agent_match.group(1)), int(acc_id), int(user_id),
