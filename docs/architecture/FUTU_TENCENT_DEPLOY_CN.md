@@ -32,9 +32,9 @@ OpenD 登录并通过 `127.0.0.1:11111` 探测后，另行启动 `--profile loca
 
 ## 后续改用 GitHub 发布（尚未切换当前部署）
 
-服务器已能通过 HTTPS 读取 GitHub 仓库，并能连接 `ghcr.io`；但还没有下载过本项目的新镜像。后端代码可推送到用户的 `rocwangtime/QuantDinger` 分支；前端当前工作树的远端仍是 `OpenByteInc/QuantDinger-Vue`，因此须先明确用户自己的前端 fork 或其他有写权限的仓库。不要把服务器 `.env`、OpenD 登录文件、交易密码或验证码推送到 GitHub。
+服务器已通过 HTTPS 验证能读取两个开发分支，并能连接 `ghcr.io`；但还没有下载过本项目的新镜像。后端分支为 `rocwangtime/QuantDinger` 的 `codex/futu-paper-mvp`，前端分支为用户 fork `rocwangtime/QuantDinger-Vue` 的 `codex/futu-paper-dashboard`，上游前端仓库仍是 `OpenByteInc/QuantDinger-Vue`。前后端是两个独立 Git 仓库，不要把服务器 `.env`、OpenD 登录文件、交易密码或验证码推送到 GitHub。
 
-两个仓库已有手动触发的 GitHub Actions 镜像发布工作流。推送代码并确认 CI 构建通过后，使用工作流生成的对应 commit 镜像，优先以镜像 digest 固定版本。服务器 Git 拉取后，将后端与前端完整镜像引用写入**仅服务器本地**的项目根 `.env`：`FUTU_BACKEND_IMAGE_REF`、`FUTU_FRONTEND_IMAGE_REF`。叠加 [`docker-compose.futu-paper.images.yml`](../../docker-compose.futu-paper.images.yml) 后，应用服务不再在 2 GB 服务器上构建源码，也不需要同步前端 `dist/`：
+两个仓库已有手动触发的 GitHub Actions 镜像发布工作流。两仓库都是 fork，需先在各自 GitHub Actions 页面启用工作流；在工作流能运行、测试通过且镜像可从服务器拉取前，不要切换现有部署。之后使用工作流生成的对应 commit 镜像，优先以镜像 digest 固定版本。服务器 Git 拉取后，将后端与前端完整镜像引用写入**仅服务器本地**的项目根 `.env`：`FUTU_BACKEND_IMAGE_REF`、`FUTU_FRONTEND_IMAGE_REF`。叠加 [`docker-compose.futu-paper.images.yml`](../../docker-compose.futu-paper.images.yml) 后，应用服务不再在 2 GB 服务器上构建源码，也不需要同步前端 `dist/`：
 
 ```bash
 sudo docker compose -f docker-compose.yml -f docker-compose.futu-paper.yml -f docker-compose.futu-paper.images.yml \
