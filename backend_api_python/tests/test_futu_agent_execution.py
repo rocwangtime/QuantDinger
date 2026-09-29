@@ -186,6 +186,6 @@ def test_reconcile_absence_never_means_safe_to_retry(monkeypatch):
 
     monkeypatch.setattr(gateway, "get_db_connection", fake_db)
     assert gateway.reconcile_simulate_intent(1, 9) == row
-    client.find_order_by_remark.assert_called_once_with("qd_agent_9")
+    client.find_order_by_remark.assert_called_once_with("qd_agent_9", refresh_cache=True)
     client.place_limit_order.assert_not_called()
     assert "last_reconciled_at=NOW()" in db.cursor.return_value.execute.call_args.args[0]

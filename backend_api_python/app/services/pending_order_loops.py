@@ -35,10 +35,14 @@ class PendingOrderLoops:
             cur = db.cursor()
             try:
                 cur.execute(
-                    """SELECT id, user_id FROM qd_agent_trade_intents
+                    """SELECT DISTINCT ON (account_ref) id, user_id, account_ref
+                       FROM qd_agent_trade_intents
                        WHERE broker='futu' AND status IN
                          ('EXECUTING','UNCERTAIN','SUBMITTED','PARTIALLY_FILLED')
-                       ORDER BY last_reconciled_at ASC NULLS FIRST, id ASC LIMIT 20"""
+                         AND (last_reconciled_at IS NULL OR
+                              last_reconciled_at < NOW() - INTERVAL '10 seconds')
+                       ORDER BY account_ref, last_reconciled_at ASC NULLS FIRST, id ASC
+                       LIMIT 20"""
                 )
                 rows = cur.fetchall() or []
             finally:

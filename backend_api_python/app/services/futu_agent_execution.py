@@ -207,11 +207,11 @@ def reconcile_simulate_intent(user_id: int, intent_id: int) -> dict:
     try:
         if not client.connect(need_quote=False):
             raise IntentError("Futu OpenD is unavailable for reconciliation", 503)
-        result = (client.get_order_status(row["broker_order_id"])
+        result = (client.get_order_status(row["broker_order_id"], refresh_cache=True)
                   if row.get("broker_order_id") else None)
         if result is None or not result.success:
             result = client.find_order_by_remark(
-                row.get("broker_remark") or f"qd_agent_{intent_id}"
+                row.get("broker_remark") or f"qd_agent_{intent_id}", refresh_cache=True,
             )
         if result is None or not result.success or not result.order_id:
             # Current-day order query may be incomplete. Absence is never
@@ -281,11 +281,11 @@ def cancel_open_simulate_agent_orders(user_id: int) -> dict:
             client = _load_client(user_id, row["account_ref"])
             if not client.connect(need_quote=False):
                 raise RuntimeError("FUTU_OPEND_UNAVAILABLE")
-            result = (client.get_order_status(row["broker_order_id"])
+            result = (client.get_order_status(row["broker_order_id"], refresh_cache=True)
                       if row.get("broker_order_id") else None)
             if result is None or not result.success:
                 result = client.find_order_by_remark(
-                    row.get("broker_remark") or f"qd_agent_{intent_id}"
+                    row.get("broker_remark") or f"qd_agent_{intent_id}", refresh_cache=True,
                 )
             if result is None or not result.success or not result.order_id:
                 raise RuntimeError("FUTU_ORDER_OUTCOME_UNKNOWN")

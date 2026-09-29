@@ -569,7 +569,7 @@ class FutuClient:
             logger.error("Futu cancel_order exception: %s", exc)
             return False
 
-    def get_order_status(self, order_id: str) -> OrderResult:
+    def get_order_status(self, order_id: str, *, refresh_cache: bool = False) -> OrderResult:
         try:
             with self._lock:
                 self._ensure_connected()
@@ -581,7 +581,7 @@ class FutuClient:
                     order_id=oid,
                     trd_env=self._trd_env(ft),
                     acc_id=self._acc_id_arg(),
-                    refresh_cache=True,
+                    refresh_cache=refresh_cache,
                 )
                 if ret != ft.RET_OK:
                     code_err, msg = classify_futu_error(data)
@@ -607,7 +607,7 @@ class FutuClient:
             logger.error("Futu get_order_status failed: %s", exc)
             return OrderResult(success=False, order_id=str(order_id or ""), message=str(exc))
 
-    def find_order_by_remark(self, remark: str) -> Optional[OrderResult]:
+    def find_order_by_remark(self, remark: str, *, refresh_cache: bool = False) -> Optional[OrderResult]:
         """Idempotency helper: locate an order by client remark after a timeout."""
         tag = str(remark or "").strip()
         if not tag:
@@ -619,7 +619,7 @@ class FutuClient:
                 ret, data = self._trade_ctx.order_list_query(
                     trd_env=self._trd_env(ft),
                     acc_id=self._acc_id_arg(),
-                    refresh_cache=True,
+                    refresh_cache=refresh_cache,
                 )
                 if ret != ft.RET_OK or data is None:
                     return None
