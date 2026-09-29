@@ -41,6 +41,13 @@ MCP_TOOL_NAMES = (
     "runtime_overview",
     "stop_strategy",
     "place_quick_order",
+    "create_trade_intent",
+    "list_trade_intents",
+    "get_trade_intent",
+    "cancel_trade_intent",
+    "cancel_agent_orders",
+    "get_trading_policy",
+    "get_futu_quote",
     "emergency_stop_trading",
     "list_jobs",
     "get_job",
@@ -246,9 +253,10 @@ mcp = FastMCP(
     instructions=(
         "Tools for the QuantDinger self-hosted quant platform. "
         "All tools are tenant-scoped via the configured agent token. "
-        "Live order placement is available only through place_quick_order with "
-        "T scope, confirm_order=true, and confirm_live_trading=true when the "
-        "token is not paper-only. Server-side live trading flags still apply. "
+        "Broker order placement is disabled. create_trade_intent with T scope "
+        "records a proposal by default; only a human-enabled, time-limited "
+        "PAPER_AUTO policy may execute internal platform paper simulation. "
+        "Futu intents remain proposals, not SIMULATE broker orders. "
         "Runtime overview is available, and stop_strategy can stop a tenant-owned "
         "strategy when the token has T scope. "
         "SECURITY: never log or paste the agent token; responses may include "
@@ -399,30 +407,32 @@ def place_quick_order(
     confirm_order: bool = False,
     confirm_live_trading: bool = False,
 ) -> Any:
-    """Place a quick order through Agent Gateway (requires T scope)."""
+    """Legacy alias: create an intent; no direct broker order is possible."""
     if not confirm_order:
         return {
             "error": True,
             "status": 400,
             "body": {
                 "message": (
-                    "Order placement changes account state. Re-call with "
-                    "confirm_order=true after explicit user approval."
+                    "An enabled internal PAPER_AUTO policy may simulate a fill. "
+                    "Re-call with confirm_order=true to submit an intent."
                 ),
             },
         }
 
-    identity = _get("/api/agent/v1/whoami")
-    if isinstance(identity, dict) and identity.get("paper_only") is False and not confirm_live_trading:
+    if confirm_live_trading:
+        return {
+            "error": True,
+            "status": 501,
+            "body": {
+                "message": "Agent broker live trading is unavailable; confirm_live_trading is not approval.",
+            },
+        }
+    if market_type != "spot" or leverage != 1 or margin_mode or tp_price or sl_price:
         return {
             "error": True,
             "status": 400,
-            "body": {
-                "message": (
-                    "This Agent Token is live-capable. Re-call with "
-                    "confirm_live_trading=true after explicit user approval."
-                ),
-            },
+            "body": {"message": "Legacy derivatives/protection fields are not supported by trade intents."},
         }
 
     payload: dict[str, Any] = {
@@ -431,21 +441,98 @@ def place_quick_order(
         "side": side,
         "qty": float(qty),
         "order_type": order_type,
-        "market_type": market_type,
-        "leverage": int(leverage or 1),
     }
     if limit_price is not None:
         payload["limit_price"] = float(limit_price)
     if credential_id is not None:
+        if market != "USStock":
+            return {
+                "error": True,
+                "status": 400,
+                "body": {"message": "credential_id is only supported for Futu USStock proposals."},
+            }
+        payload["broker"] = "futu"
         payload["credential_id"] = int(credential_id)
-    if margin_mode:
-        payload["margin_mode"] = margin_mode
-    if tp_price is not None:
-        payload["tp_price"] = float(tp_price)
-    if sl_price is not None:
-        payload["sl_price"] = float(sl_price)
     headers = _idempotency_headers(idempotency_key)
     return _post("/api/agent/v1/quick-trade/orders", json=payload, headers=headers)
+
+
+@_tool
+def create_trade_intent(
+    market: str,
+    symbol: str,
+    side: str,
+    qty: float,
+    order_type: str = "limit",
+    limit_price: float | None = None,
+    broker: str = "platform",
+    credential_id: int | None = None,
+    reason: str = "",
+    strategy_version: str = "",
+    idempotency_key: str = "",
+    confirm_create: bool = False,
+) -> Any:
+    """Submit an immutable plan (or bounded internal paper simulation)."""
+    if not confirm_create:
+        return {"error": True, "status": 400, "body": {
+            "message": "Confirm creation of this intent with confirm_create=true. This is not real-trade approval."
+        }}
+    payload: dict[str, Any] = {
+        "market": market, "symbol": symbol, "side": side, "qty": qty,
+        "order_type": order_type, "broker": broker,
+        "reason": reason, "strategy_version": strategy_version,
+    }
+    if limit_price is not None:
+        payload["limit_price"] = limit_price
+    if credential_id is not None:
+        payload["credential_id"] = credential_id
+    return _post(
+        "/api/agent/v1/trade-intents", json=payload,
+        headers=_idempotency_headers(idempotency_key),
+    )
+
+
+@_tool
+def list_trade_intents() -> Any:
+    """Read the tenant's recent immutable trade plans and paper results."""
+    return _get("/api/agent/v1/trade-intents")
+
+
+@_tool
+def get_trade_intent(intent_id: int) -> Any:
+    """Read one tenant-owned trade intent and its risk result."""
+    return _get(f"/api/agent/v1/trade-intents/{int(intent_id)}")
+
+
+@_tool
+def cancel_trade_intent(intent_id: int, confirm_cancel: bool = False) -> Any:
+    """Cancel a proposal before any execution; cannot cancel broker orders."""
+    if not confirm_cancel:
+        return {"error": True, "status": 400, "body": {"message": "Set confirm_cancel=true to cancel this proposal."}}
+    return _post(f"/api/agent/v1/trade-intents/{int(intent_id)}/cancel", json={})
+
+
+@_tool
+def cancel_agent_orders(confirm_cancel: bool = False) -> Any:
+    """Cancel open Agent-owned orders without changing policy or liquidating."""
+    if not confirm_cancel:
+        return {"error": True, "status": 400, "body": {"message": "Set confirm_cancel=true to request cancellation."}}
+    return _post("/api/agent/v1/agent-orders/cancel", json={"confirm": True})
+
+
+@_tool
+def get_trading_policy(broker: str = "platform", account_ref: str = "default") -> Any:
+    """Read effective human-owned Agent trading mode; cannot change it."""
+    return _get("/api/agent/v1/trading-policy", params={"broker": broker, "account_ref": account_ref})
+
+
+@_tool
+def get_futu_quote(credential_id: int, symbol: str) -> Any:
+    """Read Futu quote provenance; never eligible to authorize a broker order."""
+    return _get(
+        f"/api/agent/v1/trading/accounts/{int(credential_id)}/futu-quote",
+        params={"symbol": symbol},
+    )
 
 
 @_tool
@@ -836,7 +923,7 @@ def cancel_open_paper_orders(
     idempotency_key: str = "",
     confirm_cancel: bool = False,
 ) -> Any:
-    """Compatibility alias for the tenant emergency trading stop."""
+    """Compatibility alias for cancellation only (does not revoke tokens)."""
     if not confirm_cancel:
         return {
             "error": True,
@@ -849,7 +936,7 @@ def cancel_open_paper_orders(
             },
         }
     return _post(
-        "/api/agent/v1/quick-trade/kill-switch",
+        "/api/agent/v1/agent-orders/cancel",
         json={"confirm": True},
         headers=_idempotency_headers(idempotency_key),
     )

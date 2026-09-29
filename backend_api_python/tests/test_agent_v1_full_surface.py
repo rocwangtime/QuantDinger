@@ -4,9 +4,8 @@ from __future__ import annotations
 from contextlib import contextmanager
 
 import pytest
-from flask import g
-
-from app.routes.agent_v1 import quick_trade, research, trading_data
+from app.routes.agent_v1 import research, trading_data
+from app.services import agent_trade_intents
 from app.utils import agent_auth
 
 
@@ -154,42 +153,25 @@ def test_safe_account_metadata_never_returns_credential_blob(client, monkeypatch
     assert "api_key" not in item
 
 
-def test_live_notional_cap_rejects_before_order_and_releases_lock(app, monkeypatch):
-    state = {"rolled_back": False}
-
+def test_paper_notional_cap_rejects_before_order():
     class Cursor:
-        rowcount = 1
+        def execute(self, *_args):
+            pytest.fail("Oversized order must be denied before ledger queries")
 
-        def execute(self, _sql, _params=None):
-            pass
-
-        def fetchone(self):
-            return {"max_order_notional": 100, "max_daily_notional": 1000}
-
-        def close(self):
-            pass
-
-    class Connection:
-        def cursor(self):
-            return Cursor()
-
-        def rollback(self):
-            state["rolled_back"] = True
-
-    @contextmanager
-    def fake_db():
-        yield Connection()
-
-    monkeypatch.setattr(quick_trade, "get_db_connection", fake_db)
-    with app.test_request_context(
-        "/api/agent/v1/quick-trade/orders",
-        method="POST",
-        headers={"Idempotency-Key": "oversized-order"},
-    ):
-        g.agent_token = _token()
-        g.agent_user_id = 7
-        allowed, details = quick_trade._reserve_live_notional(150)
-
+    allowed, details = agent_trade_intents._risk(
+        Cursor(), 7,
+        {
+            "broker": "platform", "account_ref": "default",
+            "allowed_markets": ["CRYPTO"], "allowed_symbols": ["BTC/USDT"],
+            "allow_market_order": False, "allow_short": False,
+            "max_order_notional": 100, "max_daily_notional": 1000,
+            "max_orders_per_day": 10,
+        },
+        agent_trade_intents.normalize_order({
+            "market": "Crypto", "symbol": "BTC/USDT", "side": "buy",
+            "qty": 1.5, "order_type": "limit", "limit_price": 100,
+        }),
+        100,
+    )
     assert allowed is False
     assert details["reason"] == "max_order_notional"
-    assert state["rolled_back"] is True

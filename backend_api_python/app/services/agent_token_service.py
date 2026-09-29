@@ -23,10 +23,10 @@ _SAAS_MODE_VALUES = {"saas", "shared", "hosted", "multitenant", "multi-tenant"}
 USER_SCOPES = frozenset(s for s in ALL_SCOPES if s != SCOPE_C)
 
 _USER_FUND_RISKS = [
-    "Agent instructions can trigger real orders; misconfiguration or prompt injection may cause unintended trades and financial loss.",
+    "Agent instructions can propose trade intents. Broker execution is disabled for Agent tokens until a separate human-reviewed gateway is implemented.",
     "A leaked token grants API access within its scopes until revoked — treat it like an exchange API key.",
-    "Live trading requires paper_only=false on the token AND AGENT_LIVE_TRADING_ENABLED=true on the server; both must be deliberately enabled.",
-    "Paper-only mode simulates fills and never touches exchange credentials, but still consumes platform compute and job queue capacity.",
+    "The legacy AGENT_LIVE_TRADING_ENABLED switch does not authorize direct Agent broker orders.",
+    "New tokens are paper-only. Internal paper fills additionally require a human-enabled, expiring PAPER_AUTO policy.",
 ]
 
 _SYSTEM_RISKS = [
@@ -87,13 +87,14 @@ def get_token_policy(*, for_admin: bool = False) -> dict[str, Any]:
     return {
         "deployment_mode": deployment_mode_label(),
         "is_saas": saas,
-        "agent_live_trading_enabled": agent_live_trading_enabled(),
+        "agent_live_trading_enabled": False,
+        "agent_broker_execution_enabled": False,
         "allowed_scopes": sorted(ALL_SCOPES if for_admin else USER_SCOPES),
         "c_scope_admin_only": True,
         "default_paper_only": True,
         "default_max_order_notional": _positive_env_float("AGENT_DEFAULT_MAX_ORDER_NOTIONAL", 1000),
         "default_max_daily_notional": _positive_env_float("AGENT_DEFAULT_MAX_DAILY_NOTIONAL", 5000),
-        "live_trading_requires_ack": True,
+        "live_trading_requires_ack": False,
         "risk_disclosure": risks,
     }
 
@@ -131,16 +132,12 @@ def _parse_issue_body(body: dict[str, Any], *, allow_c_scope: bool) -> dict[str,
     markets = parse_csv_list(body.get("markets"), default="*")
     instruments = parse_csv_list(body.get("instruments"), default="*")
     paper_only = bool(body.get("paper_only", True))
-    if "T" in scopes and not paper_only:
-        paper_only = False
-        if not body.get("ack_live_trading_risk"):
-            raise TokenIssueError(
-                "Issuing a live-eligible T-scope token requires "
-                "ack_live_trading_risk=true after reviewing the risk disclosure.",
-                code=400,
-                details="Set paper_only=true for paper-only trading, or pass "
-                "ack_live_trading_risk=true to confirm you accept live-trading risks.",
-            )
+    if not paper_only:
+        raise TokenIssueError(
+            "New Agent tokens must be paper_only=true; real broker execution is unavailable.",
+            code=501,
+            http=501,
+        )
 
     rate_limit = int(body.get("rate_limit_per_min") or 60)
     if rate_limit < 1 or rate_limit > 6000:

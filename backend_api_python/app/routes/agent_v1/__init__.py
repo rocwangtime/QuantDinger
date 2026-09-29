@@ -42,6 +42,7 @@ def register(app) -> None:
     from . import portfolio  # noqa: F401
     from . import runtime  # noqa: F401
     from . import quick_trade  # noqa: F401
+    from . import trade_intents  # noqa: F401
     from . import jobs as jobs_module  # noqa: F401
     from . import indicators  # noqa: F401
     from . import research  # noqa: F401

@@ -183,7 +183,7 @@ def test_saas_mode_allows_T_scope_paper_only(
     assert data["paper_only"] is True
 
 
-def test_saas_mode_live_T_requires_ack(
+def test_saas_mode_live_T_is_disabled(
     client, admin_authed, stub_db_for_issue, monkeypatch
 ):
     monkeypatch.setenv("QUANTDINGER_DEPLOYMENT_MODE", "hosted")
@@ -193,11 +193,11 @@ def test_saas_mode_live_T_requires_ack(
         "scopes": "R,T",
         "paper_only": False,
     })
-    assert resp.status_code == 400
-    assert "ack_live_trading_risk" in resp.get_json()["message"]
+    assert resp.status_code == 501
+    assert "paper_only=true" in resp.get_json()["message"]
 
 
-def test_saas_mode_live_T_with_ack_succeeds(
+def test_saas_mode_live_T_with_ack_is_still_disabled(
     client, admin_authed, stub_db_for_issue, monkeypatch
 ):
     monkeypatch.setenv("QUANTDINGER_DEPLOYMENT_MODE", "saas")
@@ -208,9 +208,8 @@ def test_saas_mode_live_T_with_ack_succeeds(
         "paper_only": False,
         "ack_live_trading_risk": True,
     })
-    assert resp.status_code == 200
-    data = resp.get_json()["data"]
-    assert data["paper_only"] is False
+    assert resp.status_code == 501
+    assert "paper_only=true" in resp.get_json()["message"]
 
 
 def test_me_tokens_rejects_C_scope(

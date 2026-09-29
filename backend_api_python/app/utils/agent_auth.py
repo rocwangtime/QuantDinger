@@ -140,6 +140,59 @@ def _ensure_schema() -> None:
         CREATE INDEX IF NOT EXISTS idx_agent_paper_orders_user
             ON qd_agent_paper_orders(user_id, created_at DESC);
 
+        CREATE TABLE IF NOT EXISTS qd_agent_trading_policies (
+            user_id INTEGER NOT NULL REFERENCES qd_users(id) ON DELETE CASCADE,
+            broker VARCHAR(32) NOT NULL,
+            account_ref VARCHAR(80) NOT NULL,
+            mode VARCHAR(24) NOT NULL DEFAULT 'PLAN_ONLY'
+              CHECK (mode IN ('PLAN_ONLY', 'PAPER_AUTO', 'EMERGENCY_STOP')),
+            allowed_markets JSONB NOT NULL DEFAULT '[]'::jsonb,
+            allowed_symbols JSONB NOT NULL DEFAULT '[]'::jsonb,
+            max_order_notional DECIMAL(24,8) NOT NULL DEFAULT 1000,
+            max_daily_notional DECIMAL(24,8) NOT NULL DEFAULT 5000,
+            max_orders_per_day INTEGER NOT NULL DEFAULT 10,
+            allow_market_order BOOLEAN NOT NULL DEFAULT FALSE,
+            allow_short BOOLEAN NOT NULL DEFAULT FALSE,
+            enabled_until TIMESTAMPTZ,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            PRIMARY KEY (user_id, broker, account_ref)
+        );
+        CREATE TABLE IF NOT EXISTS qd_agent_trade_intents (
+            id BIGSERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES qd_users(id) ON DELETE CASCADE,
+            agent_token_id INTEGER REFERENCES qd_agent_tokens(id) ON DELETE SET NULL,
+            broker VARCHAR(32) NOT NULL,
+            account_ref VARCHAR(80) NOT NULL,
+            idempotency_key VARCHAR(120) NOT NULL,
+            intent_hash VARCHAR(64) NOT NULL,
+            order_spec JSONB NOT NULL,
+            quote_snapshot JSONB,
+            risk_result JSONB,
+            notional DECIMAL(24,8),
+            status VARCHAR(24) NOT NULL DEFAULT 'PROPOSED'
+              CHECK (status IN ('PROPOSED', 'REJECTED', 'SUBMITTED', 'FILLED', 'CANCELLED', 'EXPIRED')),
+            paper_order_uid VARCHAR(40),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE (agent_token_id, idempotency_key)
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_intents_user
+            ON qd_agent_trade_intents(user_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_agent_intents_policy_daily
+            ON qd_agent_trade_intents(user_id, broker, account_ref, created_at);
+        CREATE TABLE IF NOT EXISTS qd_agent_policy_audit (
+            id BIGSERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES qd_users(id) ON DELETE CASCADE,
+            broker VARCHAR(32) NOT NULL,
+            account_ref VARCHAR(80) NOT NULL,
+            actor_user_id INTEGER NOT NULL,
+            previous_mode VARCHAR(24) NOT NULL,
+            new_mode VARCHAR(24) NOT NULL,
+            previous_policy JSONB,
+            new_policy JSONB,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+
         ALTER TABLE qd_agent_tokens
             ADD COLUMN IF NOT EXISTS max_order_notional DECIMAL(24,8) NOT NULL DEFAULT 1000;
         ALTER TABLE qd_agent_tokens

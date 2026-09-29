@@ -12,7 +12,7 @@ from app.services.live_trading.factory import (
     exchange_market_scope,
     exchange_trading_environment,
 )
-from app.utils.agent_auth import SCOPE_R, agent_required, current_user_id
+from app.utils.agent_auth import SCOPE_R, agent_required, current_user_id, instrument_allowed, market_allowed
 from app.utils.credential_crypto import decrypt_credential_blob
 from app.utils.db import get_db_connection
 
@@ -97,6 +97,38 @@ def get_trading_account_positions(credential_id: int):
         market_type=(request.args.get("market_type") or "").strip() or None,
     )
     return envelope(rows)
+
+
+@agent_v1_bp.route("/trading/accounts/<int:credential_id>/futu-quote", methods=["GET"])
+@agent_required(SCOPE_R)
+def get_futu_execution_quote(credential_id: int):
+    """Read broker-sourced quote provenance, never an execution permit."""
+    symbol = str(request.args.get("symbol") or "").strip().upper()
+    if not symbol or not market_allowed("USStock") or not instrument_allowed(symbol):
+        return error(403, "Symbol is not allowed for this token", http=403)
+    from app.services.agent_trade_intents import IntentError, account_scope
+    from app.services.exchange_execution import resolve_exchange_config
+    from app.services.futu_trading.config import config_from_exchange_config
+    from app.services.futu_trading.execution_quote import describe_futu_quote
+    from app.services.futu_trading.quote_client import FutuQuoteClient
+
+    try:
+        account_scope(current_user_id(), {"broker": "futu", "credential_id": credential_id})
+        cfg = resolve_exchange_config({"credential_id": credential_id}, user_id=current_user_id())
+        client = FutuQuoteClient(config_from_exchange_config(cfg))
+        try:
+            if not client.connect():
+                return error(503, "Futu OpenD quote service is unavailable", retriable=True, http=503)
+            snapshot = client.get_quote(symbol, "USStock")
+            if not snapshot.get("success"):
+                return error(503, "Futu quote is unavailable", retriable=True, http=503)
+            return envelope(describe_futu_quote(symbol, snapshot))
+        finally:
+            client.close()
+    except IntentError as exc:
+        return error(exc.status, str(exc), http=exc.status)
+    except Exception:
+        return error(503, "Futu quote is unavailable", retriable=True, http=503)
 
 
 @agent_v1_bp.route("/trading/strategies/<int:strategy_id>/positions", methods=["GET"])

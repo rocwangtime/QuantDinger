@@ -420,12 +420,12 @@ components:
           maxLength: 128
         futu_host:
           type: string
-          default: 127.0.0.1
+          default: ''
           maxLength: 255
         futu_port:
           type: integer
-          default: 11111
-          minimum: 1
+          default: 0
+          minimum: 0
           maximum: 65535
         host:
           type: string
@@ -670,8 +670,8 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/Error'
-    UNPROCESSABLE_CONTENT:
-      description: Unprocessable Content
+    UNPROCESSABLE_ENTITY:
+      description: Unprocessable Entity
       content:
         application/json:
           schema:
@@ -900,7 +900,7 @@ paths:
     post:
       responses:
         '422':
-          $ref: '#/components/responses/UNPROCESSABLE_CONTENT'
+          $ref: '#/components/responses/UNPROCESSABLE_ENTITY'
         '200':
           description: OK
           content:
@@ -1010,7 +1010,7 @@ paths:
     post:
       responses:
         '422':
-          $ref: '#/components/responses/UNPROCESSABLE_CONTENT'
+          $ref: '#/components/responses/UNPROCESSABLE_ENTITY'
         '200':
           description: OK
           content:
@@ -1049,7 +1049,7 @@ paths:
     post:
       responses:
         '422':
-          $ref: '#/components/responses/UNPROCESSABLE_CONTENT'
+          $ref: '#/components/responses/UNPROCESSABLE_ENTITY'
         '400':
           description: Bad Request
           content:
@@ -1084,7 +1084,7 @@ paths:
     post:
       responses:
         '422':
-          $ref: '#/components/responses/UNPROCESSABLE_CONTENT'
+          $ref: '#/components/responses/UNPROCESSABLE_ENTITY'
         '400':
           description: Bad Request
           content:
@@ -5480,7 +5480,7 @@ paths:
     post:
       responses:
         '422':
-          $ref: '#/components/responses/UNPROCESSABLE_CONTENT'
+          $ref: '#/components/responses/UNPROCESSABLE_ENTITY'
         '400':
           description: Bad Request
           content:
@@ -5508,7 +5508,7 @@ paths:
     post:
       responses:
         '422':
-          $ref: '#/components/responses/UNPROCESSABLE_CONTENT'
+          $ref: '#/components/responses/UNPROCESSABLE_ENTITY'
         '200':
           description: OK
           content:
@@ -5528,7 +5528,8 @@ paths:
             schema:
               $ref: '#/components/schemas/CredentialCreateRequest'
       summary: Create a new credential for the current user.
-      description: Supports crypto exchanges, IBKR (US stocks), Alpaca, and Futu (HK/US).
+      description: Supports crypto exchanges, IBKR (US stocks), Alpaca, and Futu US
+        paper.
       tags:
       - Credentials
       operationId: postApiCredentialsCreate
@@ -5585,7 +5586,7 @@ paths:
         required: true
       responses:
         '422':
-          $ref: '#/components/responses/UNPROCESSABLE_CONTENT'
+          $ref: '#/components/responses/UNPROCESSABLE_ENTITY'
         '400':
           description: Bad Request
           content:
@@ -6770,9 +6771,7 @@ paths:
       summary: Connect to FutuOpenD (diagnostics only — no orders placed).
       description: 'Body: host, port, trade_env=demo, trade_market=US,
 
-        security_firm, and an explicitly selected SIMULATE acc_id. Live trading,
-
-        HK trading, and unlock passwords are rejected.'
+        security_firm, acc_id. Unlock passwords and live trading are rejected.'
       tags:
       - Futu
       operationId: postApiFutuConnect
@@ -6797,6 +6796,66 @@ paths:
       operationId: postApiFutuDisconnect
       summary: Post Api Futu Disconnect
       x-visibility: internal
+  /api/futu/automation:
+    get:
+      responses:
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      tags:
+      - Futu
+      operationId: getApiFutuAutomation
+      summary: Get Api Futu Automation
+      x-visibility: internal
+  /api/futu/automation/arm:
+    post:
+      responses:
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      summary: Explicitly arm only the connected, saved US SIMULATE account.
+      tags:
+      - Futu
+      operationId: postApiFutuAutomationArm
+      x-visibility: internal
+  /api/futu/automation/pause:
+    post:
+      responses:
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      summary: Disarm first, then cancel only platform-owned queued/open paper orders.
+      tags:
+      - Futu
+      operationId: postApiFutuAutomationPause
+      x-visibility: internal
   /api/futu/probe:
     post:
       responses:
@@ -6812,8 +6871,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HumanSuccessEnvelope'
-      summary: Open a fresh diagnostic connection and return US paper account permissions
-        (no orders).
+      summary: Connect (or reuse session) and return permissions / account probe (no
+        orders).
       tags:
       - Futu
       operationId: postApiFutuProbe
@@ -6893,10 +6952,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HumanSuccessEnvelope'
+      summary: Platform-recorded fills inferred from paper order cumulative updates.
       tags:
       - Futu
       operationId: getApiFutuFills
-      summary: Get platform-recorded fills inferred from SIMULATE order updates, not broker deal history.
       x-visibility: internal
   /api/futu/quote:
     get:
@@ -8061,7 +8120,7 @@ paths:
     post:
       responses:
         '422':
-          $ref: '#/components/responses/UNPROCESSABLE_CONTENT'
+          $ref: '#/components/responses/UNPROCESSABLE_ENTITY'
         '400':
           description: Bad Request
           content:
@@ -8205,7 +8264,7 @@ paths:
     post:
       responses:
         '422':
-          $ref: '#/components/responses/UNPROCESSABLE_CONTENT'
+          $ref: '#/components/responses/UNPROCESSABLE_ENTITY'
         '400':
           description: Bad Request
           content:
@@ -8293,7 +8352,7 @@ paths:
     post:
       responses:
         '422':
-          $ref: '#/components/responses/UNPROCESSABLE_CONTENT'
+          $ref: '#/components/responses/UNPROCESSABLE_ENTITY'
         '400':
           description: Bad Request
           content:

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import math
+import time
 
 from app.data.market_symbols_seed import (
     get_hot_symbols as seed_get_hot_symbols,
@@ -143,6 +144,12 @@ def price():
         if not math.isfinite(close) or close <= 0:
             return error(503, "brokerAccounts.quoteUnavailable", retriable=True, http=503)
         source = str(quote.get("source") or "unknown")
+        received_at = time.time()
+        try:
+            as_of = float(quote.get("timestamp"))
+        except (TypeError, ValueError):
+            as_of = None
+        stale = as_of is None or as_of > received_at + 2 or received_at - as_of > 10
         return envelope({
             "market": market,
             "symbol": symbol,
@@ -150,6 +157,13 @@ def price():
             "source": source,
             "quote_type": "historical" if source == "kline_1d" else "latest_available",
             "timestamp": quote.get("timestamp"),
+            "provider": source,
+            "broker": None,
+            "as_of": as_of,
+            "received_at": received_at,
+            "is_realtime": False,
+            "is_stale": stale,
+            "execution_eligible": False,
             "raw": quote,
         })
     except Exception as exc:
