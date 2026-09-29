@@ -79,16 +79,24 @@ def arm(user_id: int, credential_id: int, acc_id: int) -> None:
             )
             min_pending_order_id = int((cur.fetchone() or {}).get("last_id") or 0)
             cur.execute(
+                """SELECT COALESCE(MAX(id), 0) AS last_id FROM qd_agent_trade_intents
+                   WHERE user_id = %s AND broker = 'futu' AND account_ref = %s""",
+                (int(user_id), f"credential:{int(credential_id)}"),
+            )
+            min_agent_intent_id = int((cur.fetchone() or {}).get("last_id") or 0)
+            cur.execute(
                 """INSERT INTO qd_futu_automation_state
-                   (acc_id, user_id, credential_id, min_pending_order_id,
+                   (acc_id, user_id, credential_id, min_pending_order_id, min_agent_intent_id,
                     enabled, state, last_error, armed_at, updated_at)
-                   VALUES (%s, %s, %s, %s, TRUE, 'armed', '', NOW(), NOW())
+                   VALUES (%s, %s, %s, %s, %s, TRUE, 'armed', '', NOW(), NOW())
                    ON CONFLICT (acc_id) DO UPDATE SET
                      credential_id = EXCLUDED.credential_id,
                      min_pending_order_id = EXCLUDED.min_pending_order_id,
+                     min_agent_intent_id = EXCLUDED.min_agent_intent_id,
                      enabled = TRUE, state = 'armed', last_error = '',
                      armed_at = NOW(), updated_at = NOW()""",
-                (int(acc_id), int(user_id), int(credential_id), min_pending_order_id),
+                (int(acc_id), int(user_id), int(credential_id), min_pending_order_id,
+                 min_agent_intent_id),
             )
             db.commit()
         except Exception:
@@ -179,38 +187,78 @@ def disarm_all_on_worker_start() -> None:
 
 
 @contextmanager
-def submission_permit(*, user_id: int, credential_id: int, acc_id: int, remark: str) -> Iterator[None]:
+def submission_permit(*, user_id: int, credential_id: int, acc_id: int, remark: str,
+                      symbol: str = "", side: str = "", qty: float = 0,
+                      limit_price: float = 0) -> Iterator[None]:
     """Hold the account lock through the *broker* submit; DB errors fail closed."""
     if not hard_switch_enabled():
         raise ValueError("FUTU_PAPER_AUTOTRADE_HARD_DISABLED")
     if min(int(user_id), int(credential_id), int(acc_id)) <= 0:
         raise ValueError("FUTU_OPERATOR_NOT_ARMED")
-    match = re.fullmatch(r"qd_(\d+)_(\d+)(?:_[a-z0-9]+)?", str(remark or ""))
-    if match is None:
+    strategy_match = re.fullmatch(r"qd_(\d+)_(\d+)(?:_[a-z0-9]+)?", str(remark or ""))
+    agent_match = re.fullmatch(r"qd_agent_(\d+)", str(remark or ""))
+    if strategy_match is None and agent_match is None:
         raise ValueError("FUTU_PLATFORM_ORDER_ID_REQUIRED")
-    strategy_id = int(match.group(1))
-    pending_order_id = int(match.group(2))
+    if agent_match is not None and (not symbol or side not in {"buy", "sell"}
+                                    or qty <= 0 or limit_price <= 0):
+        raise ValueError("FUTU_AGENT_ORDER_SPEC_REQUIRED")
     allowed = False
     broker_error: BaseException | None = None
     with get_db_connection() as db:
         cur = db.cursor()
         try:
+            if agent_match is not None:
+                # Serialize human policy changes through the broker call.
+                # EMERGENCY_STOP cannot commit midway through submission.
+                cur.execute("SELECT pg_advisory_xact_lock(824111, %s)", (int(user_id),))
             _lock_account(cur, acc_id)
-            cur.execute(
-                """SELECT 1 FROM qd_futu_automation_state gate
-                   JOIN pending_orders pending
-                     ON pending.id = %s AND pending.user_id = gate.user_id
-                    AND pending.credential_id = gate.credential_id
-                   WHERE gate.acc_id = %s AND gate.user_id = %s
-                     AND gate.credential_id = %s
-                     AND gate.enabled = TRUE AND gate.state = 'armed'
-                     AND pending.id > gate.min_pending_order_id
-                     AND pending.strategy_id = %s
-                     AND LOWER(pending.exchange_id) = 'futu'
-                     AND pending.execution_mode = 'live'
-                     AND pending.status = 'processing'""",
-                (pending_order_id, int(acc_id), int(user_id), int(credential_id), strategy_id),
-            )
+            if strategy_match is not None:
+                cur.execute(
+                    """SELECT 1 FROM qd_futu_automation_state gate
+                       JOIN pending_orders pending
+                         ON pending.id = %s AND pending.user_id = gate.user_id
+                        AND pending.credential_id = gate.credential_id
+                       WHERE gate.acc_id = %s AND gate.user_id = %s
+                         AND gate.credential_id = %s
+                         AND gate.enabled = TRUE AND gate.state = 'armed'
+                         AND pending.id > gate.min_pending_order_id
+                         AND pending.strategy_id = %s
+                         AND LOWER(pending.exchange_id) = 'futu'
+                         AND pending.execution_mode = 'live'
+                         AND pending.status = 'processing'""",
+                    (int(strategy_match.group(2)), int(acc_id), int(user_id),
+                     int(credential_id), int(strategy_match.group(1))),
+                )
+            else:
+                cur.execute(
+                    """SELECT 1 FROM qd_futu_automation_state gate
+                       JOIN qd_agent_trade_intents intent
+                         ON intent.id = %s AND intent.user_id = gate.user_id
+                        AND intent.account_ref = 'credential:' || gate.credential_id::text
+                       JOIN qd_agent_trading_policies policy
+                         ON policy.user_id = gate.user_id AND policy.broker = 'futu'
+                        AND policy.account_ref = intent.account_ref
+                       LEFT JOIN qd_agent_trading_policies global_stop
+                         ON global_stop.user_id = gate.user_id AND global_stop.broker = '*'
+                        AND global_stop.account_ref = '*'
+                       WHERE gate.acc_id = %s AND gate.user_id = %s
+                         AND gate.credential_id = %s
+                         AND gate.enabled = TRUE AND gate.state = 'armed'
+                         AND intent.id > gate.min_agent_intent_id
+                         AND intent.broker = 'futu' AND intent.status = 'EXECUTING'
+                         AND intent.broker_remark = %s
+                         AND intent.order_spec->>'symbol' = %s
+                         AND intent.order_spec->>'side' = %s
+                         AND (intent.order_spec->>'qty')::numeric = %s
+                         AND (intent.order_spec->>'limit_price')::numeric = %s
+                         AND intent.order_spec->>'order_type' = 'limit'
+                         AND intent.order_spec->>'market' = 'USStock'
+                         AND policy.mode = 'PAPER_AUTO' AND policy.enabled_until > NOW()
+                         AND COALESCE(global_stop.mode, '') <> 'EMERGENCY_STOP'""",
+                    (int(agent_match.group(1)), int(acc_id), int(user_id),
+                     int(credential_id), str(remark), str(symbol).upper(), str(side).lower(),
+                     float(qty), float(limit_price)),
+                )
             allowed = cur.fetchone() is not None
             if allowed:
                 try:

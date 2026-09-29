@@ -32,6 +32,31 @@ def test_submission_permit_checks_saved_credential_and_pending_order_under_lock(
     assert query.args[1] == (5, 3, 1, 2, 4)
 
 
+def test_agent_submit_permit_binds_immutable_order_and_human_policy(monkeypatch):
+    monkeypatch.setenv("FUTU_PAPER_AUTOTRADE_ALLOWED", "true")
+    cursor = MagicMock()
+    cursor.fetchone.return_value = {"?column?": 1}
+    db = MagicMock()
+    db.cursor.return_value = cursor
+
+    @contextmanager
+    def fake_connection():
+        yield db
+
+    monkeypatch.setattr(operator_gate, "get_db_connection", fake_connection)
+    with operator_gate.submission_permit(
+        user_id=1, credential_id=2, acc_id=3, remark="qd_agent_9",
+        symbol="AAPL", side="buy", qty=1, limit_price=100,
+    ):
+        assert db.rollback.call_count == 0
+    statements = [call.args[0] for call in cursor.execute.call_args_list]
+    assert "pg_advisory_xact_lock(824111" in statements[0]
+    assert "intent.order_spec->>'symbol'" in statements[-1]
+    assert "policy.enabled_until > NOW()" in statements[-1]
+    assert "min_agent_intent_id" in statements[-1]
+    assert cursor.execute.call_args.args[1] == (9, 3, 1, 2, "qd_agent_9", "AAPL", "buy", 1.0, 100.0)
+
+
 def test_submission_permit_does_not_send_expected_denial_or_broker_error_to_db_logger(monkeypatch):
     monkeypatch.setenv("FUTU_PAPER_AUTOTRADE_ALLOWED", "true")
     cursor = MagicMock()

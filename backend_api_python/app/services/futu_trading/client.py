@@ -471,6 +471,10 @@ class FutuClient:
                     credential_id=self.config.operator_credential_id,
                     acc_id=account_id,
                     remark=remark,
+                    symbol=str(symbol).upper(),
+                    side=str(side).lower(),
+                    qty=qty,
+                    limit_price=px,
                 ):
                     ret, data = self._trade_ctx.place_order(**kwargs)
                 if ret != ft.RET_OK:
@@ -577,6 +581,7 @@ class FutuClient:
                     order_id=oid,
                     trd_env=self._trd_env(ft),
                     acc_id=self._acc_id_arg(),
+                    refresh_cache=True,
                 )
                 if ret != ft.RET_OK:
                     code_err, msg = classify_futu_error(data)
@@ -614,6 +619,7 @@ class FutuClient:
                 ret, data = self._trade_ctx.order_list_query(
                     trd_env=self._trd_env(ft),
                     acc_id=self._acc_id_arg(),
+                    refresh_cache=True,
                 )
                 if ret != ft.RET_OK or data is None:
                     return None
@@ -643,14 +649,26 @@ class FutuClient:
             with self._lock:
                 self._ensure_connected()
                 ft = _ensure_futu()
+                currency = getattr(getattr(ft, "Currency", None), "USD", None)
+                query = {
+                    "trd_env": self._trd_env(ft),
+                    "acc_id": self._acc_id_arg(),
+                }
+                if self.config.trade_market == "US" and currency is not None:
+                    query["currency"] = currency
                 ret, data = self._trade_ctx.accinfo_query(
-                    trd_env=self._trd_env(ft),
-                    acc_id=self._acc_id_arg(),
+                    **query,
                 )
                 if ret != ft.RET_OK or data is None or len(data) == 0:
                     return {"success": False, "error": "FUTU_ACCOUNT_QUERY_FAILED"}
                 row = data.iloc[0] if hasattr(data, "iloc") and len(data) else data
                 summary = account_row_to_dict(row)
+                if self.config.trade_market == "US" and currency is not None:
+                    # Futu's universal-account funds are denominated in the
+                    # requested query currency; a US single-market account
+                    # ignores the parameter and is USD-denominated.
+                    summary["currency"] = "USD"
+                    summary["currency_basis"] = "futu_usd_query"
                 return {
                     "success": True,
                     "account": self._acc_id,
@@ -804,6 +822,39 @@ class FutuClient:
             code_err, msg = classify_futu_error(exc)
             logger.error("Futu get_quote failed: %s", msg)
             return {"success": False, "error": f"{code_err}:{msg}"}
+
+    def get_simulate_execution_quote(self, symbol: str) -> Dict[str, Any]:
+        """Fresh subscribed US quote for SIMULATE risk checks, never REAL authorization."""
+        from app.services.futu_trading.execution_quote import describe_futu_quote
+
+        with self._lock:
+            self._ensure_connected()
+            if self._quote_ctx is None:
+                raise RuntimeError("FUTU_QUOTE_CONTEXT_REQUIRED")
+            ft = _ensure_futu()
+            code = to_futu_code(symbol, "USStock")
+            ret, _ = self._quote_ctx.subscribe([code], [ft.SubType.QUOTE], subscribe_push=False)
+            if ret != ft.RET_OK:
+                raise RuntimeError("FUTU_QUOTE_SUBSCRIPTION_REQUIRED")
+            ret, states = self._quote_ctx.get_market_state([code])
+            if ret != ft.RET_OK or states is None or len(states) == 0:
+                raise RuntimeError("FUTU_MARKET_STATE_UNAVAILABLE")
+            state_row = states.iloc[0] if hasattr(states, "iloc") else states[0]
+            state = str(dict(state_row).get("market_state") or "UNKNOWN").split(".")[-1].upper()
+            raw = self._snapshot_unlocked(code)
+            snapshot = describe_futu_quote(
+                symbol, {"last": safe_float(raw.get("last_price")),
+                         "bid": safe_float(raw.get("bid_price")),
+                         "ask": safe_float(raw.get("ask_price")), "raw": raw},
+            )
+            snapshot["market_status"] = state
+            snapshot["subscribed"] = True
+            snapshot["simulate_execution_eligible"] = bool(
+                state == "AFTERNOON" and not snapshot["is_stale"]
+                and snapshot["price"] and snapshot["bid"] and snapshot["ask"]
+                and snapshot["bid"] <= snapshot["ask"]
+            )
+            return snapshot
 
     def _snapshot_unlocked(self, code: str) -> Dict[str, Any]:
         ft = _ensure_futu()

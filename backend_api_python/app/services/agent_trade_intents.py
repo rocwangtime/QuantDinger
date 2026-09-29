@@ -1,7 +1,6 @@
-"""Server-owned Agent trading policies, proposals and internal paper execution.
+"""Server-owned Agent trading policies, proposals and paper execution.
 
-Futu intents remain proposals until a separately reviewed SIMULATE execution
-gateway exists; REAL trading is deliberately absent.
+REAL trading is deliberately absent.
 """
 
 from __future__ import annotations
@@ -178,8 +177,8 @@ def set_policy(user_id: int, broker: str, account_ref: str, body: dict[str, Any]
         raise IntentError("Invalid trading policy mode")
     if body.get("confirm_mode") != mode:
         raise IntentError("Type the exact mode in confirm_mode")
-    if mode == "PAPER_AUTO" and (broker, account_ref) != ("platform", "default"):
-        raise IntentError("PAPER_AUTO currently supports internal platform paper only")
+    if mode == "PAPER_AUTO" and broker not in {"platform", "futu"}:
+        raise IntentError("PAPER_AUTO requires a platform or saved Futu account")
     markets = _list(body.get("allowed_markets", []), "allowed_markets")
     symbols = _list(body.get("allowed_symbols", []), "allowed_symbols")
     per_order = _positive(body.get("max_order_notional", 1000), "max_order_notional")
@@ -197,6 +196,8 @@ def set_policy(user_id: int, broker: str, account_ref: str, body: dict[str, Any]
     if mode == "PAPER_AUTO":
         if not markets or not symbols or "*" in markets or "*" in symbols:
             raise IntentError("PAPER_AUTO requires exact market and symbol allowlists")
+        if broker == "futu" and (markets != ["USSTOCK"] or allow_market):
+            raise IntentError("Futu PAPER_AUTO permits only USStock limit orders")
         raw = str(body.get("enabled_until") or "")
         try:
             enabled_until = datetime.fromisoformat(raw.replace("Z", "+00:00"))
@@ -300,7 +301,8 @@ def _risk(cur, user_id: int, policy: dict, order: dict, price: float) -> tuple[b
         """SELECT COALESCE(SUM(notional),0) AS used, COUNT(*) AS orders
            FROM qd_agent_trade_intents WHERE user_id=%s AND broker=%s AND account_ref=%s
              AND created_at >= date_trunc('day', NOW())
-             AND status IN ('SUBMITTED','FILLED')""",
+             AND status IN ('EXECUTING','UNCERTAIN','SUBMITTED','PARTIALLY_FILLED',
+                            'FILLED','CANCELLED','FAILED')""",
         (user_id, policy["broker"], policy["account_ref"]),
     )
     daily = cur.fetchone() or {}
@@ -308,7 +310,7 @@ def _risk(cur, user_id: int, policy: dict, order: dict, price: float) -> tuple[b
         return False, {"reason": "max_daily_notional"}
     if int(daily.get("orders") or 0) >= int(policy["max_orders_per_day"]):
         return False, {"reason": "max_orders_per_day"}
-    if order["side"] == "sell" and not policy["allow_short"]:
+    if order["side"] == "sell" and not policy["allow_short"] and order["broker"] == "platform":
         cur.execute(
             """SELECT COALESCE(SUM(CASE WHEN side='buy' THEN qty ELSE -qty END),0) AS held
                FROM qd_agent_paper_orders

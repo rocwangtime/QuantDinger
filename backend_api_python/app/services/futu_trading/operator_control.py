@@ -64,14 +64,23 @@ def _owned_order_identities(user_id: int, credential_id: int) -> tuple[set[str],
     with get_db_connection() as db:
         cur = db.cursor()
         cur.execute(
-            """SELECT exchange_order_id, client_order_id, pending_order_id, strategy_id
+            """SELECT exchange_order_id, client_order_id, pending_order_id, strategy_id,
+                      NULL::BIGINT AS agent_intent_id
                FROM qd_live_order_bindings
                WHERE user_id = %s AND credential_id = %s AND LOWER(exchange_id) = 'futu'
                UNION ALL
-               SELECT exchange_order_id, client_order_id, id AS pending_order_id, strategy_id
+               SELECT exchange_order_id, client_order_id, id AS pending_order_id, strategy_id,
+                      NULL::BIGINT AS agent_intent_id
                FROM pending_orders
-               WHERE user_id = %s AND credential_id = %s AND LOWER(exchange_id) = 'futu'""",
-            (int(user_id), int(credential_id), int(user_id), int(credential_id)),
+               WHERE user_id = %s AND credential_id = %s AND LOWER(exchange_id) = 'futu'
+               UNION ALL
+               SELECT broker_order_id AS exchange_order_id, broker_remark AS client_order_id,
+                      NULL::BIGINT AS pending_order_id, NULL::BIGINT AS strategy_id,
+                      id AS agent_intent_id
+               FROM qd_agent_trade_intents
+               WHERE user_id = %s AND broker = 'futu' AND account_ref = %s""",
+            (int(user_id), int(credential_id), int(user_id), int(credential_id),
+             int(user_id), f"credential:{int(credential_id)}"),
         )
         rows = cur.fetchall() or []
         db.rollback()
@@ -85,6 +94,9 @@ def _owned_order_identities(user_id: int, credential_id: int) -> tuple[set[str],
             # it from its pending row so a crash between broker accept and DB
             # update can still be identified and cancelled safely.
             remarks.add(f"qd_{strategy_id}_{pending_order_id}")
+        agent_intent_id = int(row.get("agent_intent_id") or 0)
+        if agent_intent_id > 0:
+            remarks.add(f"qd_agent_{agent_intent_id}")
     return (
         {str(row["exchange_order_id"]) for row in rows if row.get("exchange_order_id")},
         remarks,
@@ -105,6 +117,13 @@ def _cancel_queued_orders(user_id: int, credential_id: int) -> int:
                 (int(user_id), int(credential_id)),
             )
             count = int(cur.rowcount or 0)
+            cur.execute(
+                """UPDATE qd_agent_trade_intents SET status = 'EXPIRED', updated_at = NOW()
+                   WHERE user_id = %s AND broker = 'futu' AND account_ref = %s
+                     AND status = 'PROPOSED'""",
+                (int(user_id), f"credential:{int(credential_id)}"),
+            )
+            count += int(cur.rowcount or 0)
             db.commit()
             return count
         except Exception:
@@ -127,6 +146,14 @@ def _unresolved_submit_outcomes(user_id: int, credential_id: int) -> int:
             (int(user_id), int(credential_id)),
         )
         count = int((cur.fetchone() or {}).get("n") or 0)
+        cur.execute(
+            """SELECT COUNT(*) AS n FROM qd_agent_trade_intents
+               WHERE user_id = %s AND broker = 'futu' AND account_ref = %s
+                 AND status IN ('EXECUTING', 'UNCERTAIN')
+                 AND COALESCE(broker_order_id, '') = ''""",
+            (int(user_id), f"credential:{int(credential_id)}"),
+        )
+        count += int((cur.fetchone() or {}).get("n") or 0)
         db.rollback()
         cur.close()
     return count

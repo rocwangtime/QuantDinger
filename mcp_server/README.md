@@ -50,13 +50,15 @@ Never place an agent token in prompts, logs, screenshots, source control, or MCP
 | `runtime_overview`, `stop_strategy` | R/T | Runtime inspection and confirmed stop |
 | Broker account, strategy position/trade, and quick-trade observation tools | R | Secret-free execution observations |
 | Signal-alert tools | N | Notification task lifecycle and confirmed delivery evaluation |
-| `create_trade_intent`, `place_quick_order` | T | Idempotent intent proposal; internal paper only if a human enables time-limited `PAPER_AUTO` |
+| `create_trade_intent`, `place_quick_order` | T | Idempotent intent proposal; no broker submission |
+| `place_platform_paper_order` | T | Explicit internal paper execution under human `PAPER_AUTO` |
+| `place_futu_simulate_order`, `execute_futu_simulate_intent`, `reconcile_futu_simulate_intent` | T | Explicit US SIMULATE-only limit order or broker-status lookup; requires separate human policy and operator arm |
 | `list_trade_intents`, `get_trade_intent`, `get_trading_policy`, `get_futu_quote` | R | Intent audit, effective policy, and non-executable Futu quote provenance |
 | `cancel_trade_intent`, `cancel_agent_orders` | T | Cancel a proposal or request cancellation of Agent-originated open orders |
 | `list_portfolio_positions`, `list_paper_orders` | R | Portfolio and paper-order reads |
 | `emergency_stop_trading`, `cancel_open_paper_orders` | T | Persisted stop and T-token revocation, or paper-order cancellation only |
 
-Every mutating W/B/N/T tool requires a caller-generated `idempotency_key`; retries of the same request must reuse it. `stop_strategy` requires `confirm_stop=true`. `create_trade_intent` never places a Futu or REAL broker order. `place_quick_order` is a compatibility alias for intent creation and rejects the old live-confirmation and protection fields. Only internal platform paper simulation may execute under an explicit, expiring human policy with symbol, market, and notional limits. New non-paper Agent tokens and REAL trading modes are disabled.
+Every mutating W/B/N/T tool requires a caller-generated `idempotency_key`; retries of the same request must reuse it. `stop_strategy` requires `confirm_stop=true`. `create_trade_intent` never places a Futu or REAL broker order. `place_quick_order` is a compatibility alias for intent creation and rejects the old live-confirmation and protection fields. Explicit internal paper and Futu US SIMULATE execution require an expiring human policy with exact symbol, market, and notional limits; Futu additionally requires the account operator arm. Unknown broker submissions are reconciled, never retried. New non-paper Agent tokens and REAL trading modes are disabled.
 
 ## Strategy API V2 workflow
 

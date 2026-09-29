@@ -1880,6 +1880,7 @@ CREATE TABLE IF NOT EXISTS qd_futu_automation_state (
     user_id INTEGER NOT NULL REFERENCES qd_users(id) ON DELETE CASCADE,
     credential_id INTEGER NOT NULL REFERENCES qd_exchange_credentials(id) ON DELETE CASCADE,
     min_pending_order_id BIGINT NOT NULL DEFAULT 0,
+    min_agent_intent_id BIGINT NOT NULL DEFAULT 0,
     enabled BOOLEAN NOT NULL DEFAULT FALSE,
     state VARCHAR(24) NOT NULL DEFAULT 'paused',
     last_error TEXT NOT NULL DEFAULT '',
@@ -1889,6 +1890,8 @@ CREATE TABLE IF NOT EXISTS qd_futu_automation_state (
 );
 ALTER TABLE qd_futu_automation_state
   ADD COLUMN IF NOT EXISTS min_pending_order_id BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE qd_futu_automation_state
+  ADD COLUMN IF NOT EXISTS min_agent_intent_id BIGINT NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS idx_futu_automation_user ON qd_futu_automation_state(user_id);
 
 -- =============================================================================
@@ -3010,12 +3013,45 @@ CREATE TABLE IF NOT EXISTS qd_agent_trade_intents (
     risk_result JSONB,
     notional DECIMAL(24,8),
     status VARCHAR(24) NOT NULL DEFAULT 'PROPOSED'
-      CHECK (status IN ('PROPOSED', 'REJECTED', 'SUBMITTED', 'FILLED', 'CANCELLED', 'EXPIRED')),
+      CHECK (status IN ('PROPOSED', 'REJECTED', 'EXECUTING', 'UNCERTAIN',
+                       'SUBMITTED', 'PARTIALLY_FILLED', 'FILLED', 'FAILED',
+                       'CANCELLED', 'EXPIRED')),
     paper_order_uid VARCHAR(40),
+    broker_order_id VARCHAR(80),
+    broker_remark VARCHAR(64),
+    filled_qty DECIMAL(24,8) NOT NULL DEFAULT 0,
+    avg_fill_price DECIMAL(24,8),
+    last_reconciled_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (agent_token_id, idempotency_key)
 );
+ALTER TABLE qd_agent_trade_intents ADD COLUMN IF NOT EXISTS broker_order_id VARCHAR(80);
+ALTER TABLE qd_agent_trade_intents ADD COLUMN IF NOT EXISTS broker_remark VARCHAR(64);
+ALTER TABLE qd_agent_trade_intents ADD COLUMN IF NOT EXISTS filled_qty DECIMAL(24,8) NOT NULL DEFAULT 0;
+ALTER TABLE qd_agent_trade_intents ADD COLUMN IF NOT EXISTS avg_fill_price DECIMAL(24,8);
+ALTER TABLE qd_agent_trade_intents ADD COLUMN IF NOT EXISTS last_reconciled_at TIMESTAMPTZ;
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'qd_agent_trade_intents'::regclass
+      AND conname = 'qd_agent_trade_intents_status_check'
+      AND pg_get_constraintdef(oid) NOT LIKE '%EXECUTING%'
+  ) THEN
+    ALTER TABLE qd_agent_trade_intents DROP CONSTRAINT qd_agent_trade_intents_status_check;
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'qd_agent_trade_intents'::regclass
+      AND conname = 'qd_agent_trade_intents_status_check'
+  ) THEN
+    ALTER TABLE qd_agent_trade_intents ADD CONSTRAINT qd_agent_trade_intents_status_check
+      CHECK (status IN ('PROPOSED', 'REJECTED', 'EXECUTING', 'UNCERTAIN',
+                       'SUBMITTED', 'PARTIALLY_FILLED', 'FILLED', 'FAILED',
+                       'CANCELLED', 'EXPIRED'));
+  END IF;
+END $$;
 CREATE INDEX IF NOT EXISTS idx_agent_intents_user
   ON qd_agent_trade_intents(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_agent_intents_policy_daily

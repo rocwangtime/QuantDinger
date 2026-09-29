@@ -51,6 +51,9 @@ MCP_TOOL_NAMES = (
     "get_futu_quote_status",
     "get_futu_order_book",
     "place_platform_paper_order",
+    "place_futu_simulate_order",
+    "execute_futu_simulate_intent",
+    "reconcile_futu_simulate_intent",
     "emergency_stop_trading",
     "list_jobs",
     "get_job",
@@ -256,10 +259,10 @@ mcp = FastMCP(
     instructions=(
         "Tools for the QuantDinger self-hosted quant platform. "
         "All tools are tenant-scoped via the configured agent token. "
-        "Broker order placement is disabled. create_trade_intent with T scope "
-        "records a proposal by default; only a human-enabled, time-limited "
-        "PAPER_AUTO policy may execute internal platform paper simulation. "
-        "Futu intents remain proposals, not SIMULATE broker orders. "
+        "create_trade_intent with T scope records a proposal by default. "
+        "Explicit paper-order tools require a human-enabled, time-limited "
+        "PAPER_AUTO policy. Futu tools may submit only US SIMULATE limit "
+        "orders after the separate operator account arm; REAL is disabled. "
         "Runtime overview is available, and stop_strategy can stop a tenant-owned "
         "strategy when the token has T scope. "
         "SECURITY: never log or paste the agent token; responses may include "
@@ -568,6 +571,49 @@ def place_platform_paper_order(
         json={"broker": "platform", "market": market, "symbol": symbol,
               "side": side, "qty": qty, "order_type": "limit", "limit_price": limit_price},
         headers=_idempotency_headers(idempotency_key),
+    )
+
+
+@_tool
+def place_futu_simulate_order(
+    credential_id: int, symbol: str, side: str, qty: float, limit_price: float,
+    idempotency_key: str, confirm_order: bool = False,
+) -> Any:
+    """Place one US SIMULATE limit order after human PAPER_AUTO and operator arm."""
+    if not confirm_order:
+        return {"error": True, "status": 400, "body": {
+            "message": "Set confirm_order=true. This submits to Futu SIMULATE, never REAL."
+        }}
+    return _post(
+        "/api/agent/v1/simulate-orders/place",
+        json={"broker": "futu", "credential_id": int(credential_id), "market": "USStock",
+              "symbol": symbol, "side": side, "qty": qty,
+              "order_type": "limit", "limit_price": limit_price},
+        headers=_idempotency_headers(idempotency_key),
+    )
+
+
+@_tool
+def execute_futu_simulate_intent(
+    intent_id: int, idempotency_key: str, confirm_order: bool = False,
+) -> Any:
+    """Execute a previously proposed Futu SIMULATE intent at most once."""
+    if not confirm_order:
+        return {"error": True, "status": 400, "body": {
+            "message": "Set confirm_order=true; broker submission is possible only in SIMULATE."
+        }}
+    return _post(
+        f"/api/agent/v1/trade-intents/{int(intent_id)}/execute-simulate",
+        json={}, headers=_idempotency_headers(idempotency_key),
+    )
+
+
+@_tool
+def reconcile_futu_simulate_intent(intent_id: int, idempotency_key: str) -> Any:
+    """Query Futu for an existing order; never retries the broker submission."""
+    return _post(
+        f"/api/agent/v1/trade-intents/{int(intent_id)}/reconcile-simulate",
+        json={}, headers=_idempotency_headers(idempotency_key),
     )
 
 

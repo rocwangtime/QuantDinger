@@ -164,7 +164,7 @@
           "order_type":  { "type": "string", "enum": ["market","limit"] },
           "limit_price": { "type": "number", "nullable": true },
           "broker": { "type": "string", "enum": ["platform", "futu"], "default": "platform" },
-          "credential_id": { "type": "integer", "description": "Saved Futu US SIMULATE credential for plan-only proposals" },
+          "credential_id": { "type": "integer", "description": "Saved Futu US SIMULATE credential; intent creation itself remains plan-only" },
           "reason": { "type": "string", "maxLength": 2000 },
           "strategy_version": { "type": "string", "maxLength": 120 }
         }
@@ -735,7 +735,7 @@
     "/api/agent/v1/trade-intents": {
       "post": {
         "summary": "Create immutable trade intent; default plan-only",
-        "description": "T scope. Requires Idempotency-Key. This endpoint always stores a proposal; it never places an order. Futu Agent broker execution is unavailable.",
+        "description": "T scope. Requires Idempotency-Key. This endpoint always stores a proposal; it never places an order. A separate SIMULATE-only execution call is required.",
         "x-scope-class": "T",
         "parameters": [{ "in": "header", "name": "Idempotency-Key", "required": true, "schema": { "type": "string", "maxLength": 120 } }],
         "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/OrderRequest" } } } },
@@ -754,6 +754,32 @@
         "parameters": [{ "in": "header", "name": "Idempotency-Key", "required": true, "schema": { "type": "string", "maxLength": 120 } }],
         "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/OrderRequest" } } } },
         "responses": { "201": { "description": "Internal paper order result" }, "403": { "description": "Paper execution policy not active" } }
+      }
+    },
+    "/api/agent/v1/simulate-orders/place": {
+      "post": {
+        "summary": "Create and execute one Futu US SIMULATE limit intent",
+        "description": "Requires a paper-only T token, exact human Futu PAPER_AUTO policy, separately armed operator account, fresh subscribed regular-session quote and risk checks. Repeated intent never submits twice. REAL is unavailable.",
+        "x-scope-class": "T",
+        "parameters": [{ "in": "header", "name": "Idempotency-Key", "required": true, "schema": { "type": "string", "maxLength": 120 } }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/OrderRequest" } } } },
+        "responses": { "201": { "description": "Submitted or retained for reconciliation" }, "403": { "description": "Policy or operator gate denied" }, "409": { "description": "Quote or risk preflight failed" } }
+      }
+    },
+    "/api/agent/v1/trade-intents/{intent_id}/execute-simulate": {
+      "post": {
+        "summary": "Execute an existing Futu SIMULATE proposal once",
+        "x-scope-class": "T",
+        "parameters": [{ "in": "path", "name": "intent_id", "required": true, "schema": { "type": "integer" } }, { "in": "header", "name": "Idempotency-Key", "required": true, "schema": { "type": "string", "maxLength": 120 } }],
+        "responses": { "200": { "description": "Current intent; existing broker outcome is never retried" }, "403": { "description": "Policy or operator gate denied" } }
+      }
+    },
+    "/api/agent/v1/trade-intents/{intent_id}/reconcile-simulate": {
+      "post": {
+        "summary": "Read-only Futu order lookup and local status reconciliation",
+        "x-scope-class": "T",
+        "parameters": [{ "in": "path", "name": "intent_id", "required": true, "schema": { "type": "integer" } }, { "in": "header", "name": "Idempotency-Key", "required": true, "schema": { "type": "string", "maxLength": 120 } }],
+        "responses": { "200": { "description": "Current intent; a missing broker order remains uncertain" } }
       }
     },
     "/api/agent/v1/trade-intents/{intent_id}/cancel": {

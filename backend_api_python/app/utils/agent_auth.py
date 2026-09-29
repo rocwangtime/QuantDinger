@@ -170,8 +170,15 @@ def _ensure_schema() -> None:
             risk_result JSONB,
             notional DECIMAL(24,8),
             status VARCHAR(24) NOT NULL DEFAULT 'PROPOSED'
-              CHECK (status IN ('PROPOSED', 'REJECTED', 'SUBMITTED', 'FILLED', 'CANCELLED', 'EXPIRED')),
+              CHECK (status IN ('PROPOSED', 'REJECTED', 'EXECUTING', 'UNCERTAIN',
+                               'SUBMITTED', 'PARTIALLY_FILLED', 'FILLED', 'FAILED',
+                               'CANCELLED', 'EXPIRED')),
             paper_order_uid VARCHAR(40),
+            broker_order_id VARCHAR(80),
+            broker_remark VARCHAR(64),
+            filled_qty DECIMAL(24,8) NOT NULL DEFAULT 0,
+            avg_fill_price DECIMAL(24,8),
+            last_reconciled_at TIMESTAMPTZ,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             UNIQUE (agent_token_id, idempotency_key)

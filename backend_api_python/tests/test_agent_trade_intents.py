@@ -43,9 +43,14 @@ def test_real_modes_cannot_be_configured_even_with_confirmation():
 
 
 def test_platform_paper_requires_human_expiry_and_exact_allowlist():
-    with pytest.raises(intents.IntentError, match="internal platform paper"):
+    with pytest.raises(intents.IntentError, match="exact market and symbol allowlists"):
         intents.set_policy(1, "futu", "credential:2", {
             "mode": "PAPER_AUTO", "confirm_mode": "PAPER_AUTO",
+        })
+    with pytest.raises(intents.IntentError, match="USStock limit"):
+        intents.set_policy(1, "futu", "credential:2", {
+            "mode": "PAPER_AUTO", "confirm_mode": "PAPER_AUTO",
+            "allowed_markets": ["Crypto"], "allowed_symbols": ["AAPL"],
         })
     with pytest.raises(intents.IntentError, match="allowlists"):
         intents.set_policy(1, "platform", "default", {
