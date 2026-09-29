@@ -4,8 +4,8 @@ from __future__ import annotations
 from contextlib import contextmanager
 
 import pytest
-from app.routes.agent_v1 import research, trading_data
-from app.services import agent_trade_intents
+from app.routes.agent_v1 import research, trading_data, trade_intents
+from app.services import agent_trade_intents, futu_agent_execution
 from app.utils import agent_auth
 
 
@@ -105,6 +105,26 @@ def test_reused_key_with_different_payload_is_rejected(client, monkeypatch):
         json={"market": "USStock", "symbol": "MSFT"},
     )
     assert response.status_code == 409
+
+
+def test_explicit_futu_simulate_direct_order_routes_through_durable_gateway(client, monkeypatch):
+    monkeypatch.setattr(agent_auth, "_reserve_idempotency", lambda *_: ("reserved", None))
+    monkeypatch.setattr(agent_auth, "_complete_idempotency", lambda *_: None)
+    monkeypatch.setattr(trade_intents, "submit_intent", lambda *_a, **_kw: {"id": 91})
+    seen = []
+    monkeypatch.setattr(futu_agent_execution, "execute_simulate_intent",
+                        lambda user_id, token, intent_id: seen.append((user_id, token["id"], intent_id))
+                        or {"id": intent_id, "status": "SUBMITTED", "broker": "futu"})
+    response = client.post(
+        "/api/agent/v1/simulate-orders/place",
+        headers=_headers(key="futu-sim-91"),
+        json={"broker": "futu", "credential_id": 2, "market": "USStock",
+              "symbol": "AAPL", "side": "buy", "qty": 1,
+              "order_type": "limit", "limit_price": 100},
+    )
+    assert response.status_code == 201
+    assert response.get_json()["data"]["status"] == "SUBMITTED"
+    assert seen == [(7, 501, 91)]
 
 
 def test_factor_registry_is_exposed(client):
