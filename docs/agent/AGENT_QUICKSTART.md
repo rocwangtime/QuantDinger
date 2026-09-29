@@ -13,7 +13,7 @@ curl -H "Authorization: Bearer $QUANTDINGER_AGENT_TOKEN" \
   http://localhost:8888/api/agent/v1/whoami
 ```
 
-Scopes are `R` for reads, `W` for saved artifacts and deployment configuration, `B` for backtests, `N` for notification side effects, and `T` for runtime or order mutations. `C` is admin-only. Token permissions never bypass server-side live-trading controls.
+Scopes are `R` for reads, `W` for saved artifacts and deployment configuration, `B` for backtests, `N` for notification side effects, and `T` for trade proposals and emergency controls. `C` is admin-only. New tokens must be `paper_only=true`; Agent broker-live execution is disabled regardless of `AGENT_LIVE_TRADING_ENABLED`.
 
 Every mutating W/B/N/T request requires a unique `Idempotency-Key` header. Reuse the same key only when retrying the exact same method, route, query, and body. The gateway atomically reserves the key, returns a stored completed response on replay, and rejects concurrent or mismatched reuse.
 
@@ -89,13 +89,70 @@ Indicators are chart-only. Fetch `/indicators/authoring-contract`, validate with
 
 Research tools expose point-in-time universes, factor metadata, and the tenant watchlist under `/research/*`. Broker observation endpoints under `/trading/*` return safe credential metadata, account snapshots, account/strategy positions, pending orders, and cursor-paginated trade ledgers. They never return decrypted API keys, secrets, passphrases, or encrypted credential blobs.
 
+For an owned Futu US SIMULATE credential,
+`GET /trading/accounts/{credential_id}/futu-quote?symbol=SPY` returns a
+quote-only OpenD snapshot with provider, exchange timestamp, receipt time and
+staleness. Until real-time entitlement and market status can be verified, it
+deliberately reports `execution_eligible=false`; no order code consumes it.
+
 N-scope signal-alert endpoints under `/notifications/signal-alerts` reuse the existing indicator notification service. Immediate evaluation requires explicit MCP confirmation because it may deliver a notification.
 
-## Runtime and orders
+## Trading policy and immutable intents
 
-`GET /runtime/overview` returns compact tenant runtime state. Quick orders require T scope and an `Idempotency-Key`. Live execution additionally requires a live-capable token, server live-trading enablement, a credential reference, client-side explicit confirmation, and compliance with the token's `max_order_notional` and `max_daily_notional` caps.
+`POST /trade-intents` (T scope) records an immutable proposed order. The legacy
+`POST /quick-trade/orders` endpoint is an alias. A unique `Idempotency-Key` is
+mandatory for each intent; retrying the same key with changed order content is
+rejected. By default the effective mode is `PLAN_ONLY`, so no paper or broker
+order is generated.
 
-The emergency stop at `/quick-trade/kill-switch` requires `confirm=true`. It attempts to cancel open agent-originated live orders, cancels open paper orders, revokes all active T-scope tokens for the tenant, and returns any exchange cancellation failures for mandatory human review.
+```bash
+curl -X POST http://localhost:8888/api/agent/v1/trade-intents \
+  -H "Authorization: Bearer $QUANTDINGER_AGENT_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: spy-plan-20260929-1' \
+  -d '{"broker":"futu","credential_id":2,"market":"USStock","symbol":"SPY","side":"buy","qty":1,"order_type":"limit","limit_price":600,"reason":"test proposal"}'
+```
+
+The server verifies that the credential belongs to the token's tenant and is
+an explicitly selected US `SIMULATE` account, but a Futu intent is **always a
+plan**. It does not use the existing strategy's Futu SIMULATE order path, and
+it cannot address a REAL account. Agent tokens can read the effective policy
+through `GET /trading-policy` and list/get/cancel unexecuted proposals under
+`/trade-intents`; they cannot change policy or approve an order.
+
+Human administrators can view and change policy under
+`/api/agent/v1/admin/trading-policy` (human JWT only). `PAPER_AUTO` currently
+supports **internal platform paper simulation only**. Enabling it requires an
+exact market/symbol allowlist, per-order/daily/count limits, typed
+`confirm_mode=PAPER_AUTO`, and an expiry within 24 hours. It does not call
+Futu or another broker. The Web Agent Token page shows policy and intents.
+`LIVE_APPROVAL` and `LIVE_AUTO` are rejected, including when the old server
+environment switch is set; they require a separately authorized implementation.
+
+## Runtime and emergency stop
+
+`GET /runtime/overview` returns compact tenant runtime state. Internal paper
+simulation uses a research K-line quote labeled `research_kline`, with
+`is_realtime=false` and `execution_eligible=false`. This quote is never treated
+as a Futu execution quote. The human policy, not an Agent-supplied confirm
+flag, controls whether it may write to the internal paper ledger.
+
+The emergency stop at `/quick-trade/kill-switch` persists a global
+`EMERGENCY_STOP` before attempting to cancel previously created Agent orders.
+It expires pending proposals, cancels open internal paper orders, revokes all
+active T-scope tokens for the tenant, and reports any exchange cancellation
+attempts for mandatory human review. An accepted exchange cancellation
+request is not marked terminal until separate broker reconciliation confirms
+it. It **does not liquidate positions**, stop separately deployed strategies,
+or sign out of Futu OpenD. The human administrator must explicitly clear the
+global stop before new Agent proposals are accepted. If a strategy is already
+running, pause it via its own operator controls as a separate action.
+
+Stopping autonomous submissions, cancelling Agent-owned open orders, and
+liquidating a position are distinct actions. The first uses the human policy
+`EMERGENCY_STOP`; the second uses `/agent-orders/cancel` (T scope) or
+`/admin/agent-orders/cancel` (human JWT). Neither action liquidates. No Agent
+force-liquidation endpoint is exposed.
 
 Rate limiting is shared through Redis across API workers and enforces both token and tenant quotas. Responses include `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `X-RateLimit-Reset`; `429` responses also include `Retry-After`.
 

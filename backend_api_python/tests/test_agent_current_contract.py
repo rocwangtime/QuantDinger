@@ -72,7 +72,7 @@ def _reset_agent_auth(monkeypatch):
     agent_auth._rate_state.clear()
 
 
-def test_live_capable_token_never_silently_falls_back_to_paper(client, monkeypatch):
+def test_live_capable_token_only_creates_intent_even_with_old_env_switch(client, monkeypatch):
     token = {
         "id": 9,
         "user_id": 1,
@@ -89,7 +89,12 @@ def test_live_capable_token_never_silently_falls_back_to_paper(client, monkeypat
     monkeypatch.setattr(agent_auth, "_lookup_token", lambda _: token)
     monkeypatch.setattr(agent_auth, "_touch_token_last_used", lambda *_: None)
     monkeypatch.setattr(agent_auth, "_audit", lambda *args, **kwargs: None)
-    monkeypatch.delenv("AGENT_LIVE_TRADING_ENABLED", raising=False)
+    monkeypatch.setenv("AGENT_LIVE_TRADING_ENABLED", "true")
+    from app.routes.agent_v1 import trade_intents
+    monkeypatch.setattr(
+        trade_intents, "submit_intent",
+        lambda *_args, **_kwargs: {"status": "PROPOSED", "paper_order_uid": None},
+    )
 
     response = client.post(
         "/api/agent/v1/quick-trade/orders",
@@ -99,8 +104,9 @@ def test_live_capable_token_never_silently_falls_back_to_paper(client, monkeypat
         },
         json={"market": "Crypto", "symbol": "BTC/USDT", "side": "buy", "qty": 0.01},
     )
-    assert response.status_code == 501
-    assert "AGENT_LIVE_TRADING_ENABLED" in response.get_json()["message"]
+    assert response.status_code == 201
+    assert response.get_json()["data"]["status"] == "PROPOSED"
+    assert response.get_json()["data"]["paper_order_uid"] is None
 
 
 def test_paper_limit_order_only_fills_when_marketable():

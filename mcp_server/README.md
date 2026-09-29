@@ -50,11 +50,13 @@ Never place an agent token in prompts, logs, screenshots, source control, or MCP
 | `runtime_overview`, `stop_strategy` | R/T | Runtime inspection and confirmed stop |
 | Broker account, strategy position/trade, and quick-trade observation tools | R | Secret-free execution observations |
 | Signal-alert tools | N | Notification task lifecycle and confirmed delivery evaluation |
-| `place_quick_order` | T | Confirmed order with token notional caps |
+| `create_trade_intent`, `place_quick_order` | T | Idempotent intent proposal; internal paper only if a human enables time-limited `PAPER_AUTO` |
+| `list_trade_intents`, `get_trade_intent`, `get_trading_policy`, `get_futu_quote` | R | Intent audit, effective policy, and non-executable Futu quote provenance |
+| `cancel_trade_intent`, `cancel_agent_orders` | T | Cancel a proposal or request cancellation of Agent-originated open orders |
 | `list_portfolio_positions`, `list_paper_orders` | R | Portfolio and paper-order reads |
-| `emergency_stop_trading`, `cancel_open_paper_orders` | T | Emergency cancellation and T-token revocation |
+| `emergency_stop_trading`, `cancel_open_paper_orders` | T | Persisted stop and T-token revocation, or paper-order cancellation only |
 
-Every mutating W/B/N/T tool requires a caller-generated `idempotency_key`; retries of the same request must reuse it. `stop_strategy` requires `confirm_stop=true`. `place_quick_order` requires `confirm_order=true`; a live-capable token also requires `confirm_live_trading=true`. Optional `tp_price` and `sl_price` protection are forwarded to the shared Quick Trade execution path. Server-side trading flags, allowlists, and per-order/per-day notional caps still apply.
+Every mutating W/B/N/T tool requires a caller-generated `idempotency_key`; retries of the same request must reuse it. `stop_strategy` requires `confirm_stop=true`. `create_trade_intent` never places a Futu or REAL broker order. `place_quick_order` is a compatibility alias for intent creation and rejects the old live-confirmation and protection fields. Only internal platform paper simulation may execute under an explicit, expiring human policy with symbol, market, and notional limits. New non-paper Agent tokens and REAL trading modes are disabled.
 
 ## Strategy API V2 workflow
 
@@ -97,7 +99,7 @@ Market, symbol, and timeframe are not backtest parameters. They come from the co
 
 Indicators are chart-only. Validate and save them through the indicator tools, then convert the idea into Strategy API V2 code before using `submit_backtest` or `create_strategy`.
 
-Restoring a source snapshot requires `confirm_restore=true`. The emergency stop requires confirmation, attempts to cancel agent-originated live orders, cancels paper orders, revokes every active tenant T token, and reports exchange cancellations needing human follow-up.
+Restoring a source snapshot requires `confirm_restore=true`. The emergency stop requires confirmation, persists a global Agent stop, requests cancellation of agent-originated legacy live orders, cancels paper orders, and revokes every active tenant T token. An exchange cancellation acknowledgement is not proof of a final cancelled state: check the broker and platform records manually. `cancel_agent_orders` and `cancel_open_paper_orders` do not change the trading policy or revoke tokens. None of these actions liquidates positions.
 
 The optional Docker network service is enabled explicitly:
 

@@ -11,6 +11,9 @@ from .security import redact_secrets
 WRITE_TOOLS = {
     "stop_strategy": True,
     "place_quick_order": True,
+    "create_trade_intent": True,
+    "cancel_trade_intent": True,
+    "cancel_agent_orders": True,
     "emergency_stop_trading": True,
     "cancel_job": True,
     "save_indicator": True,

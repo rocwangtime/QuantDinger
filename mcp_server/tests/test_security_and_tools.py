@@ -30,7 +30,7 @@ def fresh_module(monkeypatch):
 
 
 def test_mcp_tool_registry_complete(fresh_module):
-    assert len(fresh_module.MCP_TOOL_NAMES) == 58
+    assert len(fresh_module.MCP_TOOL_NAMES) == 65
     # Every exported name should correspond to a registered @mcp.tool function.
     for name in fresh_module.MCP_TOOL_NAMES:
         assert hasattr(fresh_module, name), f"missing tool function: {name}"
@@ -217,7 +217,7 @@ def test_create_strategy_uses_canonical_deployment_payload(monkeypatch, fresh_mo
     assert captured["headers"] == {"Idempotency-Key": "strategy-create-7"}
 
 
-def test_quick_order_forwards_native_protection(monkeypatch, fresh_module):
+def test_quick_order_rejects_legacy_native_protection(monkeypatch, fresh_module):
     captured = {}
 
     monkeypatch.setattr(fresh_module, "_get", lambda path, params=None: {"paper_only": True})
@@ -238,9 +238,9 @@ def test_quick_order_forwards_native_protection(monkeypatch, fresh_module):
         confirm_order=True,
     )
 
-    assert out == {"status": "filled"}
-    assert captured["json"]["tp_price"] == 70000.0
-    assert captured["json"]["sl_price"] == 60000.0
+    assert out["error"] is True
+    assert out["status"] == 400
+    assert not captured
 
 
 def test_stop_strategy_requires_confirmation(fresh_module):
