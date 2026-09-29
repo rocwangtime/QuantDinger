@@ -100,22 +100,34 @@ def backtest_range_policy(market: str, timeframe: str) -> BacktestRangePolicy:
     )
 
 
-def backtest_warmup_calendar_days(timeframe: str, warmup_bars: int) -> int:
+def backtest_warmup_calendar_days(
+    timeframe: str,
+    warmup_bars: int,
+    markets: Iterable[str] = (),
+) -> int:
     bars = max(0, int(warmup_bars or 0))
     if bars == 0:
         return 0
     normalized = normalize_backtest_timeframe(timeframe).lower()
     if normalized.endswith("m") and normalized[:-1].isdigit():
         minutes = max(1, int(normalized[:-1]))
-        return max(1, math.ceil(bars * minutes * 1.5 / 1440.0))
-    if normalized.endswith("h") and normalized[:-1].isdigit():
+        days = max(1, math.ceil(bars * minutes * 1.5 / 1440.0))
+        hours = minutes / 60.0
+    elif normalized.endswith("h") and normalized[:-1].isdigit():
         hours = max(1, int(normalized[:-1]))
-        return max(1, math.ceil(bars * hours * 1.5 / 24.0))
-    if normalized.endswith("d"):
+        days = max(1, math.ceil(bars * hours * 1.5 / 24.0))
+    elif normalized.endswith("d"):
         return max(2, math.ceil(bars * 7.0 / 5.0 * 1.35))
-    if normalized.endswith("w"):
+    elif normalized.endswith("w"):
         return max(8, bars * 8)
-    return max(1, math.ceil(bars * 1.5))
+    else:
+        return max(1, math.ceil(bars * 1.5))
+
+    if any(DataSourceFactory.normalize_market(market or "") in {"USStock", "HKStock", "AStock"} for market in markets):
+        # Match the fetcher's allowance for short equity sessions, weekends,
+        # and holidays so the UI never offers a range the server rejects.
+        days = max(days, 7, math.ceil(bars * hours / 4 * 7 / 5 * 1.5))
+    return days
 
 
 def backtest_range_policy_metadata(
@@ -137,7 +149,9 @@ def backtest_range_policy_metadata(
     normalized_timeframe = normalize_backtest_timeframe(timeframe)
     timeframe_seconds = _TIMEFRAME_SECONDS.get(normalized_timeframe, 86400)
     normalized_warmup_bars = max(0, int(warmup_bars or 0))
-    warmup_days = backtest_warmup_calendar_days(normalized_timeframe, normalized_warmup_bars)
+    warmup_days = backtest_warmup_calendar_days(
+        normalized_timeframe, normalized_warmup_bars, normalized_markets
+    )
     return {
         "timeframe": normalized_timeframe,
         "market": market,
