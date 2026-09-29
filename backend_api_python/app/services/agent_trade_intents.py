@@ -248,6 +248,28 @@ def set_policy(user_id: int, broker: str, account_ref: str, body: dict[str, Any]
                  })),
             )
             if mode == "EMERGENCY_STOP":
+                if broker == "*":
+                    # Clearing the global stop must never resurrect a still-
+                    # unexpired PAPER_AUTO account policy. Downgrade every
+                    # account first, with a separate audit row for each.
+                    cur.execute(
+                        """INSERT INTO qd_agent_policy_audit
+                             (user_id, broker, account_ref, actor_user_id,
+                              previous_mode, new_mode, previous_policy, new_policy)
+                           SELECT user_id, broker, account_ref, %s, mode,
+                                  'PLAN_ONLY', to_jsonb(p),
+                                  jsonb_build_object('mode', 'PLAN_ONLY',
+                                                     'reason', 'global_emergency_stop')
+                           FROM qd_agent_trading_policies p
+                           WHERE user_id=%s AND broker <> '*' AND mode <> 'PLAN_ONLY'""",
+                        (user_id, user_id),
+                    )
+                    cur.execute(
+                        """UPDATE qd_agent_trading_policies
+                           SET mode='PLAN_ONLY', enabled_until=NULL, updated_at=NOW()
+                           WHERE user_id=%s AND broker <> '*'""",
+                        (user_id,),
+                    )
                 cur.execute(
                     """UPDATE qd_agent_trade_intents SET status='EXPIRED', updated_at=NOW()
                        WHERE user_id=%s AND status='PROPOSED'

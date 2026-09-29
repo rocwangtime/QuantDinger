@@ -69,7 +69,7 @@ class _Cursor:
         self.statements.append((statement, params))
         if "INSERT INTO qd_agent_trade_intents" in statement:
             self.result = {"id": 7}
-        elif "UPDATE qd_agent_trade_intents SET status=" in statement:
+        elif "UPDATE qd_agent_trade_intents SET status=" in statement and "RETURNING *" in statement:
             self.result = {"id": 7, "status": params[0], "paper_order_uid": params[4]}
         else:
             self.result = None
@@ -174,3 +174,18 @@ def test_risk_uses_fill_price_when_sell_limit_understates_notional():
     )
     assert accepted is False
     assert result["reason"] == "max_order_notional"
+
+
+def test_global_emergency_stop_downgrades_active_account_modes(monkeypatch):
+    db = _fake_db(monkeypatch)
+    monkeypatch.setattr(intents, "_policy_row", lambda *_a, **_k: {
+        "mode": "PLAN_ONLY", "configured_mode": "PLAN_ONLY",
+    })
+    monkeypatch.setattr(intents, "get_policy", lambda *_a: {"mode": "EMERGENCY_STOP"})
+    result = intents.set_policy(1, "*", "*", {
+        "mode": "EMERGENCY_STOP", "confirm_mode": "EMERGENCY_STOP",
+    })
+    statements = [sql for sql, _ in db.cur.statements]
+    assert result["mode"] == "EMERGENCY_STOP"
+    assert any("SET mode='PLAN_ONLY', enabled_until=NULL" in sql for sql in statements)
+    assert any("reason', 'global_emergency_stop'" in sql for sql in statements)

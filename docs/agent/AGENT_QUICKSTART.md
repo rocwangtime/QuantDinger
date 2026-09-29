@@ -146,7 +146,9 @@ request is not marked terminal until separate broker reconciliation confirms
 it. It **does not liquidate positions**, stop separately deployed strategies,
 or sign out of Futu OpenD. The human administrator must explicitly clear the
 global stop before new Agent proposals are accepted. If a strategy is already
-running, pause it via its own operator controls as a separate action.
+running, pause it via its own operator controls as a separate action. A global
+stop also downgrades every account's Agent `PAPER_AUTO` policy to `PLAN_ONLY`,
+so clearing the stop never silently resumes prior Agent automation.
 
 Stopping autonomous submissions, cancelling Agent-owned open orders, and
 liquidating a position are distinct actions. The first uses the human policy
