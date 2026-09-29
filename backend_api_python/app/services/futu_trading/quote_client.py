@@ -77,6 +77,68 @@ class FutuQuoteClient:
         if not self.connected and not self.connect():
             raise ConnectionError("Cannot connect to FutuOpenD quote service")
 
+    def get_status(self) -> Dict[str, Any]:
+        """Expose only quote-service health, never OpenD login identifiers."""
+        with self._lock:
+            self._ensure_connected()
+            ft = _ensure_futu()
+            ret, data = self._quote_ctx.get_global_state()
+            if ret != ft.RET_OK or not isinstance(data, dict):
+                raise RuntimeError("FUTU_GLOBAL_STATE_UNAVAILABLE")
+            return {
+                "connected": True,
+                "quote_logged_in": bool(data["qot_logined"]) if "qot_logined" in data else None,
+                "us_market_state": str(data.get("market_us") or "UNKNOWN"),
+                "quote_permissions": "UNVERIFIED",
+            }
+
+    def get_subscription_quota(self) -> Dict[str, Any]:
+        with self._lock:
+            self._ensure_connected()
+            ft = _ensure_futu()
+            ret, data = self._quote_ctx.query_subscription(is_all_conn=True)
+            if ret != ft.RET_OK or not isinstance(data, dict):
+                raise RuntimeError("FUTU_SUBSCRIPTION_QUOTA_UNAVAILABLE")
+            return {
+                "total_used": int(data["total_used"]) if data.get("total_used") is not None else None,
+                "own_used": int(data["own_used"]) if data.get("own_used") is not None else None,
+                "remaining": int(data["remain"]) if data.get("remain") is not None else None,
+            }
+
+    def get_market_state(self, symbol: str, market_type: str = "USStock") -> Dict[str, Any]:
+        with self._lock:
+            self._ensure_connected()
+            ft = _ensure_futu()
+            code = to_futu_code(symbol, market_type)
+            ret, data = self._quote_ctx.get_market_state([code])
+            if ret != ft.RET_OK or data is None or len(data) == 0:
+                raise RuntimeError("FUTU_MARKET_STATE_UNAVAILABLE")
+            row = data.iloc[0] if hasattr(data, "iloc") else data[0]
+            return {"symbol": format_display_symbol(code),
+                    "market_state": str(dict(row).get("market_state") or "UNKNOWN")}
+
+    def get_order_book(self, symbol: str, *, depth: int = 5,
+                       market_type: str = "USStock") -> Dict[str, Any]:
+        """Subscribed order book for diagnostics; it is not an execution permit."""
+        with self._lock:
+            self._ensure_connected()
+            ft = _ensure_futu()
+            code = to_futu_code(symbol, market_type)
+            ret, data = self._quote_ctx.subscribe([code], [ft.SubType.ORDER_BOOK], subscribe_push=False)
+            if ret != ft.RET_OK:
+                raise RuntimeError("FUTU_ORDER_BOOK_SUBSCRIBE_FAILED")
+            ret, data = self._quote_ctx.get_order_book(code, num=max(1, min(int(depth), 10)))
+            if ret != ft.RET_OK or not isinstance(data, dict):
+                raise RuntimeError("FUTU_ORDER_BOOK_UNAVAILABLE")
+            return {
+                "symbol": format_display_symbol(code),
+                "bid": [[safe_float(level[0]), safe_float(level[1]), int(level[2])]
+                        for level in data.get("Bid", [])],
+                "ask": [[safe_float(level[0]), safe_float(level[1]), int(level[2])]
+                        for level in data.get("Ask", [])],
+                "execution_eligible": False,
+            }
+
     def get_quote(self, symbol: str, market_type: str = "HKStock") -> Dict[str, Any]:
         with self._lock:
             self._ensure_connected()

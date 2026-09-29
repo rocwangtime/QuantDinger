@@ -28,6 +28,16 @@ class ToolDefinition:
     enabled: bool = True
     priority: int = 50
     safety: str = ""
+    layer: str = ""  # observe / plan / execute / manage
+
+    def effective_layer(self) -> str:
+        if self.layer:
+            return self.layer
+        if self.read_only:
+            return "observe"
+        if self.risk_level == "trading":
+            return "execute"
+        return "manage"
 
     def pick(self, language: str, zh: str, en: str) -> str:
         return zh if (language or "").lower().startswith("zh") else en
@@ -48,6 +58,7 @@ class ToolDefinition:
             "enabled": self.enabled,
             "priority": self.priority,
             "safety": self.safety,
+            "layer": self.effective_layer(),
         }
 
     def prompt_line(self, language: str) -> str:
@@ -59,7 +70,7 @@ class ToolDefinition:
         return (
             f"- {self.id}: {label}. {description} "
             f"Requires: {requires}. Produces: {produces}. "
-            f"Risk: {self.risk_level}. Read-only: {self.read_only}.{safety}"
+            f"Layer: {self.effective_layer()}. Risk: {self.risk_level}. Read-only: {self.read_only}.{safety}"
         )
 
 
@@ -633,6 +644,9 @@ _MCP_EXTENSION_ROUTES = {
     "cancel_agent_orders": "/api/agent/v1/agent-orders/cancel",
     "get_trading_policy": "/api/agent/v1/trading-policy",
     "get_futu_quote": "/api/agent/v1/trading/accounts/{credential_id}/futu-quote",
+    "get_futu_quote_status": "/api/agent/v1/trading/accounts/{credential_id}/futu-quote-status",
+    "get_futu_order_book": "/api/agent/v1/trading/accounts/{credential_id}/futu-order-book",
+    "place_platform_paper_order": "/api/agent/v1/paper-orders/place",
     "cancel_job": "/api/agent/v1/jobs/{job_id}/cancel",
     "link_indicator_config": "/api/agent/v1/indicators/link-config",
     "list_universes": "/api/agent/v1/research/universes",
@@ -660,6 +674,7 @@ _MCP_EXTENSION_ROUTES = {
 _MCP_EXTENSION_WRITES = {
     "emergency_stop_trading",
     "create_trade_intent",
+    "place_platform_paper_order",
     "cancel_trade_intent",
     "cancel_agent_orders",
     "cancel_job",
@@ -693,7 +708,7 @@ MCP_AGENT_TOOLS = MCP_AGENT_TOOLS + tuple(
         route=route,
         produces=("tool_result",),
         risk_level=("trading" if name in {
-            "create_trade_intent", "cancel_trade_intent", "cancel_agent_orders",
+            "create_trade_intent", "cancel_trade_intent", "cancel_agent_orders", "place_platform_paper_order",
         } else "write_config" if name in _MCP_EXTENSION_WRITES else "read"),
         read_only=name not in _MCP_EXTENSION_WRITES,
         priority=80,
@@ -702,6 +717,9 @@ MCP_AGENT_TOOLS = MCP_AGENT_TOOLS + tuple(
             if name in _MCP_EXTENSION_WRITES
             else ""
         ),
+        layer=("plan" if name in {"create_trade_intent", "cancel_trade_intent"}
+               else "execute" if name in {"place_platform_paper_order", "cancel_agent_orders", "emergency_stop_trading"}
+               else ""),
     )
     for name, route in _MCP_EXTENSION_ROUTES.items()
 )
@@ -725,8 +743,8 @@ def build_tool_prompt(language: str = "zh-CN", intent: str = "") -> str:
     tools = sorted(tools, key=lambda tool: (-tool.priority, tool.id))[:8]
     lines = [
         "[QuantDinger tool registry]",
-        "These are available system workflows. Treat write tools as user-confirmed handoffs, not autonomous execution.",
-        "Live trading boundary: strategy deployments are created stopped. Quick live orders require explicit user confirmation, T scope, a live-capable token, and server-side enablement.",
+        "Tool layers: observe reads; plan records proposals; execute mutates paper/broker state; manage changes settings. A plan tool must never be treated as execution authorization.",
+        "Direct platform paper orders require T scope and a human-set, expiring PAPER_AUTO policy. Futu SIMULATE Agent execution is not exposed; REAL trading remains unavailable in this workflow.",
     ]
     lines.extend(tool.prompt_line(language) for tool in tools)
     return "\n".join(lines)

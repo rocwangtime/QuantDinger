@@ -134,6 +134,41 @@ def test_quote_client_rejects_remote_host_before_loading_sdk(monkeypatch):
     ensure_futu.assert_not_called()
 
 
+def test_quote_diagnostics_are_read_only_and_hide_login_identifiers(monkeypatch):
+    fake_ft = MagicMock(RET_OK=0)
+    fake_ft.SubType.ORDER_BOOK = "ORDER_BOOK"
+    monkeypatch.setattr("app.services.futu_trading.quote_client._ensure_futu", lambda: fake_ft)
+    client = FutuQuoteClient(FutuConfig())
+    ctx = MagicMock()
+    client._quote_ctx = ctx
+    client._connected = True
+    ctx.get_global_state.return_value = (0, {
+        "qot_logined": True, "market_us": "MORNING", "user_id": 123,
+    })
+    ctx.query_subscription.return_value = (0, {
+        "total_used": 3, "own_used": 1, "remain": 297, "sub_list": {"QUOTE": ["US.AAPL"]},
+    })
+    ctx.get_market_state.return_value = (0, [{"market_state": "MORNING"}])
+    ctx.subscribe.return_value = (0, "ok")
+    ctx.get_order_book.return_value = (0, {
+        "Bid": [(100.0, 5, 2, {})], "Ask": [(100.1, 7, 1, {})],
+    })
+
+    assert client.get_status() == {
+        "connected": True, "quote_logged_in": True, "us_market_state": "MORNING",
+        "quote_permissions": "UNVERIFIED",
+    }
+    assert client.get_subscription_quota() == {
+        "total_used": 3, "own_used": 1, "remaining": 297,
+    }
+    assert client.get_market_state("AAPL")["market_state"] == "MORNING"
+    book = client.get_order_book("AAPL", depth=3)
+    assert book["bid"] == [[100.0, 5.0, 2]]
+    assert book["execution_eligible"] is False
+    ctx.subscribe.assert_called_once_with(["US.AAPL"], ["ORDER_BOOK"], subscribe_push=False)
+    assert not hasattr(client, "_trade_ctx")
+
+
 def test_four_hour_resampling_aligns_to_first_exchange_session_bar():
     source = FutuDataSource(market="USStock")
     start = datetime(2026, 1, 5, 14, 30, tzinfo=timezone.utc)

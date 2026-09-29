@@ -13,12 +13,13 @@ from typing import Any
 from app.services.futu_trading.timezones import futu_time_key_to_timestamp
 
 
-def describe_futu_quote(symbol: str, snapshot: dict[str, Any], *, now: float | None = None) -> dict:
+def describe_futu_quote(symbol: str, snapshot: dict[str, Any], *, now: float | None = None,
+                        market_type: str = "USStock") -> dict:
     received = float(now if now is not None else time.time())
     raw = snapshot.get("raw") if isinstance(snapshot.get("raw"), dict) else {}
     stamp = raw.get("update_time") or raw.get("time_key") or raw.get("time")
     try:
-        as_of = futu_time_key_to_timestamp(stamp, "USStock") if stamp else None
+        as_of = futu_time_key_to_timestamp(stamp, market_type) if stamp else None
     except (TypeError, ValueError):
         as_of = None
     try:
@@ -35,7 +36,7 @@ def describe_futu_quote(symbol: str, snapshot: dict[str, Any], *, now: float | N
     stale = age is None or age < -2 or age > 10 or price <= 0
     return {
         "symbol": symbol.upper(),
-        "market": "US",
+        "market": "HK" if market_type == "HKStock" else "US",
         "price": price or None,
         "bid": bid or None,
         "ask": ask or None,

@@ -1,6 +1,10 @@
 """Futu live strategies must stop on stale quotes and recover after OpenD reconnects."""
 
+from datetime import datetime
 from unittest.mock import MagicMock
+from zoneinfo import ZoneInfo
+
+import pytest
 
 from app.services.futu_trading.quote_feed import FutuQuoteFeed, fresh_futu_quote_prices
 
@@ -45,7 +49,9 @@ def test_futu_quote_feed_reconnects_after_poll_failure(monkeypatch):
         def get_quote(self, *_args):
             if len(created) == 1:
                 raise ConnectionError("OpenD disconnected")
-            return {"success": True, "last": 701.0}
+            return {"success": True, "last": 701.0, "raw": {
+                "update_time": datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S"),
+            }}
 
         def disconnect(self):
             self.disconnected = True
@@ -63,3 +69,25 @@ def test_futu_quote_feed_reconnects_after_poll_failure(monkeypatch):
     assert feed._prices == {"SPY": 701.0}
     assert feed.last_error == ""
     assert feed._client is None
+
+
+def test_repeated_old_snapshot_never_refreshes_strategy_quote_clock(monkeypatch):
+    now = datetime(2026, 9, 29, 9, 30, 30, tzinfo=ZoneInfo("America/New_York")).timestamp()
+    monkeypatch.setattr("app.services.futu_trading.quote_feed.time.time", lambda: now)
+    feed = _feed()
+    feed._connected = True
+    feed._prices = {"SPY": 700.0}
+    feed._price_updated_at = {"SPY": now - 20}
+    feed._updated_at = now - 20
+    feed._client = MagicMock()
+    feed._client.get_quote.return_value = {
+        "success": True, "last": 701.0,
+        "raw": {"update_time": "2026-09-29 09:30:00"},
+    }
+
+    with pytest.raises(ConnectionError, match="FUTU_QUOTE_STALE_OR_UNTIMED"):
+        feed._poll_once()
+
+    assert fresh_futu_quote_prices(feed.snapshot()) == {}
+    assert feed._prices["SPY"] == 700.0
+    assert feed._price_updated_at["SPY"] == now - 20

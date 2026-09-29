@@ -134,7 +134,10 @@ class FutuQuoteFeed:
     def _poll_once(self) -> None:
         if self._client is None:
             return
+        from app.services.futu_trading.execution_quote import describe_futu_quote
+
         updated = False
+        updated_times: list[float] = []
         attempted = 0
         failed = 0
         for item in self.instruments:
@@ -147,11 +150,16 @@ class FutuQuoteFeed:
             try:
                 quote = self._client.get_quote(symbol, market)
                 if isinstance(quote, dict) and quote.get("success"):
-                    price = float(quote.get("last") or quote.get("close") or 0.0)
-                    if price > 0:
-                        self._prices[key] = price
-                        self._price_updated_at[key] = time.time()
+                    provenance = describe_futu_quote(symbol, quote, now=time.time(),
+                                                     market_type=market)
+                    if not provenance["is_stale"]:
+                        self._prices[key] = float(provenance["price"])
+                        self._price_updated_at[key] = float(provenance["as_of"])
+                        updated_times.append(float(provenance["as_of"]))
                         updated = True
+                    else:
+                        self._last_error = "FUTU_QUOTE_STALE_OR_UNTIMED"
+                        failed += 1
                 else:
                     failed += 1
             except Exception as exc:
@@ -160,6 +168,6 @@ class FutuQuoteFeed:
         if attempted and failed == attempted:
             raise ConnectionError(self._last_error or "Futu quotes unavailable")
         if updated:
-            self._updated_at = time.time()
+            self._updated_at = max(updated_times)
             self._connected = True
             self._last_error = ""

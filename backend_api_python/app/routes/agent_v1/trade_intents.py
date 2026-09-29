@@ -18,7 +18,7 @@ from . import agent_v1_bp
 from ._helpers import envelope, error, get_json_or_400
 
 
-def submit_trade_intent_request(body: dict):
+def submit_trade_intent_request(body: dict, *, require_paper_execution: bool = False):
     """Shared implementation for the new endpoint and legacy quick-trade alias."""
     try:
         from app.services.agent_trade_intents import normalize_order
@@ -31,6 +31,7 @@ def submit_trade_intent_request(body: dict):
             current_user_id(), current_token(), body,
             (request.headers.get("Idempotency-Key") or "").strip(),
             quote_provider=_last_price,
+            require_paper_execution=require_paper_execution,
         )
     except IntentError as exc:
         return error(exc.status, str(exc), http=exc.status)
@@ -42,6 +43,18 @@ def submit_trade_intent_request(body: dict):
 def create_trade_intent():
     body, err = get_json_or_400()
     return err if err else submit_trade_intent_request(body)
+
+
+@agent_v1_bp.route("/paper-orders/place", methods=["POST"])
+@agent_required(SCOPE_T)
+def place_platform_paper_order():
+    """Explicit direct-order tool for internal paper; never reaches OpenD."""
+    body, err = get_json_or_400()
+    if err:
+        return err
+    if body.get("broker", "platform") != "platform" or body.get("credential_id"):
+        return error(403, "This endpoint is for internal platform paper only", http=403)
+    return submit_trade_intent_request(body, require_paper_execution=True)
 
 
 @agent_v1_bp.route("/trade-intents", methods=["GET"])

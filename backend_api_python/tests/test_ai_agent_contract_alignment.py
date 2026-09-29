@@ -94,6 +94,15 @@ def test_mcp_metadata_matches_exported_tools_and_documented_routes():
             assert _normalize_path(tool.route) in documented, tool.id
 
 
+def test_trading_tool_layers_keep_proposals_separate_from_execution():
+    tools = {tool.id: tool for tool in MCP_AGENT_TOOLS}
+    assert tools["mcp.get_futu_quote_status"].effective_layer() == "observe"
+    assert tools["mcp.get_futu_order_book"].effective_layer() == "observe"
+    assert tools["mcp.create_trade_intent"].effective_layer() == "plan"
+    assert tools["mcp.place_platform_paper_order"].effective_layer() == "execute"
+    assert "futu" not in tools["mcp.place_platform_paper_order"].route
+
+
 def test_builtin_skill_registry_does_not_advertise_retired_experiments():
     skills = list_skills("en-US")
     by_id = {item["id"]: item for item in skills}
