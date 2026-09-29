@@ -744,10 +744,10 @@
       "get": { "summary": "List tenant trade intents", "x-scope-class": "R", "responses": { "200": { "description": "OK" } } }
     },
     "/api/agent/v1/trade-intents/{intent_id}": {
-      "get": { "summary": "Get one tenant trade intent", "x-scope-class": "R", "responses": { "200": { "description": "OK" } } }
+      "get": { "summary": "Get one tenant trade intent", "x-scope-class": "R", "parameters": [{ "in": "path", "name": "intent_id", "required": true, "schema": { "type": "integer" } }], "responses": { "200": { "description": "OK" } } }
     },
     "/api/agent/v1/trade-intents/{intent_id}/cancel": {
-      "post": { "summary": "Cancel a proposed intent", "x-scope-class": "T", "responses": { "200": { "description": "Cancelled" }, "409": { "description": "Not a proposal" } } }
+      "post": { "summary": "Cancel a proposed intent", "x-scope-class": "T", "parameters": [{ "in": "path", "name": "intent_id", "required": true, "schema": { "type": "integer" } }], "responses": { "200": { "description": "Cancelled" }, "409": { "description": "Not a proposal" } } }
     },
     "/api/agent/v1/agent-orders/cancel": {
       "post": { "summary": "Best-effort cancel Agent-owned open orders without stopping policy or liquidating", "x-scope-class": "T", "responses": { "200": { "description": "Cancellation requests; verify every legacy broker order manually" } } }
