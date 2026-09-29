@@ -1,0 +1,37 @@
+# Use immutable CI-built images for the US SIMULATE deployment.
+# Layer after docker-compose.yml and docker-compose.futu-paper.yml.
+# FUTU_*_IMAGE_REF must be a full GHCR image reference pinned to a commit tag
+# or, preferably, a sha256 digest. Never put broker credentials in CI images.
+services:
+  migration:
+    build: !reset null
+    image: ${FUTU_BACKEND_IMAGE_REF:?Set FUTU_BACKEND_IMAGE_REF to a pinned backend image}
+    pull_policy: missing
+  backend:
+    build: !reset null
+    image: ${FUTU_BACKEND_IMAGE_REF:?Set FUTU_BACKEND_IMAGE_REF to a pinned backend image}
+    pull_policy: missing
+  trading-worker:
+    build: !reset null
+    image: ${FUTU_BACKEND_IMAGE_REF:?Set FUTU_BACKEND_IMAGE_REF to a pinned backend image}
+    pull_policy: missing
+  scheduler-worker:
+    build: !reset null
+    image: ${FUTU_BACKEND_IMAGE_REF:?Set FUTU_BACKEND_IMAGE_REF to a pinned backend image}
+    pull_policy: missing
+  opend-relay:
+    build: !reset null
+    image: ${FUTU_BACKEND_IMAGE_REF:?Set FUTU_BACKEND_IMAGE_REF to a pinned backend image}
+    pull_policy: missing
+  celery-worker:
+    build: !reset null
+    image: ${FUTU_BACKEND_IMAGE_REF:?Set FUTU_BACKEND_IMAGE_REF to a pinned backend image}
+    pull_policy: missing
+  celery-beat:
+    build: !reset null
+    image: ${FUTU_BACKEND_IMAGE_REF:?Set FUTU_BACKEND_IMAGE_REF to a pinned backend image}
+    pull_policy: missing
+  frontend:
+    build: !reset null
+    image: ${FUTU_FRONTEND_IMAGE_REF:?Set FUTU_FRONTEND_IMAGE_REF to a pinned frontend image}
+    pull_policy: missing

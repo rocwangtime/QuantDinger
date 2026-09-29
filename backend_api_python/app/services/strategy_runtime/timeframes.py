@@ -92,6 +92,8 @@ def load_live_frequency_frames(
     candidates: list[dict[str, object]],
     manifest: StrategyManifest,
     end_date: datetime,
+    exchange_config: dict[str, object] | None = None,
+    strict_data_source: bool = False,
     warn: Callable[[str], None] | None = None,
 ) -> dict[str, dict[str, pd.DataFrame]]:
     """Load a complete live frame bundle for all declared strategy timeframes."""
@@ -100,11 +102,17 @@ def load_live_frequency_frames(
         - timedelta(days=live_history_days(frequency, manifest.warmup_bars, candidates))
         for frequency in manifest.frequencies
     }
+    fetch_options = {}
+    if exchange_config is not None:
+        fetch_options["exchange_config"] = exchange_config
+    if strict_data_source:
+        fetch_options["strict_data_source"] = True
     bundles, skipped = service.fetch_frequency_frames(
         candidates,
         manifest.frequencies,
         start_dates,
         end_date,
+        **fetch_options,
     )
     driving_frequency = manifest.driving_frequency
     driving_frames = bundles.get(driving_frequency, {})

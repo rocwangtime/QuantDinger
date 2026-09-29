@@ -1,0 +1,26 @@
+[Unit]
+Description=Futu OpenD for QuantDinger SIMULATE trading
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=futuopend
+Group=futuopend
+WorkingDirectory=/opt/futu-opend
+Environment=HOME=/var/lib/futuopend
+EnvironmentFile=/etc/quantdinger/futu-opend.env
+ExecStart=/opt/futu-opend/FutuOpenD -login_account=${FUTU_LOGIN_ACCOUNT} -login_by_remember=1 -api_ip=127.0.0.1 -api_port=11111 -console=1 -log_level=warning
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/futu-opend /var/lib/futuopend
+
+[Install]
+WantedBy=multi-user.target

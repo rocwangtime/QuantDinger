@@ -35,6 +35,7 @@ _PREFIX_TAGS: list[tuple[str, str]] = [
     ("/api/portfolio", "Portfolio"),
     ("/api/ibkr", "IBKR"),
     ("/api/alpaca", "Alpaca"),
+    ("/api/futu", "Futu"),
     ("/api/global-market", "GlobalMarket"),
     ("/api/community", "Community"),
     ("/api/fast-analysis", "FastAnalysis"),
@@ -78,6 +79,7 @@ def register_human_blueprints(api: Api) -> None:
     from app.routes.portfolio import portfolio_blp
     from app.routes.ibkr import ibkr_blp
     from app.routes.alpaca import alpaca_blp
+    from app.routes.futu import futu_blp
     from app.routes.global_market import global_market_blp
     from app.routes.community import community_blp
     from app.routes.fast_analysis import fast_analysis_blp
@@ -107,6 +109,7 @@ def register_human_blueprints(api: Api) -> None:
         (portfolio_blp, "/api/portfolio"),
         (ibkr_blp, "/api/ibkr"),
         (alpaca_blp, "/api/alpaca"),
+        (futu_blp, "/api/futu"),
         (global_market_blp, "/api/global-market"),
         (community_blp, "/api/community"),
         (fast_analysis_blp, "/api/fast-analysis"),

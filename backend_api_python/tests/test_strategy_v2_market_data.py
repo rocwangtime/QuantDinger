@@ -642,3 +642,62 @@ def test_gate_hk_stock_shared_cache_uses_trading_calendar_coverage(monkeypatch):
     assert len(first) == 5
     assert second.equals(first)
     assert calls == [True]
+
+
+def test_futu_config_and_strict_mode_are_forwarded_without_secrets_in_cache(monkeypatch):
+    captured = {}
+    cache_keys = []
+    config = {
+        "exchange_id": "futu",
+        "futu_host": "host.docker.internal",
+        "futu_port": 11111,
+        "trade_market": "US",
+        "unlock_password": "must-not-enter-cache-key",
+    }
+
+    def get_kline(**kwargs):
+        captured.update(kwargs)
+        return [], None
+
+    monkeypatch.setattr(market_data.DataSourceFactory, "get_kline_with_diagnostics", get_kline)
+    monkeypatch.setattr(market_data._cache, "get", lambda key: cache_keys.append(key))
+
+    market_data.load_strategy_frame(
+        "USStock",
+        "AAPL",
+        "1d",
+        datetime(2026, 8, 1),
+        datetime(2026, 8, 2),
+        market_type="spot",
+        exchange_id="futu",
+        exchange_config=config,
+        strict_data_source=True,
+    )
+
+    assert captured["exchange_config"] is config
+    assert captured["allow_futu_fallback"] is False
+    assert captured["strict_data_source"] is True
+    assert "host.docker.internal" in cache_keys[0]
+    assert "must-not-enter-cache-key" not in cache_keys[0]
+
+
+def test_strict_market_data_failure_is_not_silenced(monkeypatch):
+    monkeypatch.setattr(market_data._cache, "get", lambda _key: None)
+
+    def get_kline(**_kwargs):
+        raise RuntimeError("FUTU_OPEND_UNREACHABLE")
+
+    monkeypatch.setattr(market_data.DataSourceFactory, "get_kline", get_kline)
+
+    with pytest.raises(RuntimeError, match="executionMarketDataUnavailable"):
+        market_data.load_strategy_frame(
+            "HKStock",
+            "00700.HK",
+            "1d",
+            datetime(2026, 8, 1),
+            datetime(2026, 8, 2),
+            market_type="spot",
+            exchange_id="futu",
+            exchange_config={"futu_host": "127.0.0.1"},
+            strict_data_source=True,
+        )

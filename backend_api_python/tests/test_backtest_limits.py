@@ -7,7 +7,10 @@ from app.services.backtest_limits import (
     backtest_range_policy_metadata,
     validate_backtest_range,
 )
-from app.services.strategy_v2.service import StrategyV2BacktestService
+from app.services.strategy_v2.service import (
+    StrategyV2BacktestService,
+    _backtest_member_data_kwargs,
+)
 
 
 def test_forex_intraday_range_error_includes_actionable_recommendation():
@@ -89,8 +92,31 @@ def test_policy_metadata_uses_strictest_market_and_normalizes_timeframe():
     assert policy["timeframe"] == "1H"
     assert policy["market"] == "USStock"
     assert policy["maxDays"] == 700
-    assert policy["warmupDays"] == 2
-    assert policy["maxSelectedDays"] == 698
+    assert policy["warmupDays"] == 13
+    assert policy["maxSelectedDays"] == 687
+
+
+def test_us_stock_minute_policy_includes_equity_warmup_calendar_buffer():
+    policy = backtest_range_policy_metadata(
+        markets=["USStock"], timeframe="1m", warmup_bars=3
+    )
+
+    assert policy["warmupDays"] == 7
+    assert policy["maxSelectedDays"] == 23
+
+
+def test_futu_backtest_data_source_requires_explicit_opt_in(monkeypatch):
+    member = {"market": "USStock", "symbol": "SPY"}
+    monkeypatch.delenv("STRATEGY_V2_BACKTEST_STOCK_DATA_SOURCE", raising=False)
+    assert _backtest_member_data_kwargs(member, None, False)["exchange_id"] == ""
+
+    monkeypatch.setenv("STRATEGY_V2_BACKTEST_STOCK_DATA_SOURCE", "futu")
+    selected = _backtest_member_data_kwargs(member, None, False)
+    assert selected["exchange_id"] == "futu"
+    assert selected["strict_data_source"] is True
+    assert _backtest_member_data_kwargs({"market": "Crypto", "symbol": "BTC/USDT"}, None, False)["exchange_id"] == ""
+    assert _backtest_member_data_kwargs({**member, "exchange_id": "ibkr"}, None, False)["exchange_id"] == "ibkr"
+    assert _backtest_member_data_kwargs(member, {"exchange_id": "alpaca"}, False)["exchange_id"] == ""
 
 
 def test_service_rejects_one_year_of_one_minute_data_before_fetching():

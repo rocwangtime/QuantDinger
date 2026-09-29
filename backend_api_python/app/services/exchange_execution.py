@@ -86,7 +86,16 @@ def safe_exchange_config_for_log(cfg: Dict[str, Any]) -> Dict[str, Any]:
     )
 
     out = redact_partner_attribution(strip_partner_config(cfg))
-    for k in ["api_key", "secret_key", "passphrase", "apiKey", "secret", "password"]:
+    for k in [
+        "api_key",
+        "secret_key",
+        "passphrase",
+        "apiKey",
+        "secret",
+        "password",
+        "unlock_password",
+        "unlockPassword",
+    ]:
         if k in out and out.get(k):
             out[k] = mask_secret(str(out.get(k)))
     return out
@@ -194,11 +203,14 @@ def resolve_exchange_config(exchange_config: Dict[str, Any], user_id: int = 1) -
 
     merged: Dict[str, Any] = {}
     credential_id = exchange_config.get("credential_id") or exchange_config.get("credentials_id")
+    loaded_futu_credential_id = 0
     try:
         if credential_id:
             base = _load_credential_config(int(credential_id), user_id=user_id)
             if isinstance(base, dict):
                 merged.update(base)
+                if str(base.get("exchange_id") or "").strip().lower() == "futu":
+                    loaded_futu_credential_id = int(credential_id)
     except Exception as e:
         logger.warning(f"Failed to load credential_id={credential_id}: {e}")
 
@@ -213,6 +225,12 @@ def resolve_exchange_config(exchange_config: Dict[str, Any], user_id: int = 1) -
         "use_testnet", "is_testnet", "isTestnet", "sandbox", "paper_trading", "paperTrading",
         "base_url", "baseUrl", "futures_base_url", "futuresBaseUrl",
     }
+    if str(merged.get("exchange_id") or "").lower() == "futu":
+        credential_owned_keys.update({
+            "futu_host", "futu_port", "host", "port", "trade_env", "trade_market", "tradeMarket",
+            "security_firm", "securityFirm", "acc_id", "accId", "unlock_password", "unlockPassword",
+            "is_encrypt", "isEncrypt",
+        })
 
     # Overlay strategy-level settings, excluding credential-owned and revenue fields.
     for k, v in strip_partner_config(exchange_config).items():
@@ -224,6 +242,11 @@ def resolve_exchange_config(exchange_config: Dict[str, Any], user_id: int = 1) -
             continue
         merged[k] = v
 
+    if str(merged.get("exchange_id") or "").lower() == "futu":
+        # Broker submission permission is tied to the authenticated owner and
+        # the saved credential, never to a caller-supplied inline account ID.
+        merged["_operator_user_id"] = int(user_id)
+        merged["_operator_credential_id"] = loaded_futu_credential_id
     return merged
 
 
@@ -281,4 +304,3 @@ def coalesce_exchange_config_from_payload(payload: Dict[str, Any]) -> Dict[str, 
             ex_cfg["credential_id"] = cred
 
     return ex_cfg
-

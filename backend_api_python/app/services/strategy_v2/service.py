@@ -8,7 +8,7 @@ import os
 from time import perf_counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 import pandas as pd
 
@@ -469,21 +469,22 @@ class StrategyV2BacktestService:
         frequency: str,
         start_date: datetime,
         end_date: datetime,
+        *,
+        exchange_config: Optional[dict[str, Any]] = None,
+        strict_data_source: bool = False,
     ) -> tuple[dict[str, pd.DataFrame], list[dict[str, Any]]]:
         frames: dict[str, pd.DataFrame] = {}
         skipped: list[dict[str, Any]] = []
 
         def fetch(member: dict[str, Any]):
+            kwargs = _backtest_member_data_kwargs(member, exchange_config, strict_data_source)
             frame = self.frame_fetcher(
                 member["market"],
                 member["symbol"],
                 frequency,
                 start_date,
                 end_date,
-                market_type=member.get("market_type") or "",
-                exchange_id=member.get("exchange_id") or "",
-                instrument_id=member.get("instrument_id") or "",
-                api_family=member.get("api_family") or "",
+                **kwargs,
             )
             return member, frame
 
@@ -501,6 +502,10 @@ class StrategyV2BacktestService:
                         continue
                     frames[member["key"]] = frame
                 except Exception as exc:
+                    if _backtest_member_data_kwargs(member, exchange_config, strict_data_source).get("strict_data_source"):
+                        raise RuntimeError(
+                            f"strategyV2.executionMarketDataUnavailable:{exc}"
+                        ) from exc
                     if isinstance(exc, MarketDataUnavailableError):
                         skipped.append({
                             "symbol": member.get("key") or "",
@@ -517,6 +522,9 @@ class StrategyV2BacktestService:
         frequencies: tuple[str, ...],
         start_dates: dict[str, datetime],
         end_date: datetime,
+        *,
+        exchange_config: Optional[dict[str, Any]] = None,
+        strict_data_source: bool = False,
     ) -> tuple[dict[str, dict[str, pd.DataFrame]], list[dict[str, Any]]]:
         """Load every declared timeframe and retain only complete symbol bundles."""
         bundles: dict[str, dict[str, pd.DataFrame]] = {
@@ -525,16 +533,14 @@ class StrategyV2BacktestService:
         skipped: list[dict[str, Any]] = []
 
         def fetch(member: dict[str, Any], frequency: str):
+            kwargs = _backtest_member_data_kwargs(member, exchange_config, strict_data_source)
             frame = self.frame_fetcher(
                 member["market"],
                 member["symbol"],
                 frequency,
                 start_dates[frequency],
                 end_date,
-                market_type=member.get("market_type") or "",
-                exchange_id=member.get("exchange_id") or "",
-                instrument_id=member.get("instrument_id") or "",
-                api_family=member.get("api_family") or "",
+                **kwargs,
             )
             return member, frequency, frame
 
@@ -565,6 +571,10 @@ class StrategyV2BacktestService:
                         continue
                     bundles[frequency][member["key"]] = frame
                 except Exception as exc:
+                    if _backtest_member_data_kwargs(member, exchange_config, strict_data_source).get("strict_data_source"):
+                        raise RuntimeError(
+                            f"strategyV2.executionMarketDataUnavailable:{exc}"
+                        ) from exc
                     item: dict[str, Any] = {
                         "symbol": member.get("key") or "",
                         "frequency": frequency,
@@ -718,21 +728,43 @@ def _validate_warmup_history(frequency_frames, warmup_bars: int, start_date: dat
     validate_warmup(frequency_frames, warmup_bars, start_date)
 
 
+def _backtest_member_data_kwargs(
+    member: dict[str, Any],
+    exchange_config: Optional[dict[str, Any]],
+    strict_data_source: bool,
+) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {
+        "market_type": member.get("market_type") or "",
+        "exchange_id": member.get("exchange_id") or "",
+        "instrument_id": member.get("instrument_id") or "",
+        "api_family": member.get("api_family") or "",
+    }
+    if exchange_config is not None:
+        kwargs["exchange_config"] = exchange_config
+    if strict_data_source:
+        kwargs["strict_data_source"] = True
+    elif (
+        exchange_config is None
+        and not kwargs["exchange_id"]
+        and member.get("market") in {"USStock", "HKStock"}
+        and os.getenv("STRATEGY_V2_BACKTEST_STOCK_DATA_SOURCE", "").strip().lower() == "futu"
+    ):
+        # Explicit server-side opt-in. Never mix public candles into a Futu
+        # backtest when OpenD or quote permission is unavailable.
+        kwargs["exchange_id"] = "futu"
+        kwargs["strict_data_source"] = True
+    return kwargs
+
+
 def _warmup_calendar_days(frequency: str, warmup_bars: int, candidates=()) -> int:
     """Keep the legacy helper available for internal callers and tests."""
-    days = backtest_warmup_calendar_days(frequency, warmup_bars)
-    normalized = str(frequency).lower()
-    if warmup_bars > 0 and normalized.endswith(("m", "h")) and any(
-        item.get("market") in {"USStock", "HKStock", "AStock"}
-        or str(item.get("underlying_market") or "") in {"USStock", "HKStock", "AStock"}
-        or str(item.get("product_type") or "").strip().lower() == "direct_equity"
+    markets = [
+        item.get("underlying_market") or "USStock"
+        if str(item.get("product_type") or "").strip().lower() == "direct_equity"
+        else item.get("market") or item.get("underlying_market") or ""
         for item in candidates
-    ):
-        hours = float(normalized[:-1]) / (60 if normalized.endswith("m") else 1)
-        # Four trading hours per session also covers the shortest stock market
-        # in a mixed universe; allow weekends and a holiday safety margin.
-        days = max(days, 7, math.ceil(warmup_bars * hours / 4 * 7 / 5 * 1.5))
-    return days
+    ]
+    return backtest_warmup_calendar_days(frequency, warmup_bars, markets)
 
 
 def _benchmark_for_manifest(manifest: StrategyManifest) -> InstrumentSpec | None:

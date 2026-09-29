@@ -15,7 +15,7 @@ class PendingOrderLoops:
 
     def _run_sync_loop(self) -> None:
         while not self._stop_event.is_set():
-            for sync in (self._sync_quick_trade_orders, self._sync_alpaca_sent_orders, self._sync_live_sent_orders, self._maybe_sync_positions):
+            for sync in (self._sync_quick_trade_orders, self._sync_alpaca_sent_orders, self._sync_futu_sent_orders, self._sync_live_sent_orders, self._maybe_sync_positions):
                 if self._stop_event.is_set() or (self.lease_guard and not self.lease_guard()):
                     break
                 try:
@@ -46,4 +46,3 @@ class PendingOrderLoops:
                 self._dispatch_one(o)
             except Exception as e:
                 self._mark_failed(order_id=int(oid), error=str(e))
-

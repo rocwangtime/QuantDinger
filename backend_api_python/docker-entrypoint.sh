@@ -131,6 +131,12 @@ if [ "$(id -u)" = "0" ] && id quantdinger >/dev/null 2>&1; then
         echo "[INFO] Repairing runtime volume ownership recursively (one-time maintenance)."
         chown -R quantdinger:quantdinger /app/logs /app/data 2>/dev/null || true
     fi
+    # futu-api writes SDK logs below HOME before opening any quote/trade
+    # context. Root-run diagnostics may have created this tree first, so
+    # always restore ownership before workers drop privileges.
+    FUTU_LOG_HOME="/home/quantdinger/.com.futunn.FutuOpenD"
+    mkdir -p "$FUTU_LOG_HOME/Log"
+    chown -R quantdinger:quantdinger "$FUTU_LOG_HOME" 2>/dev/null || true
     if [ -f /app/.env ]; then
         if chown quantdinger:quantdinger /app/.env 2>/dev/null; then
             chmod 600 /app/.env 2>/dev/null || \

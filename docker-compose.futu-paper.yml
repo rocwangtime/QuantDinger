@@ -1,0 +1,30 @@
+# Use alongside docker-compose.yml. Keep QuantDinger-Vue cloned as a sibling
+# directory so the frontend image includes the Futu Account Center changes.
+services:
+  frontend:
+    image: quantdinger-frontend:futu-paper
+    pull_policy: build
+    build:
+      context: ../QuantDinger-Vue
+      dockerfile: Dockerfile
+  backend:
+    environment:
+      GUNICORN_WORKERS: "1"
+      GUNICORN_THREADS: "2"
+      DB_POOL_MIN: "1"
+      DB_POOL_MAX: "4"
+      MARKET_EXECUTOR_WORKERS: "2"
+      PORTFOLIO_EXECUTOR_WORKERS: "1"
+      ALLOW_LOCAL_DESKTOP_BROKERS: "true"
+      FUTU_PAPER_AUTOTRADE_ALLOWED: ${FUTU_PAPER_AUTOTRADE_ALLOWED:-false}
+      FUTU_OPEND_HOST: ${FUTU_OPEND_HOST:-host.docker.internal}
+      FUTU_OPEND_PORT: ${FUTU_OPEND_PORT:-11112}
+      STRATEGY_V2_BACKTEST_STOCK_DATA_SOURCE: ${STRATEGY_V2_BACKTEST_STOCK_DATA_SOURCE:-futu}
+  trading-worker:
+    environment:
+      DB_POOL_MIN: "1"
+      DB_POOL_MAX: "4"
+      ALLOW_LOCAL_DESKTOP_BROKERS: "true"
+      FUTU_PAPER_AUTOTRADE_ALLOWED: ${FUTU_PAPER_AUTOTRADE_ALLOWED:-false}
+  celery-worker:
+    command: ["celery", "-A", "app.celery_app:celery_app", "worker", "--loglevel=INFO", "-Q", "jobs,ai,maintenance", "--concurrency=1"]
