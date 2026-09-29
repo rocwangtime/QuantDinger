@@ -624,10 +624,11 @@ class FutuClient:
                 if ret != ft.RET_OK or data is None:
                     return None
                 records = data.to_dict("records") if hasattr(data, "to_dict") else list(data)
+                matches = []
                 for row in records:
                     raw = order_row_to_raw(row)
                     if str(raw.get("remark") or "") == tag:
-                        return OrderResult(
+                        matches.append(OrderResult(
                             success=True,
                             order_id=str(raw.get("order_id") or ""),
                             filled=safe_float(raw.get("filled")),
@@ -635,7 +636,10 @@ class FutuClient:
                             status=normalize_order_status(raw.get("status")),
                             message="matched_by_remark",
                             raw=raw,
-                        )
+                        ))
+                # An exact client remark is an identity only when unique.
+                # Never silently choose one of two broker orders.
+                return matches[0] if len(matches) == 1 else None
         except Exception as exc:
             logger.debug("find_order_by_remark failed: %s", exc)
         return None

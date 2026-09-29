@@ -297,6 +297,16 @@ def test_get_order_status_and_find_by_remark(_ensure):
 
 
 @patch("app.services.futu_trading.client._ensure_futu", return_value=_FakeFT)
+def test_duplicate_broker_remark_cannot_be_used_as_unique_order_identity(_ensure):
+    client, _quote, trade = _client_with_mocks()
+    trade.order_list_query.return_value = (_FakeFT.RET_OK, pd.DataFrame([
+        {"order_id": "OID-1", "remark": "qd_agent_9", "order_status": "SUBMITTED"},
+        {"order_id": "OID-2", "remark": "qd_agent_9", "order_status": "SUBMITTED"},
+    ]))
+    assert client.find_order_by_remark("qd_agent_9", refresh_cache=True) is None
+
+
+@patch("app.services.futu_trading.client._ensure_futu", return_value=_FakeFT)
 def test_account_summary_rejects_empty_broker_response(_ensure):
     client, _quote, trade = _client_with_mocks()
     trade.accinfo_query.return_value = (_FakeFT.RET_OK, pd.DataFrame())
