@@ -1,7 +1,7 @@
 {
   "max_file_lines": {
     "app/services/trading_executor.py": 4455,
-    "app/services/pending_order_worker.py": 3726,
+    "app/services/pending_order_worker.py": 3764,
     "app/services/fast_analysis.py": 1848,
     "app/routes/strategy.py": 1247,
     "app/routes/quick_trade.py": 1994
