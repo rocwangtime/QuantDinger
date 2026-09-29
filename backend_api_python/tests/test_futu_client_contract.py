@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -176,6 +178,30 @@ def test_opend_status_fails_closed_after_disconnect(_ensure):
     logged_out = client.get_connection_status()
     assert logged_out["connected"] is False
     assert logged_out["opend_connected"] is False
+
+
+@patch("app.services.futu_trading.client._ensure_futu", return_value=_FakeFT)
+def test_quote_snapshot_and_probe_are_json_serializable(_ensure):
+    client, quote, _trade = _client_with_mocks()
+    client._acc_id = 0  # A probe must work before the operator selects an account.
+    quote.get_market_snapshot.return_value = (
+        _FakeFT.RET_OK,
+        pd.DataFrame([{
+            "code": "US.AAPL",
+            "last_price": 100.0,
+            "lot_size": np.int64(1),
+            "suspension": np.bool_(False),
+            "optional_price": np.nan,
+            "update_time": pd.Timestamp("2026-09-29 09:30:00"),
+        }]),
+    )
+
+    quote_result = json.loads(json.dumps(client.get_quote("AAPL", "USStock"), allow_nan=False))
+    assert quote_result["success"] is True
+    assert quote_result["raw"]["lot_size"] == 1
+    assert quote_result["raw"]["suspension"] is False
+    assert quote_result["raw"]["optional_price"] is None
+    json.dumps(client.probe_permissions(), allow_nan=False)
 
 
 @patch("app.services.futu_trading.client._ensure_futu", return_value=_FakeFT)

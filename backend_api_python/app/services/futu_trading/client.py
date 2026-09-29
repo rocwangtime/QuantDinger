@@ -7,6 +7,7 @@ compatible with IBKRClient / AlpacaClient used by PendingOrderWorker.
 
 from __future__ import annotations
 
+import math
 import threading
 import time
 from dataclasses import dataclass, field
@@ -51,6 +52,34 @@ def _ensure_futu():
             ) from exc
         _futu_modules = ft
     return _futu_modules
+
+
+def _snapshot_json_value(value: Any) -> Any:
+    """Convert SDK/pandas scalar values before exposing a quote in JSON."""
+    if isinstance(value, dict):
+        return {str(key): _snapshot_json_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_snapshot_json_value(item) for item in value]
+    scalar = getattr(value, "item", None)
+    if callable(scalar):
+        try:
+            native = scalar()
+        except (TypeError, ValueError):
+            pass
+        else:
+            if native is not value:
+                return _snapshot_json_value(native)
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    isoformat = getattr(value, "isoformat", None)
+    if callable(isoformat):
+        try:
+            return isoformat()
+        except (TypeError, ValueError):
+            pass
+    return str(value)
 
 
 @dataclass
@@ -764,7 +793,7 @@ class FutuClient:
             raise RuntimeError(data if ret != ft.RET_OK else f"empty snapshot for {code}")
         row = data.iloc[0] if hasattr(data, "iloc") else data[0]
         try:
-            return dict(row)
+            return _snapshot_json_value(dict(row))
         except Exception:
             return {"last_price": safe_float(getattr(row, "last_price", 0)), "code": code}
 
