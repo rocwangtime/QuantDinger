@@ -114,6 +114,8 @@ class FutuConfig:
     is_encrypt: Optional[bool] = None
     timeout: float = 20.0
     market_category: str = ""
+    operator_user_id: int = 0
+    operator_credential_id: int = 0
 
     def __post_init__(self) -> None:
         self.host = str(self.host or "127.0.0.1").strip() or "127.0.0.1"
@@ -132,6 +134,8 @@ class FutuConfig:
             self.acc_id = int(self.acc_id or 0)
         except (TypeError, ValueError):
             self.acc_id = 0
+        self.operator_user_id = int(self.operator_user_id or 0)
+        self.operator_credential_id = int(self.operator_credential_id or 0)
 
     @property
     def is_simulate(self) -> bool:
@@ -200,4 +204,6 @@ def config_from_exchange_config(exchange_config: Dict[str, Any]) -> FutuConfig:
         ),
         is_encrypt=is_encrypt,
         market_category=market_category,
+        operator_user_id=int(cfg.get("_operator_user_id") or 0),
+        operator_credential_id=int(cfg.get("_operator_credential_id") or 0),
     )

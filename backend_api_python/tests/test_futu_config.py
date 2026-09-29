@@ -182,6 +182,19 @@ def test_futu_strategy_cannot_override_saved_simulate_account(monkeypatch):
     assert resolved["security_firm"] == "FUTUSECURITIES"
     assert resolved["acc_id"] == 99
     assert resolved["market_type"] == "USStock"
+    assert resolved["_operator_credential_id"] == 7
+
+
+def test_futu_inline_or_missing_credential_cannot_gain_operator_permission(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.exchange_execution._load_credential_config",
+        lambda *_args, **_kwargs: {},
+    )
+    resolved = resolve_exchange_config({
+        "exchange_id": "futu", "credential_id": 7,
+        "trade_env": "demo", "trade_market": "US", "acc_id": 99,
+    }, user_id=1)
+    assert resolved.get("_operator_credential_id", 0) == 0
 
 
 def test_safe_exchange_config_masks_futu_unlock_password():

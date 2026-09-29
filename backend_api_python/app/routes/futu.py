@@ -14,6 +14,11 @@ from app.utils.db import get_db_connection
 from app.utils.local_brokers import desktop_broker_cloud_reject_message, local_desktop_brokers_allowed
 from app.services.futu_trading import FutuClient, FutuConfig
 from app.services.futu_trading.config import normalize_trade_env, normalize_trade_market
+from app.services.futu_trading.operator_control import saved_account_credential, pause_account
+from app.services.futu_trading.operator_gate import (
+    arm as arm_automation, begin_pause, finish_pause, hard_switch_enabled,
+    state_for_user,
+)
 
 logger = get_logger(__name__)
 
@@ -90,6 +95,23 @@ def _config_from_request(data: dict) -> FutuConfig:
     )
 
 
+def _pause_selected_account(acc_id: int) -> dict:
+    user_id = int(g.user_id)
+    state = next((row for row in state_for_user(user_id) if int(row["acc_id"]) == acc_id), None)
+    credential_id = int(state["credential_id"]) if state else 0
+    try:
+        credential_id, config = saved_account_credential(
+            user_id, acc_id, credential_id=credential_id,
+        )
+    except Exception as exc:
+        if state:
+            begin_pause(user_id, credential_id, acc_id)
+            finish_pause(user_id, acc_id, confirmed=False, error=str(exc))
+            return {"state": "unconfirmed", "enabled": False, "error": str(exc)}
+        raise
+    return pause_account(user_id, credential_id, acc_id, config)
+
+
 @futu_blp.route("/status", methods=["GET"])
 @login_required
 def get_status():
@@ -101,6 +123,8 @@ def get_status():
         else:
             status = client.get_connection_status()
         status["worker_streams"] = _worker_streams_for_user()
+        status["automation"] = state_for_user(int(g.user_id))
+        status["automation_hard_switch"] = hard_switch_enabled()
         return jsonify({"success": True, "data": status})
     except Exception as e:
         logger.error("Futu get status failed: %s", e)
@@ -152,11 +176,101 @@ def connect():
 @login_required
 def disconnect():
     try:
+        client = _sessions.get()
+        account_ids = {int(row["acc_id"]) for row in state_for_user(int(g.user_id))}
+        if client is not None and int(client.config.acc_id or 0) > 0:
+            selected_id = int(client.config.acc_id)
+            if selected_id not in account_ids:
+                try:
+                    saved_account_credential(int(g.user_id), selected_id)
+                except ValueError:
+                    pass  # No saved strategy credential means no order permission.
+                else:
+                    account_ids.add(selected_id)
+        for acc_id in sorted(account_ids):
+            stopped = _pause_selected_account(acc_id)
+            if stopped["state"] != "paused":
+                return jsonify({"success": False, "data": stopped,
+                                "error": "FUTU_STOP_NOT_CONFIRMED"}), 409
         _sessions.disconnect_current()
         return jsonify({"success": True, "message": "Disconnected"})
     except Exception as e:
         logger.error("Futu disconnect failed: %s", e)
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+@futu_blp.route("/automation", methods=["GET"])
+@login_required
+def automation_status():
+    return jsonify({
+        "success": True,
+        "data": {"hard_switch_enabled": hard_switch_enabled(),
+                 "accounts": state_for_user(int(g.user_id))},
+    })
+
+
+@futu_blp.route("/automation/arm", methods=["POST"])
+@login_required
+def automation_arm():
+    """Explicitly arm only the connected, saved US SIMULATE account."""
+    try:
+        if not hard_switch_enabled():
+            return jsonify({"success": False, "error": "FUTU_PAPER_AUTOTRADE_HARD_DISABLED"}), 403
+        client, error = _require_connected_client()
+        if error is not None:
+            return error
+        status = client.get_connection_status()
+        acc_id = int(status.get("acc_id") or 0)
+        supplied = str((request.get_json(silent=True) or {}).get("confirm_acc_id") or "").strip()
+        if not status.get("connected") or not status.get("account_ready") or supplied != str(acc_id):
+            return jsonify({"success": False, "error": "FUTU_ACCOUNT_CONFIRMATION_REQUIRED"}), 400
+        credential_id, config = saved_account_credential(
+            int(g.user_id), acc_id, connected=client.config,
+        )
+        previous = next(
+            (row for row in state_for_user(int(g.user_id)) if int(row["acc_id"]) == acc_id),
+            None,
+        )
+        if previous and int(previous["credential_id"]) != credential_id:
+            previous_stop = _pause_selected_account(acc_id)
+            if previous_stop["state"] != "paused":
+                return jsonify({"success": False, "data": previous_stop,
+                                "error": "FUTU_PREVIOUS_CREDENTIAL_STOP_UNCONFIRMED"}), 409
+        preflight = pause_account(int(g.user_id), credential_id, acc_id, config)
+        if preflight["state"] != "paused":
+            return jsonify({"success": False, "data": preflight,
+                            "error": "FUTU_PRE_ARM_STOP_UNCONFIRMED"}), 409
+        arm_automation(int(g.user_id), credential_id, acc_id)
+        return jsonify({"success": True, "data": {"state": "armed", "acc_id": acc_id,
+                                                "credential_id": credential_id}})
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+    except Exception:
+        logger.exception("Futu automation arm failed")
+        return jsonify({"success": False, "error": "FUTU_ARM_FAILED"}), 500
+
+
+@futu_blp.route("/automation/pause", methods=["POST"])
+@login_required
+def automation_pause():
+    """Disarm first, then cancel only platform-owned queued/open paper orders."""
+    try:
+        data = request.get_json(silent=True) or {}
+        acc_id = int(data.get("acc_id") or 0)
+        if acc_id <= 0:
+            client = _sessions.get()
+            acc_id = int(client.config.acc_id or 0) if client else 0
+        if acc_id <= 0:
+            return jsonify({"success": False, "error": "FUTU_ACCOUNT_SELECTION_REQUIRED"}), 400
+        result = _pause_selected_account(acc_id)
+        return jsonify({"success": result["state"] == "paused", "data": result}), (
+            200 if result["state"] == "paused" else 409
+        )
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+    except Exception:
+        logger.exception("Futu automation pause failed")
+        return jsonify({"success": False, "error": "FUTU_PAUSE_FAILED"}), 500
 
 
 @futu_blp.route("/probe", methods=["POST"])

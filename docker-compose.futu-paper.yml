@@ -16,10 +16,12 @@ services:
       MARKET_EXECUTOR_WORKERS: "2"
       PORTFOLIO_EXECUTOR_WORKERS: "1"
       ALLOW_LOCAL_DESKTOP_BROKERS: "true"
+      FUTU_PAPER_AUTOTRADE_ALLOWED: ${FUTU_PAPER_AUTOTRADE_ALLOWED:-false}
   trading-worker:
     environment:
       DB_POOL_MIN: "1"
       DB_POOL_MAX: "4"
       ALLOW_LOCAL_DESKTOP_BROKERS: "true"
+      FUTU_PAPER_AUTOTRADE_ALLOWED: ${FUTU_PAPER_AUTOTRADE_ALLOWED:-false}
   celery-worker:
     command: ["celery", "-A", "app.celery_app:celery_app", "worker", "--loglevel=INFO", "-Q", "jobs,ai,maintenance", "--concurrency=1"]

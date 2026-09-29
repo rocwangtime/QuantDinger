@@ -203,11 +203,14 @@ def resolve_exchange_config(exchange_config: Dict[str, Any], user_id: int = 1) -
 
     merged: Dict[str, Any] = {}
     credential_id = exchange_config.get("credential_id") or exchange_config.get("credentials_id")
+    loaded_futu_credential_id = 0
     try:
         if credential_id:
             base = _load_credential_config(int(credential_id), user_id=user_id)
             if isinstance(base, dict):
                 merged.update(base)
+                if str(base.get("exchange_id") or "").strip().lower() == "futu":
+                    loaded_futu_credential_id = int(credential_id)
     except Exception as e:
         logger.warning(f"Failed to load credential_id={credential_id}: {e}")
 
@@ -239,6 +242,11 @@ def resolve_exchange_config(exchange_config: Dict[str, Any], user_id: int = 1) -
             continue
         merged[k] = v
 
+    if str(merged.get("exchange_id") or "").lower() == "futu":
+        # Broker submission permission is tied to the authenticated owner and
+        # the saved credential, never to a caller-supplied inline account ID.
+        merged["_operator_user_id"] = int(user_id)
+        merged["_operator_credential_id"] = loaded_futu_credential_id
     return merged
 
 

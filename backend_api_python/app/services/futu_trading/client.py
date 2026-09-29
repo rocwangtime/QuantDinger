@@ -464,7 +464,15 @@ class FutuClient:
                 if remark:
                     kwargs["remark"] = str(remark)[:64]
 
-                ret, data = self._trade_ctx.place_order(**kwargs)
+                from app.services.futu_trading.operator_gate import submission_permit
+
+                with submission_permit(
+                    user_id=self.config.operator_user_id,
+                    credential_id=self.config.operator_credential_id,
+                    acc_id=account_id,
+                    remark=remark,
+                ):
+                    ret, data = self._trade_ctx.place_order(**kwargs)
                 if ret != ft.RET_OK:
                     code_err, msg = classify_futu_error(data)
                     return OrderResult(success=False, message=f"{code_err}:{msg}", raw={"error": str(data)})
@@ -666,27 +674,36 @@ class FutuClient:
             records = data.to_dict("records") if hasattr(data, "to_dict") else list(data)
             return [position_row_to_dict(row) for row in records]
 
-    def get_open_orders(self) -> List[Dict[str, Any]]:
+    def get_open_orders(self, *, strict: bool = False) -> List[Dict[str, Any]]:
         try:
             with self._lock:
                 self._ensure_connected()
                 ft = _ensure_futu()
-                ret, data = self._trade_ctx.order_list_query(
-                    trd_env=self._trd_env(ft),
-                    acc_id=self._acc_id_arg(),
-                    status_filter_list=[
+                query_kwargs = {
+                    "trd_env": self._trd_env(ft),
+                    "acc_id": self._acc_id_arg(),
+                    "refresh_cache": bool(strict),
+                }
+                if not strict:
+                    query_kwargs["status_filter_list"] = [
                         ft.OrderStatus.SUBMITTED,
                         ft.OrderStatus.FILLED_PART,
                         ft.OrderStatus.WAITING_SUBMIT,
                         ft.OrderStatus.SUBMITTING,
-                    ],
-                )
+                    ]
+                ret, data = self._trade_ctx.order_list_query(**query_kwargs)
                 if ret != ft.RET_OK or data is None:
+                    if strict:
+                        raise RuntimeError("FUTU_OPEN_ORDER_QUERY_FAILED")
                     return []
                 records = data.to_dict("records") if hasattr(data, "to_dict") else list(data)
                 out = []
                 for row in records:
                     raw = order_row_to_raw(row)
+                    if strict and normalize_order_status(raw.get("status")) in {
+                        "filled", "cancelled", "rejected",
+                    }:
+                        continue
                     display, _ = from_futu_code(str(raw.get("code") or ""))
                     out.append({
                         "orderId": raw.get("order_id"),
@@ -704,6 +721,8 @@ class FutuClient:
                 return out
         except Exception as exc:
             logger.error("Futu get_open_orders failed: %s", exc)
+            if strict:
+                raise
             return []
 
     def get_recent_orders(self, limit: int = 100) -> List[Dict[str, Any]]:

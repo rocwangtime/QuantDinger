@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import nullcontext
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
@@ -117,14 +118,31 @@ def test_place_limit_order_success(_ensure):
             "remark": "r1",
         }]),
     )
-    result = client.place_limit_order("AAPL", "buy", 100, 350.0, "USStock", remark="r1")
+    with patch("app.services.futu_trading.operator_gate.submission_permit", return_value=nullcontext()):
+        result = client.place_limit_order("AAPL", "buy", 100, 350.0, "USStock", remark="qd_1_2")
     assert result.success
     assert result.order_id == "OID-1"
     assert result.status == "submitted"
     kwargs = trade.place_order.call_args.kwargs
     assert kwargs["code"] == "US.AAPL"
     assert kwargs["qty"] == 100
-    assert kwargs["remark"] == "r1"
+    assert kwargs["remark"] == "qd_1_2"
+
+
+@patch("app.services.futu_trading.client._ensure_futu", return_value=_FakeFT)
+def test_place_limit_order_is_default_denied_without_operator_arm(_ensure, monkeypatch):
+    client, quote, trade = _client_with_mocks()
+    monkeypatch.delenv("FUTU_PAPER_AUTOTRADE_ALLOWED", raising=False)
+    client._is_regular_us_session_now = lambda: True
+    quote.get_market_snapshot.return_value = (
+        _FakeFT.RET_OK, pd.DataFrame([{"lot_size": 1, "last_price": 100.0}]),
+    )
+
+    result = client.place_limit_order("AAPL", "buy", 1, 100.0, "USStock", remark="qd_1_2")
+
+    assert not result.success
+    assert "FUTU_PAPER_AUTOTRADE_HARD_DISABLED" in result.message
+    trade.place_order.assert_not_called()
 
 
 @patch("app.services.futu_trading.client._ensure_futu", return_value=_FakeFT)

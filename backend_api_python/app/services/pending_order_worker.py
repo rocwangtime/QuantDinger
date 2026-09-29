@@ -199,6 +199,13 @@ class PendingOrderWorker(
                 ensure_position_ledger_schema()
             except Exception as e:
                 logger.warning("ensure_position_ledger_schema failed: %s", e)
+            # Fail closed before any Futu order polling starts. If this write
+            # fails, do not start the worker at all.
+            from app.services.futu_trading.operator_gate import (
+                disarm_all_on_worker_start, hard_switch_enabled,
+            )
+            if hard_switch_enabled():
+                disarm_all_on_worker_start()
             self._stop_event.clear()
             if not self._thread or not self._thread.is_alive():
                 self._thread = threading.Thread(target=self._run_loop, name="PendingOrderWorker", daemon=True)

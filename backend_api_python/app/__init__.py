@@ -146,6 +146,18 @@ def create_app(config_name='default', *, register_http_routes: bool = True):
     _configure_ibkr_asyncio()
     _bootstrap_database()
 
+    # A Web/API process restart is also a safety boundary. Do this before
+    # registering routes so a failed disarm cannot serve a misleading
+    # "connected" UI while a previously armed worker is still running.
+    if register_http_routes:
+        from app.runtime.roles import ProcessRole, current_process_role
+        from app.services.futu_trading.operator_gate import (
+            disarm_all_on_worker_start, hard_switch_enabled,
+        )
+
+        if hard_switch_enabled() and current_process_role() in {ProcessRole.API, ProcessRole.LEGACY}:
+            disarm_all_on_worker_start()
+
     if register_http_routes:
         from app.routes import register_routes
 
