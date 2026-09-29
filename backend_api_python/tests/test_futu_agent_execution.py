@@ -104,6 +104,13 @@ def test_non_proposed_intent_is_read_only_even_if_called_twice(monkeypatch):
     assert gateway.execute_simulate_intent(1, {"id": 4, "paper_only": True}, 9) == row
 
 
+def test_pre_submit_denial_is_failed_but_ambiguous_broker_call_is_uncertain():
+    assert gateway._submission_status(OrderResult(success=False, message="operator paused")) == "FAILED"
+    assert gateway._submission_status(OrderResult(
+        success=False, message="timeout", submission_attempted=True,
+    )) == "UNCERTAIN"
+
+
 def test_ambiguous_submit_is_durable_and_never_retried(monkeypatch):
     row = {"id": 9, "status": "PROPOSED", "broker": "futu", "agent_token_id": 4,
            "account_ref": "credential:7", "order_spec": _order()}
@@ -156,7 +163,9 @@ def test_ambiguous_submit_is_durable_and_never_retried(monkeypatch):
     client = MagicMock()
     client.config = SimpleNamespace(acc_id=123)
     client.connect.return_value = True
-    client.place_limit_order.return_value = OrderResult(success=False, message="timeout")
+    client.place_limit_order.return_value = OrderResult(
+        success=False, message="timeout", submission_attempted=True,
+    )
     monkeypatch.setattr(gateway, "_load_client", lambda *_a: client)
     token = {"id": 4, "paper_only": True,
              "max_order_notional": 1000, "max_daily_notional": 5000}

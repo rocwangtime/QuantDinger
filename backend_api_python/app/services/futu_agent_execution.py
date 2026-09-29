@@ -29,6 +29,12 @@ def _broker_status(result: OrderResult) -> str:
     }.get(str(result.status).lower(), "UNCERTAIN")
 
 
+def _submission_status(result: OrderResult) -> str:
+    if result.success and result.order_id:
+        return _broker_status(result)
+    return "UNCERTAIN" if result.submission_attempted else "FAILED"
+
+
 def _preflight(client: FutuClient, order: dict[str, Any]) -> tuple[dict, float]:
     if order["broker"] != "futu" or order["market"] != "USStock" or order["order_type"] != "limit":
         raise IntentError("Only Futu USStock SIMULATE limit orders can execute", 403)
@@ -176,8 +182,9 @@ def execute_simulate_intent(user_id: int, token: dict, intent_id: int) -> dict:
                 "USStock", remark=remark,
             )
         except Exception:
-            result = OrderResult(success=False, message="FUTU_SUBMISSION_OUTCOME_UNKNOWN")
-        status = _broker_status(result) if result.success and result.order_id else "UNCERTAIN"
+            result = OrderResult(success=False, message="FUTU_SUBMISSION_OUTCOME_UNKNOWN",
+                                 submission_attempted=True)
+        status = _submission_status(result)
         with get_db_connection() as db:
             cur = db.cursor()
             try:

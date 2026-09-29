@@ -93,6 +93,7 @@ class OrderResult:
     status: str = ""
     message: str = ""
     raw: Dict[str, Any] = field(default_factory=dict)
+    submission_attempted: bool = False
 
 
 class FutuClient:
@@ -400,6 +401,7 @@ class FutuClient:
         market_type: str = "",
         remark: str = "",
     ) -> OrderResult:
+        submission_attempted = False
         try:
             with self._lock:
                 self._ensure_connected()
@@ -476,10 +478,12 @@ class FutuClient:
                     qty=qty,
                     limit_price=px,
                 ):
+                    submission_attempted = True
                     ret, data = self._trade_ctx.place_order(**kwargs)
                 if ret != ft.RET_OK:
                     code_err, msg = classify_futu_error(data)
-                    return OrderResult(success=False, message=f"{code_err}:{msg}", raw={"error": str(data)})
+                    return OrderResult(success=False, message=f"{code_err}:{msg}",
+                                       raw={"error": str(data)}, submission_attempted=True)
 
                 row = None
                 if hasattr(data, "iloc") and len(data) > 0:
@@ -498,11 +502,13 @@ class FutuClient:
                     status=status,
                     message="Order submitted",
                     raw=raw,
+                    submission_attempted=True,
                 )
         except Exception as exc:
             logger.error("Futu place_order failed: %s", exc)
             code_err, msg = classify_futu_error(exc)
-            return OrderResult(success=False, message=f"{code_err}:{msg}")
+            return OrderResult(success=False, message=f"{code_err}:{msg}",
+                               submission_attempted=submission_attempted)
 
     def place_market_order(
         self,

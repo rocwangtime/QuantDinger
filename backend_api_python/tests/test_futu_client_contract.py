@@ -141,6 +141,7 @@ def test_place_limit_order_is_default_denied_without_operator_arm(_ensure, monke
     result = client.place_limit_order("AAPL", "buy", 1, 100.0, "USStock", remark="qd_1_2")
 
     assert not result.success
+    assert result.submission_attempted is False
     assert "FUTU_PAPER_AUTOTRADE_HARD_DISABLED" in result.message
     trade.place_order.assert_not_called()
 
