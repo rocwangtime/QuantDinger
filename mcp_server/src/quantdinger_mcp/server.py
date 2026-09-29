@@ -48,6 +48,9 @@ MCP_TOOL_NAMES = (
     "cancel_agent_orders",
     "get_trading_policy",
     "get_futu_quote",
+    "get_futu_quote_status",
+    "get_futu_order_book",
+    "place_platform_paper_order",
     "emergency_stop_trading",
     "list_jobs",
     "get_job",
@@ -414,7 +417,7 @@ def place_quick_order(
             "status": 400,
             "body": {
                 "message": (
-                    "An enabled internal PAPER_AUTO policy may simulate a fill. "
+                    "This legacy tool records a proposal only. "
                     "Re-call with confirm_order=true to submit an intent."
                 ),
             },
@@ -472,7 +475,7 @@ def create_trade_intent(
     idempotency_key: str = "",
     confirm_create: bool = False,
 ) -> Any:
-    """Submit an immutable plan (or bounded internal paper simulation)."""
+    """Submit an immutable plan; this tool never places an order."""
     if not confirm_create:
         return {"error": True, "status": 400, "body": {
             "message": "Confirm creation of this intent with confirm_create=true. This is not real-trade approval."
@@ -532,6 +535,39 @@ def get_futu_quote(credential_id: int, symbol: str) -> Any:
     return _get(
         f"/api/agent/v1/trading/accounts/{int(credential_id)}/futu-quote",
         params={"symbol": symbol},
+    )
+
+
+@_tool
+def get_futu_quote_status(credential_id: int) -> Any:
+    """Read OpenD health and subscription quota; entitlement is unverified."""
+    return _get(f"/api/agent/v1/trading/accounts/{int(credential_id)}/futu-quote-status")
+
+
+@_tool
+def get_futu_order_book(credential_id: int, symbol: str, depth: int = 5) -> Any:
+    """Read a subscribed US order book, never an execution permission."""
+    return _get(
+        f"/api/agent/v1/trading/accounts/{int(credential_id)}/futu-order-book",
+        params={"symbol": symbol, "depth": max(1, min(int(depth), 10))},
+    )
+
+
+@_tool
+def place_platform_paper_order(
+    market: str, symbol: str, side: str, qty: float, limit_price: float,
+    idempotency_key: str, confirm_order: bool = False,
+) -> Any:
+    """Execute internal paper only when a human enabled PAPER_AUTO."""
+    if not confirm_order:
+        return {"error": True, "status": 400, "body": {
+            "message": "Set confirm_order=true. A human-set platform PAPER_AUTO policy must also be active."
+        }}
+    return _post(
+        "/api/agent/v1/paper-orders/place",
+        json={"broker": "platform", "market": market, "symbol": symbol,
+              "side": side, "qty": qty, "order_type": "limit", "limit_price": limit_price},
+        headers=_idempotency_headers(idempotency_key),
     )
 
 

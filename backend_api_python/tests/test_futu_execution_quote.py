@@ -39,3 +39,12 @@ def test_future_timestamp_is_stale_instead_of_appearing_instantaneous():
     assert result["is_stale"] is True
     assert result["delay_ms"] == -60000
     assert result["execution_eligible"] is False
+
+
+def test_hk_quote_uses_hong_kong_exchange_clock():
+    now = datetime(2026, 9, 29, 9, 30, 2, tzinfo=ZoneInfo("Asia/Hong_Kong")).timestamp()
+    result = describe_futu_quote("00700.HK", {
+        "last": 600, "raw": {"update_time": "2026-09-29 09:30:01"},
+    }, now=now, market_type="HKStock")
+    assert result["market"] == "HK"
+    assert result["is_stale"] is False

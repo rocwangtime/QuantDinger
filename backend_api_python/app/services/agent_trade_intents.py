@@ -1,8 +1,7 @@
-"""Server-owned Agent trading policies and immutable trade intents.
+"""Server-owned Agent trading policies, proposals and internal paper execution.
 
-The only executable mode in this module is *internal* paper simulation. It
-never opens a broker client. Futu intents remain proposals until a separately
-reviewed SIMULATE execution gateway exists; REAL trading is deliberately absent.
+Futu intents remain proposals until a separately reviewed SIMULATE execution
+gateway exists; REAL trading is deliberately absent.
 """
 
 from __future__ import annotations
@@ -337,6 +336,7 @@ def submit_intent(
     idempotency_key: str,
     *,
     quote_provider: Callable[[str, str], float | None] | None = None,
+    require_paper_execution: bool = False,
 ) -> dict:
     if not 1 <= len(idempotency_key) <= 120:
         raise IntentError("Idempotency-Key is required (1–120 characters)")
@@ -350,7 +350,9 @@ def submit_intent(
             policy = _policy_row(cur, user_id, broker, account_ref, lock=True)
             if policy["mode"] == "EMERGENCY_STOP":
                 raise IntentError("Agent trading is stopped for this account", 403)
-            if policy["mode"] == "PAPER_AUTO" and (broker != "platform" or not token.get("paper_only", True)):
+            if require_paper_execution and (broker != "platform" or policy["mode"] != "PAPER_AUTO"):
+                raise IntentError("Direct paper orders require an active platform PAPER_AUTO policy", 403)
+            if require_paper_execution and not token.get("paper_only", True):
                 raise IntentError("Live-capable tokens and Futu accounts cannot use platform paper execution", 403)
             cur.execute(
                 """INSERT INTO qd_agent_trade_intents
@@ -377,7 +379,7 @@ def submit_intent(
             risk = {"reason": "plan_only", "broker_execution": False}
             notional = None
             order_uid = None
-            if policy["mode"] == "PAPER_AUTO":
+            if require_paper_execution:
                 # Research K-lines are acceptable for *internal simulation only*.
                 # This quote can never authorize a Futu or REAL broker order.
                 try:

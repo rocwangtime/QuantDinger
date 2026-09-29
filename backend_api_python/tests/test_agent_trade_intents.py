@@ -117,13 +117,32 @@ def test_default_plan_only_records_intent_without_quote_or_order(monkeypatch):
     assert db.commits == 1
 
 
+def test_create_intent_remains_plan_only_even_when_paper_auto_is_armed(monkeypatch):
+    db = _fake_db(monkeypatch)
+    monkeypatch.setattr(intents, "_policy_row", lambda *_a, **_k: {"mode": "PAPER_AUTO"})
+    result = intents.submit_intent(
+        1, {"id": 3, "paper_only": True}, _order(), "plan-key",
+        quote_provider=lambda *_: pytest.fail("proposal must not fetch an execution quote"),
+    )
+    assert result["status"] == "PROPOSED"
+    assert not any("INSERT INTO qd_agent_paper_orders" in sql for sql, _ in db.cur.statements)
+
+
+def test_direct_paper_order_requires_explicit_policy(monkeypatch):
+    _fake_db(monkeypatch)
+    monkeypatch.setattr(intents, "_policy_row", lambda *_a, **_k: {"mode": "PLAN_ONLY"})
+    with pytest.raises(intents.IntentError, match="PAPER_AUTO"):
+        intents.submit_intent(1, {"id": 3, "paper_only": True}, _order(), "direct-key",
+                              require_paper_execution=True)
+
+
 def test_explicit_internal_paper_is_atomic_and_never_calls_broker(monkeypatch):
     db = _fake_db(monkeypatch)
     monkeypatch.setattr(intents, "_policy_row", lambda *_a, **_k: {"mode": "PAPER_AUTO"})
     monkeypatch.setattr(intents, "_risk", lambda *_a, **_k: (True, {"reason": "accepted", "notional": 1.0}))
     result = intents.submit_intent(
         1, {"id": 3, "paper_only": True}, _order(limit_price=110), "key-2",
-        quote_provider=lambda *_: 100.0,
+        quote_provider=lambda *_: 100.0, require_paper_execution=True,
     )
     assert result["status"] == "FILLED"
     assert result["paper_order_uid"] == "intent-7"
@@ -135,7 +154,8 @@ def test_live_capable_token_cannot_use_internal_paper(monkeypatch):
     _fake_db(monkeypatch)
     monkeypatch.setattr(intents, "_policy_row", lambda *_a, **_k: {"mode": "PAPER_AUTO"})
     with pytest.raises(intents.IntentError, match="Live-capable"):
-        intents.submit_intent(1, {"id": 3, "paper_only": False}, _order(), "key-3")
+        intents.submit_intent(1, {"id": 3, "paper_only": False}, _order(), "key-3",
+                              require_paper_execution=True)
 
 
 def test_internal_paper_quote_failure_records_rejection(monkeypatch):
@@ -147,7 +167,7 @@ def test_internal_paper_quote_failure_records_rejection(monkeypatch):
 
     result = intents.submit_intent(
         1, {"id": 3, "paper_only": True}, _order(), "key-4",
-        quote_provider=failed_quote,
+        quote_provider=failed_quote, require_paper_execution=True,
     )
     assert result["status"] == "REJECTED"
     assert db.commits == 1

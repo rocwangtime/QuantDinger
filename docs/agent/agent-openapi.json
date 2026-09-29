@@ -735,7 +735,7 @@
     "/api/agent/v1/trade-intents": {
       "post": {
         "summary": "Create immutable trade intent; default plan-only",
-        "description": "T scope. Requires Idempotency-Key. Futu is plan-only; only a human-enabled, expiring platform PAPER_AUTO policy can write internal paper orders. No Agent broker-live execution.",
+        "description": "T scope. Requires Idempotency-Key. This endpoint always stores a proposal; it never places an order. Futu Agent broker execution is unavailable.",
         "x-scope-class": "T",
         "parameters": [{ "in": "header", "name": "Idempotency-Key", "required": true, "schema": { "type": "string", "maxLength": 120 } }],
         "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/OrderRequest" } } } },
@@ -745,6 +745,16 @@
     },
     "/api/agent/v1/trade-intents/{intent_id}": {
       "get": { "summary": "Get one tenant trade intent", "x-scope-class": "R", "parameters": [{ "in": "path", "name": "intent_id", "required": true, "schema": { "type": "integer" } }], "responses": { "200": { "description": "OK" } } }
+    },
+    "/api/agent/v1/paper-orders/place": {
+      "post": {
+        "summary": "Place a direct internal platform paper order",
+        "description": "T scope, paper-only token, Idempotency-Key, and an active human-enabled platform PAPER_AUTO policy are required. Never reaches a broker or Futu OpenD.",
+        "x-scope-class": "T",
+        "parameters": [{ "in": "header", "name": "Idempotency-Key", "required": true, "schema": { "type": "string", "maxLength": 120 } }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/OrderRequest" } } } },
+        "responses": { "201": { "description": "Internal paper order result" }, "403": { "description": "Paper execution policy not active" } }
+      }
     },
     "/api/agent/v1/trade-intents/{intent_id}/cancel": {
       "post": { "summary": "Cancel a proposed intent", "x-scope-class": "T", "parameters": [{ "in": "path", "name": "intent_id", "required": true, "schema": { "type": "integer" } }], "responses": { "200": { "description": "Cancelled" }, "409": { "description": "Not a proposal" } } }
@@ -766,6 +776,12 @@
         "responses": { "200": { "description": "Quote with provider, as_of, received_at, stale and execution_eligible=false" }, "503": { "description": "OpenD quote unavailable" } }
       }
     },
+    "/api/agent/v1/trading/accounts/{credential_id}/futu-quote-status": {
+      "get": { "summary": "Read OpenD quote health and subscription quota; entitlement unverified", "x-scope-class": "R", "parameters": [{ "in": "path", "name": "credential_id", "required": true, "schema": { "type": "integer" } }], "responses": { "200": { "description": "Sanitized status and quota" }, "503": { "description": "OpenD unavailable" } } }
+    },
+    "/api/agent/v1/trading/accounts/{credential_id}/futu-order-book": {
+      "get": { "summary": "Read subscribed Futu US order book and symbol market state", "x-scope-class": "R", "parameters": [{ "in": "path", "name": "credential_id", "required": true, "schema": { "type": "integer" } }, { "in": "query", "name": "symbol", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "Market state and bid/ask levels; not execution-eligible" }, "503": { "description": "OpenD unavailable" } } }
+    },
     "/api/agent/v1/admin/trading-policy": {
       "get": { "summary": "Read policy as human administrator", "security": [{ "HumanJWT": [] }], "responses": { "200": { "description": "OK" } } },
       "put": { "summary": "Change plan, internal paper, or emergency-stop policy as human administrator", "security": [{ "HumanJWT": [] }], "responses": { "200": { "description": "Updated" }, "501": { "description": "REAL modes unavailable" } } }
@@ -779,7 +795,7 @@
     "/api/agent/v1/quick-trade/orders": {
       "post": {
         "summary": "Legacy alias for creating a trade intent",
-        "description": "Requires T scope and Idempotency-Key. Does not call broker APIs. Default mode stores PROPOSED only; human-enabled internal PAPER_AUTO may simulate an order.",
+        "description": "Requires T scope and Idempotency-Key. Always stores a PROPOSED intent; never calls broker or internal paper execution APIs.",
         "x-scope-class": "T",
         "parameters": [{ "in": "header", "name": "Idempotency-Key", "required": true, "schema": { "type": "string", "maxLength": 120 } }],
         "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/OrderRequest" } } } },

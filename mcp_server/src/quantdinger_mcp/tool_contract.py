@@ -12,6 +12,7 @@ WRITE_TOOLS = {
     "stop_strategy": True,
     "place_quick_order": True,
     "create_trade_intent": True,
+    "place_platform_paper_order": True,
     "cancel_trade_intent": True,
     "cancel_agent_orders": True,
     "emergency_stop_trading": True,

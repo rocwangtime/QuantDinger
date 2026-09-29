@@ -108,17 +108,14 @@ def get_futu_execution_quote(credential_id: int):
         return error(403, "Symbol is not allowed for this token", http=403)
     from app.services.agent_trade_intents import IntentError, account_scope
     from app.services.exchange_execution import resolve_exchange_config
-    from app.services.futu_trading.config import config_from_exchange_config
     from app.services.futu_trading.execution_quote import describe_futu_quote
-    from app.services.futu_trading.quote_client import FutuQuoteClient
+    from app.services.futu_trading.session_pool import get_futu_session_pool
 
     try:
         account_scope(current_user_id(), {"broker": "futu", "credential_id": credential_id})
         cfg = resolve_exchange_config({"credential_id": credential_id}, user_id=current_user_id())
-        client = FutuQuoteClient(config_from_exchange_config(cfg))
+        client = get_futu_session_pool().acquire(cfg, mode="quote")
         try:
-            if not client.connect():
-                return error(503, "Futu OpenD quote service is unavailable", retriable=True, http=503)
             snapshot = client.get_quote(symbol, "USStock")
             if not snapshot.get("success"):
                 return error(503, "Futu quote is unavailable", retriable=True, http=503)
@@ -129,6 +126,56 @@ def get_futu_execution_quote(credential_id: int):
         return error(exc.status, str(exc), http=exc.status)
     except Exception:
         return error(503, "Futu quote is unavailable", retriable=True, http=503)
+
+
+@agent_v1_bp.route("/trading/accounts/<int:credential_id>/futu-quote-status", methods=["GET"])
+@agent_required(SCOPE_R)
+def get_futu_quote_status(credential_id: int):
+    """Read-only OpenD diagnostics; permission remains unverified by design."""
+    from app.services.agent_trade_intents import IntentError, account_scope
+    from app.services.exchange_execution import resolve_exchange_config
+    from app.services.futu_trading.session_pool import get_futu_session_pool
+
+    try:
+        account_scope(current_user_id(), {"broker": "futu", "credential_id": credential_id})
+        cfg = resolve_exchange_config({"credential_id": credential_id}, user_id=current_user_id())
+        client = get_futu_session_pool().acquire(cfg, mode="quote")
+        try:
+            return envelope({"status": client.get_status(), "subscription_quota": client.get_subscription_quota()})
+        finally:
+            client.close()
+    except IntentError as exc:
+        return error(exc.status, str(exc), http=exc.status)
+    except Exception:
+        return error(503, "Futu quote diagnostics are unavailable", retriable=True, http=503)
+
+
+@agent_v1_bp.route("/trading/accounts/<int:credential_id>/futu-order-book", methods=["GET"])
+@agent_required(SCOPE_R)
+def get_futu_order_book(credential_id: int):
+    symbol = str(request.args.get("symbol") or "").strip().upper()
+    if not symbol or not market_allowed("USStock") or not instrument_allowed(symbol):
+        return error(403, "Symbol is not allowed for this token", http=403)
+    from app.services.agent_trade_intents import IntentError, account_scope
+    from app.services.exchange_execution import resolve_exchange_config
+    from app.services.futu_trading.session_pool import get_futu_session_pool
+
+    try:
+        account_scope(current_user_id(), {"broker": "futu", "credential_id": credential_id})
+        cfg = resolve_exchange_config({"credential_id": credential_id}, user_id=current_user_id())
+        client = get_futu_session_pool().acquire(cfg, mode="quote")
+        try:
+            return envelope({
+                "market": client.get_market_state(symbol),
+                "order_book": client.get_order_book(symbol, depth=clip_int(
+                    request.args.get("depth"), default=5, lo=1, hi=10)),
+            })
+        finally:
+            client.close()
+    except IntentError as exc:
+        return error(exc.status, str(exc), http=exc.status)
+    except Exception:
+        return error(503, "Futu order book is unavailable", retriable=True, http=503)
 
 
 @agent_v1_bp.route("/trading/strategies/<int:strategy_id>/positions", methods=["GET"])
