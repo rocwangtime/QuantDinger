@@ -114,6 +114,23 @@ def _cancel_queued_orders(user_id: int, credential_id: int) -> int:
             cur.close()
 
 
+def _unresolved_processing_orders(user_id: int, credential_id: int) -> int:
+    with get_db_connection() as db:
+        cur = db.cursor()
+        cur.execute(
+            """SELECT COUNT(*) AS n FROM pending_orders
+               WHERE user_id = %s AND credential_id = %s
+                 AND LOWER(exchange_id) = 'futu' AND execution_mode = 'live'
+                 AND status = 'processing'
+                 AND COALESCE(exchange_order_id, '') = ''""",
+            (int(user_id), int(credential_id)),
+        )
+        count = int((cur.fetchone() or {}).get("n") or 0)
+        db.rollback()
+        cur.close()
+    return count
+
+
 def _cancel_owned_open_orders(user_id: int, credential_id: int, config: dict) -> int:
     from app.services.futu_trading.client import FutuClient
 
@@ -123,7 +140,8 @@ def _cancel_owned_open_orders(user_id: int, credential_id: int, config: dict) ->
     try:
         owned_ids, owned_remarks = _owned_order_identities(user_id, credential_id)
         cancelled = 0
-        for attempt in range(3):
+        empty_confirmations = 0
+        for attempt in range(5):
             open_orders = client.get_open_orders(strict=True)
             owned_open = [
                 order for order in open_orders
@@ -141,11 +159,15 @@ def _cancel_owned_open_orders(user_id: int, credential_id: int, config: dict) ->
             if unknown_platform_orders:
                 raise RuntimeError("FUTU_UNTRACKED_PLATFORM_ORDER_REVIEW_REQUIRED")
             if not owned_open:
-                return cancelled
-            for order in owned_open:
-                if client.cancel_order(str(order["orderId"])):
-                    cancelled += 1
-            if attempt < 2:
+                empty_confirmations += 1
+                if empty_confirmations >= 2:
+                    return cancelled
+            else:
+                empty_confirmations = 0
+                for order in owned_open:
+                    if client.cancel_order(str(order["orderId"])):
+                        cancelled += 1
+            if attempt < 4:
                 time.sleep(0.5)
         raise RuntimeError("FUTU_ORDER_CANCEL_NOT_CONFIRMED")
     finally:
@@ -161,6 +183,8 @@ def pause_account(user_id: int, credential_id: int, acc_id: int, config: dict) -
         wait_submission_barrier(acc_id)
         queued = _cancel_queued_orders(user_id, credential_id)
         cancelled = _cancel_owned_open_orders(user_id, credential_id, config)
+        if _unresolved_processing_orders(user_id, credential_id):
+            raise RuntimeError("FUTU_PROCESSING_ORDER_REVIEW_REQUIRED")
     except Exception as exc:
         finish_pause(user_id, acc_id, confirmed=False, error=str(exc))
         return {

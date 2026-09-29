@@ -142,6 +142,20 @@ def test_pause_disarms_before_cancellation_and_keeps_failure_unconfirmed(monkeyp
     assert result["enabled"] is False
 
 
+def test_pause_keeps_stale_processing_submit_unconfirmed(monkeypatch):
+    monkeypatch.setattr(operator_control, "begin_pause", lambda *_: None)
+    monkeypatch.setattr(operator_control, "wait_submission_barrier", lambda *_: None)
+    monkeypatch.setattr(operator_control, "_cancel_queued_orders", lambda *_: 0)
+    monkeypatch.setattr(operator_control, "_cancel_owned_open_orders", lambda *_: 0)
+    monkeypatch.setattr(operator_control, "_unresolved_processing_orders", lambda *_: 1)
+    finished = []
+    monkeypatch.setattr(operator_control, "finish_pause", lambda *_, **kw: finished.append(kw["confirmed"]))
+    result = operator_control.pause_account(1, 2, 3, {})
+    assert result["state"] == "unconfirmed"
+    assert result["error"] == "FUTU_PROCESSING_ORDER_REVIEW_REQUIRED"
+    assert finished == [False]
+
+
 def test_pause_cancels_only_platform_owned_open_orders(monkeypatch):
     owned = {"owned-1"}
     rows = [
@@ -176,6 +190,41 @@ def test_pause_cancels_only_platform_owned_open_orders(monkeypatch):
     )
     assert result == 1
     assert cancelled == ["owned-1"]
+
+
+def test_pause_catches_broker_order_visible_only_on_second_refresh(monkeypatch):
+    calls = []
+    cancelled = []
+
+    class DelayedClient:
+        def __init__(self, _config):
+            pass
+
+        def connect(self, need_quote=False):
+            return True
+
+        def get_open_orders(self, *, strict=False):
+            calls.append("query")
+            if len(calls) == 1 or cancelled:
+                return []
+            return [{"orderId": "late-1", "remark": "qd_1_2"}]
+
+        def cancel_order(self, order_id):
+            cancelled.append(order_id)
+            return True
+
+        def disconnect(self):
+            pass
+
+    monkeypatch.setattr("app.services.futu_trading.client.FutuClient", DelayedClient)
+    monkeypatch.setattr(operator_control, "_owned_order_identities", lambda *_: (set(), {"qd_1_2"}))
+    monkeypatch.setattr(operator_control.time, "sleep", lambda *_: None)
+    result = operator_control._cancel_owned_open_orders(
+        1, 2, {"acc_id": 3, "trade_env": "demo", "trade_market": "US"},
+    )
+    assert result == 1
+    assert cancelled == ["late-1"]
+    assert len(calls) >= 4
 
 
 def test_pause_rejects_untracked_platform_order(monkeypatch):
