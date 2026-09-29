@@ -190,6 +190,8 @@ def submission_permit(*, user_id: int, credential_id: int, acc_id: int, remark: 
         raise ValueError("FUTU_PLATFORM_ORDER_ID_REQUIRED")
     strategy_id = int(match.group(1))
     pending_order_id = int(match.group(2))
+    allowed = False
+    broker_error: BaseException | None = None
     with get_db_connection() as db:
         cur = db.cursor()
         try:
@@ -209,9 +211,19 @@ def submission_permit(*, user_id: int, credential_id: int, acc_id: int, remark: 
                      AND pending.status = 'processing'""",
                 (pending_order_id, int(acc_id), int(user_id), int(credential_id), strategy_id),
             )
-            if cur.fetchone() is None:
-                raise ValueError("FUTU_OPERATOR_NOT_ARMED")
-            yield
+            allowed = cur.fetchone() is not None
+            if allowed:
+                try:
+                    yield
+                except BaseException as exc:
+                    # Broker exceptions must not flow through the DB pool's
+                    # generic error logger; an SDK message can contain data
+                    # that does not belong in database logs.
+                    broker_error = exc
         finally:
             db.rollback()  # releases the advisory transaction lock
             cur.close()
+    if not allowed:
+        raise ValueError("FUTU_OPERATOR_NOT_ARMED")
+    if broker_error is not None:
+        raise broker_error

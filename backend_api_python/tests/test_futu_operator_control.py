@@ -32,6 +32,39 @@ def test_submission_permit_checks_saved_credential_and_pending_order_under_lock(
     assert query.args[1] == (5, 3, 1, 2, 4)
 
 
+def test_submission_permit_does_not_send_expected_denial_or_broker_error_to_db_logger(monkeypatch):
+    monkeypatch.setenv("FUTU_PAPER_AUTOTRADE_ALLOWED", "true")
+    cursor = MagicMock()
+    db = MagicMock()
+    db.cursor.return_value = cursor
+    exits = []
+
+    @contextmanager
+    def fake_connection():
+        try:
+            yield db
+        except BaseException:
+            exits.append("error")
+            raise
+        else:
+            exits.append("normal")
+
+    monkeypatch.setattr(operator_gate, "get_db_connection", fake_connection)
+    cursor.fetchone.return_value = None
+    with pytest.raises(ValueError, match="FUTU_OPERATOR_NOT_ARMED"):
+        with operator_gate.submission_permit(
+            user_id=1, credential_id=2, acc_id=3, remark="qd_4_5",
+        ):
+            pytest.fail("broker submission must not run")
+    cursor.fetchone.return_value = {"?column?": 1}
+    with pytest.raises(RuntimeError, match="broker failed"):
+        with operator_gate.submission_permit(
+            user_id=1, credential_id=2, acc_id=3, remark="qd_4_5",
+        ):
+            raise RuntimeError("broker failed")
+    assert exits == ["normal", "normal"]
+
+
 def test_submission_permit_defaults_to_denied_without_database(monkeypatch):
     monkeypatch.delenv("FUTU_PAPER_AUTOTRADE_ALLOWED", raising=False)
     with pytest.raises(ValueError, match="FUTU_PAPER_AUTOTRADE_HARD_DISABLED"):
