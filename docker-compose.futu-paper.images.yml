@@ -6,32 +6,32 @@ services:
   migration:
     build: !reset null
     image: ${FUTU_BACKEND_IMAGE_REF:?Set FUTU_BACKEND_IMAGE_REF to a pinned backend image}
-    pull_policy: always
+    pull_policy: missing
   backend:
     build: !reset null
     image: ${FUTU_BACKEND_IMAGE_REF:?Set FUTU_BACKEND_IMAGE_REF to a pinned backend image}
-    pull_policy: always
+    pull_policy: missing
   trading-worker:
     build: !reset null
     image: ${FUTU_BACKEND_IMAGE_REF:?Set FUTU_BACKEND_IMAGE_REF to a pinned backend image}
-    pull_policy: always
+    pull_policy: missing
   scheduler-worker:
     build: !reset null
     image: ${FUTU_BACKEND_IMAGE_REF:?Set FUTU_BACKEND_IMAGE_REF to a pinned backend image}
-    pull_policy: always
+    pull_policy: missing
   opend-relay:
     build: !reset null
     image: ${FUTU_BACKEND_IMAGE_REF:?Set FUTU_BACKEND_IMAGE_REF to a pinned backend image}
-    pull_policy: always
+    pull_policy: missing
   celery-worker:
     build: !reset null
     image: ${FUTU_BACKEND_IMAGE_REF:?Set FUTU_BACKEND_IMAGE_REF to a pinned backend image}
-    pull_policy: always
+    pull_policy: missing
   celery-beat:
     build: !reset null
     image: ${FUTU_BACKEND_IMAGE_REF:?Set FUTU_BACKEND_IMAGE_REF to a pinned backend image}
-    pull_policy: always
+    pull_policy: missing
   frontend:
     build: !reset null
     image: ${FUTU_FRONTEND_IMAGE_REF:?Set FUTU_FRONTEND_IMAGE_REF to a pinned frontend image}
-    pull_policy: always
+    pull_policy: missing
