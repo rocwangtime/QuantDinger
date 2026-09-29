@@ -777,10 +777,10 @@
       }
     },
     "/api/agent/v1/trading/accounts/{credential_id}/futu-quote-status": {
-      "get": { "summary": "Read OpenD quote health and subscription quota; entitlement unverified", "x-scope-class": "R", "responses": { "200": { "description": "Sanitized status and quota" }, "503": { "description": "OpenD unavailable" } } }
+      "get": { "summary": "Read OpenD quote health and subscription quota; entitlement unverified", "x-scope-class": "R", "parameters": [{ "in": "path", "name": "credential_id", "required": true, "schema": { "type": "integer" } }], "responses": { "200": { "description": "Sanitized status and quota" }, "503": { "description": "OpenD unavailable" } } }
     },
     "/api/agent/v1/trading/accounts/{credential_id}/futu-order-book": {
-      "get": { "summary": "Read subscribed Futu US order book and symbol market state", "x-scope-class": "R", "responses": { "200": { "description": "Market state and bid/ask levels; not execution-eligible" }, "503": { "description": "OpenD unavailable" } } }
+      "get": { "summary": "Read subscribed Futu US order book and symbol market state", "x-scope-class": "R", "parameters": [{ "in": "path", "name": "credential_id", "required": true, "schema": { "type": "integer" } }, { "in": "query", "name": "symbol", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "Market state and bid/ask levels; not execution-eligible" }, "503": { "description": "OpenD unavailable" } } }
     },
     "/api/agent/v1/admin/trading-policy": {
       "get": { "summary": "Read policy as human administrator", "security": [{ "HumanJWT": [] }], "responses": { "200": { "description": "OK" } } },
