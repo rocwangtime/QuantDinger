@@ -114,15 +114,16 @@ def _cancel_queued_orders(user_id: int, credential_id: int) -> int:
             cur.close()
 
 
-def _unresolved_processing_orders(user_id: int, credential_id: int) -> int:
+def _unresolved_submit_outcomes(user_id: int, credential_id: int) -> int:
     with get_db_connection() as db:
         cur = db.cursor()
         cur.execute(
             """SELECT COUNT(*) AS n FROM pending_orders
                WHERE user_id = %s AND credential_id = %s
                  AND LOWER(exchange_id) = 'futu' AND execution_mode = 'live'
-                 AND status = 'processing'
-                 AND COALESCE(exchange_order_id, '') = ''""",
+                 AND COALESCE(exchange_order_id, '') = ''
+                 AND (status = 'processing' OR
+                      (status = 'sent' AND COALESCE(client_order_id, '') <> ''))""",
             (int(user_id), int(credential_id)),
         )
         count = int((cur.fetchone() or {}).get("n") or 0)
@@ -183,8 +184,8 @@ def pause_account(user_id: int, credential_id: int, acc_id: int, config: dict) -
         wait_submission_barrier(acc_id)
         queued = _cancel_queued_orders(user_id, credential_id)
         cancelled = _cancel_owned_open_orders(user_id, credential_id, config)
-        if _unresolved_processing_orders(user_id, credential_id):
-            raise RuntimeError("FUTU_PROCESSING_ORDER_REVIEW_REQUIRED")
+        if _unresolved_submit_outcomes(user_id, credential_id):
+            raise RuntimeError("FUTU_SUBMISSION_OUTCOME_REVIEW_REQUIRED")
     except Exception as exc:
         finish_pause(user_id, acc_id, confirmed=False, error=str(exc))
         return {

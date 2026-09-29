@@ -232,6 +232,7 @@ def test_filled_snapshot_without_broker_price_stays_retryable(monkeypatch):
 
 def test_immediate_futu_fill_waits_for_durable_reconciliation(monkeypatch):
     worker = PendingOrderWorker.__new__(PendingOrderWorker)
+    worker._prepare_submission = MagicMock()
     worker._mark_sent = MagicMock()
     worker._mark_failed = MagicMock()
     worker._unrecorded_pending_fill = MagicMock(return_value=1)
@@ -278,6 +279,7 @@ def test_immediate_futu_fill_waits_for_durable_reconciliation(monkeypatch):
 
 def test_immediate_futu_fill_records_broker_price_without_advancing_pending_snapshot(monkeypatch):
     worker = PendingOrderWorker.__new__(PendingOrderWorker)
+    worker._prepare_submission = MagicMock()
     worker._mark_sent = MagicMock()
     worker._mark_failed = MagicMock()
     worker._unrecorded_pending_fill = MagicMock(return_value=1)
@@ -314,6 +316,65 @@ def test_immediate_futu_fill_records_broker_price_without_advancing_pending_snap
     assert persist.call_args.kwargs["market_type"] == "USStock"
     assert persist.call_args.kwargs["cumulative_filled"] == 1
     worker._unrecorded_pending_fill.assert_called_once_with(25, 1.0, fail_closed=True)
+
+
+def test_ambiguous_futu_submit_keeps_durable_remark_for_reconciliation(monkeypatch):
+    worker = PendingOrderWorker.__new__(PendingOrderWorker)
+    worker._prepare_submission = MagicMock()
+    worker._mark_submit_unknown = MagicMock()
+    worker._mark_failed = MagicMock()
+    client = MagicMock()
+    client.find_order_by_remark.return_value = None
+    client.place_limit_order.return_value = SimpleNamespace(
+        success=False, message="connection timed out",
+    )
+    monkeypatch.setattr(worker_module, "append_strategy_log", MagicMock())
+
+    worker._execute_futu_order(
+        order_id=27,
+        order_row={"symbol": "US.SPY", "signal_type": "open_long", "amount": 1},
+        payload={"signal_type": "open_long", "symbol": "US.SPY", "amount": 1,
+                 "order_type": "limit", "limit_price": 100},
+        client=client,
+        strategy_id=1,
+        exchange_config={"exchange_id": "futu"},
+        market_category="USStock",
+        _notify_live_best_effort=MagicMock(),
+        _console_print=MagicMock(),
+    )
+
+    worker._prepare_submission.assert_called_once_with(
+        order_id=27, exchange_id="futu", market_type="USStock",
+        client_order_id="qd_1_27",
+    )
+    worker._mark_submit_unknown.assert_called_once()
+    worker._mark_failed.assert_not_called()
+
+
+def test_futu_sync_recovers_broker_id_from_precommitted_remark(monkeypatch):
+    row = {"id": 28, "exchange_order_id": "", "client_order_id": "qd_1_28", "strategy_id": 9,
+           "filled": 0, "avg_price": 0}
+    result = SimpleNamespace(success=True, order_id="OID-28", status="submitted",
+                             filled=0, avg_price=0, raw={}, message="matched_by_remark")
+
+    class RemarkClient(_FakeFutuClient):
+        def find_order_by_remark(self, remark):
+            assert remark == "qd_1_28"
+            return result
+
+    client = RemarkClient(result)
+    worker = _worker_with_claim(row)
+    worker._bind_reconciled_exchange_order_id = MagicMock()
+    _configure_futu_strategy(monkeypatch, client)
+    monkeypatch.setattr(worker_module, "FutuClient", RemarkClient)
+
+    worker._sync_one_futu_sent_order(row)
+
+    worker._bind_reconciled_exchange_order_id.assert_called_once_with(
+        order_id=28, exchange_id="futu", market_type="USStock",
+        client_order_id="qd_1_28", exchange_order_id="OID-28", observed_filled=0.0,
+    )
+    worker._update_futu_sent_order_snapshot.assert_called_once()
 
 
 def test_retry_uses_durable_trade_ledger_to_avoid_duplicate_fill(monkeypatch):

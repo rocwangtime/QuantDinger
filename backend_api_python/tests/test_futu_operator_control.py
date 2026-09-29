@@ -147,12 +147,12 @@ def test_pause_keeps_stale_processing_submit_unconfirmed(monkeypatch):
     monkeypatch.setattr(operator_control, "wait_submission_barrier", lambda *_: None)
     monkeypatch.setattr(operator_control, "_cancel_queued_orders", lambda *_: 0)
     monkeypatch.setattr(operator_control, "_cancel_owned_open_orders", lambda *_: 0)
-    monkeypatch.setattr(operator_control, "_unresolved_processing_orders", lambda *_: 1)
+    monkeypatch.setattr(operator_control, "_unresolved_submit_outcomes", lambda *_: 1)
     finished = []
     monkeypatch.setattr(operator_control, "finish_pause", lambda *_, **kw: finished.append(kw["confirmed"]))
     result = operator_control.pause_account(1, 2, 3, {})
     assert result["state"] == "unconfirmed"
-    assert result["error"] == "FUTU_PROCESSING_ORDER_REVIEW_REQUIRED"
+    assert result["error"] == "FUTU_SUBMISSION_OUTCOME_REVIEW_REQUIRED"
     assert finished == [False]
 
 

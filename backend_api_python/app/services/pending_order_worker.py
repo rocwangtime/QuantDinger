@@ -776,7 +776,8 @@ class PendingOrderWorker(
                     FROM pending_orders
                     WHERE status = 'sent'
                       AND LOWER(COALESCE(exchange_id, '')) = 'futu'
-                      AND COALESCE(exchange_order_id, '') <> ''
+                      AND (COALESCE(exchange_order_id, '') <> ''
+                           OR COALESCE(client_order_id, '') <> '')
                     ORDER BY sent_at ASC NULLS FIRST, id ASC
                     LIMIT %s
                     """,
@@ -804,7 +805,8 @@ class PendingOrderWorker(
                     WHERE id = %s
                       AND status = 'sent'
                       AND LOWER(COALESCE(exchange_id, '')) = 'futu'
-                      AND COALESCE(exchange_order_id, '') <> ''
+                      AND (COALESCE(exchange_order_id, '') <> ''
+                           OR COALESCE(client_order_id, '') <> '')
                     RETURNING *
                     """,
                     (int(order_id),),
@@ -879,7 +881,8 @@ class PendingOrderWorker(
         """Sync one already-claimed row; return True once its DB state is finalized."""
         order_id = int(row.get("id") or 0)
         exchange_order_id = str(row.get("exchange_order_id") or "").strip()
-        if not exchange_order_id:
+        client_order_id = str(row.get("client_order_id") or "").strip()
+        if not exchange_order_id and not client_order_id:
             return False
 
         payload = {}
@@ -921,14 +924,29 @@ class PendingOrderWorker(
             if FutuClient is None or not isinstance(client, FutuClient):
                 return False
 
-            result = client.get_order_status(exchange_order_id)
-            if not result.success:
+            result = (
+                client.get_order_status(exchange_order_id)
+                if exchange_order_id else client.find_order_by_remark(client_order_id)
+            )
+            if result and result.success and not exchange_order_id and result.order_id:
+                exchange_order_id = str(result.order_id)
+                self._bind_reconciled_exchange_order_id(
+                    order_id=order_id,
+                    exchange_id="futu",
+                    market_type="USStock",
+                    client_order_id=client_order_id,
+                    exchange_order_id=exchange_order_id,
+                    observed_filled=float(result.filled or 0.0),
+                )
+            if not result or not result.success:
                 logger.warning(
                     "Futu order status unavailable: pending_id=%s order_id=%s err=%s",
                     order_id,
-                    exchange_order_id,
-                    result.message,
+                    exchange_order_id or "pending_remark_lookup",
+                    result.message if result else "not_yet_visible",
                 )
+                return False
+            if not exchange_order_id:
                 return False
 
             status = str(result.status or "").strip().lower()
@@ -3338,6 +3356,7 @@ class PendingOrderWorker(
             return
         market_type_for_client = "USStock"
         client_remark = make_client_order_id(exchange_id="futu", strategy_id=strategy_id, order_id=order_id)
+        submission_prepared = False
 
         try:
             order_type, limit_price = _broker_order_type(payload, ref_price)
@@ -3345,6 +3364,13 @@ class PendingOrderWorker(
                 self._mark_failed(order_id=order_id, error="futu_explicit_limit_price_required")
                 _notify_live_best_effort(status="failed", error="futu_explicit_limit_price_required")
                 return
+            self._prepare_submission(
+                order_id=order_id,
+                exchange_id="futu",
+                market_type=market_type_for_client,
+                client_order_id=client_remark,
+            )
+            submission_prepared = True
             # Idempotency: if a prior attempt already placed this remark, reuse it.
             existing = None
             find_fn = getattr(client, "find_order_by_remark", None)
@@ -3364,19 +3390,23 @@ class PendingOrderWorker(
 
             if not result.success:
                 # Timeout / ambiguous failure: query by remark before failing hard.
-                if callable(find_fn) and ("timeout" in str(result.message or "").lower() or "connect" in str(result.message or "").lower()):
+                if callable(find_fn) and (
+                    self._is_ambiguous_submit_error(result.message)
+                    or "timeout" in str(result.message or "").lower()
+                    or "connect" in str(result.message or "").lower()
+                ):
                     recovered = find_fn(client_remark)
                     if recovered and recovered.success and recovered.order_id:
                         result = recovered
                     else:
-                        self._mark_failed(order_id=order_id, error=f"futu_order_failed:{result.message}")
+                        self._mark_submit_unknown(order_id=order_id, error=f"futu_submit_unknown:{result.message}")
                         _console_print(
-                            f"[worker] Futu order failed: strategy_id={strategy_id} pending_id={order_id} err={result.message}"
+                            f"[worker] Futu order outcome unknown: strategy_id={strategy_id} pending_id={order_id} err={result.message}"
                         )
-                        _notify_live_best_effort(status="failed", error=f"futu_order_failed:{result.message}")
+                        _notify_live_best_effort(status="sent", error=f"futu_submit_unknown:{result.message}")
                         append_strategy_log(
-                            strategy_id, "error",
-                            f"Futu order failed ({symbol} {signal_type}): {result.message}",
+                            strategy_id, "warning",
+                            f"Futu order outcome unknown ({symbol} {signal_type}): {result.message}",
                         )
                         return
                 else:
@@ -3477,7 +3507,10 @@ class PendingOrderWorker(
 
         except Exception as e:
             logger.error(f"Futu order execution failed: pending_id={order_id}, strategy_id={strategy_id}, err={e}")
-            self._mark_failed(order_id=order_id, error=f"futu_exception:{e}")
+            if submission_prepared:
+                self._mark_submit_unknown(order_id=order_id, error=f"futu_submit_unknown:{e}")
+            else:
+                self._mark_failed(order_id=order_id, error=f"futu_exception:{e}")
             _console_print(f"[worker] Futu order exception: strategy_id={strategy_id} pending_id={order_id} err={e}")
             _notify_live_best_effort(status="failed", error=str(e))
             append_strategy_log(strategy_id, "error", f"Futu order exception ({symbol} {signal_type}): {e}")
