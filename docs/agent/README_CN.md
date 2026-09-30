@@ -8,6 +8,7 @@
 2. [MCP 接入指南](MCP_SETUP_CN.md)：连接 Cursor、Claude Code、Codex 或远程 Agent。
 3. [Agent OpenAPI](agent-openapi.json)：查看 `/api/agent/v1` 的机器可读契约。
 4. [API 约定](../architecture/API_CONVENTIONS.md)（英文）：理解响应、认证和接口分层。
+5. [内置模型 Agent](MODEL_AGENT_CN.md)：DeepSeek/OpenAI 配置、工具层级及模拟盘执行边界。
 
 ## 权限模型
 
