@@ -1,4 +1,4 @@
-"""Durable, default-deny permission for Futu US SIMULATE order submission.
+"""Durable, default-deny permission for Futu US/HK SIMULATE order submission.
 
 The Web diagnostic connection is intentionally unrelated to this gate. An
 account must be explicitly armed after each worker start. Both a submit and
@@ -188,7 +188,7 @@ def disarm_all_on_worker_start() -> None:
 
 @contextmanager
 def submission_permit(*, user_id: int, credential_id: int, acc_id: int, remark: str,
-                      symbol: str = "", side: str = "", qty: float = 0,
+                      market: str = "", symbol: str = "", side: str = "", qty: float = 0,
                       limit_price: float = 0) -> Iterator[None]:
     """Hold the account lock through the *broker* submit; DB errors fail closed."""
     if not hard_switch_enabled():
@@ -199,7 +199,8 @@ def submission_permit(*, user_id: int, credential_id: int, acc_id: int, remark: 
     agent_match = re.fullmatch(r"qd_agent_(\d+)", str(remark or ""))
     if strategy_match is None and agent_match is None:
         raise ValueError("FUTU_PLATFORM_ORDER_ID_REQUIRED")
-    if agent_match is not None and (not symbol or side not in {"buy", "sell"}
+    if agent_match is not None and (market not in {"USStock", "HKStock"}
+                                    or not symbol or side not in {"buy", "sell"}
                                     or qty <= 0 or limit_price <= 0):
         raise ValueError("FUTU_AGENT_ORDER_SPEC_REQUIRED")
     allowed = False
@@ -254,14 +255,14 @@ def submission_permit(*, user_id: int, credential_id: int, acc_id: int, remark: 
                          AND (intent.order_spec->>'qty')::numeric = %s
                          AND (intent.order_spec->>'limit_price')::numeric = %s
                          AND intent.order_spec->>'order_type' = 'limit'
-                         AND intent.order_spec->>'market' = 'USStock'
+                         AND intent.order_spec->>'market' = %s
                          AND token.status = 'active' AND token.paper_only = TRUE
                          AND (token.expires_at IS NULL OR token.expires_at > NOW())
                          AND policy.mode = 'PAPER_AUTO' AND policy.enabled_until > NOW()
                          AND COALESCE(global_stop.mode, '') <> 'EMERGENCY_STOP'""",
                     (int(agent_match.group(1)), int(acc_id), int(user_id),
                      int(credential_id), str(remark), str(symbol).upper(), str(side).lower(),
-                     float(qty), float(limit_price)),
+                     float(qty), float(limit_price), market),
                 )
             allowed = cur.fetchone() is not None
             if allowed:

@@ -509,6 +509,7 @@ class FutuClient:
                     credential_id=self.config.operator_credential_id,
                     acc_id=account_id,
                     remark=remark,
+                    market=market,
                     symbol=str(symbol).upper(),
                     side=str(side).lower(),
                     qty=qty,

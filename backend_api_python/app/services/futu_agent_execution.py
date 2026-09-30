@@ -1,4 +1,4 @@
-"""One-shot, fail-closed Agent execution against Futu US SIMULATE.
+"""One-shot, fail-closed Agent execution against Futu US/HK SIMULATE.
 
 The intent ID is the broker identity. A committed EXECUTING record precedes
 the external call, so an ambiguous response or crash can only be reconciled,
