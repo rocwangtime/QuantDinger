@@ -127,6 +127,28 @@ def test_duplicate_saved_account_uses_newest_credential_unless_pinned(monkeypatc
     assert operator_control.saved_account_credential(1, 3, credential_id=7)[0] == 7
 
 
+def test_connect_reuses_matching_saved_paper_account(monkeypatch):
+    from app.services.futu_trading.config import FutuConfig
+
+    db = MagicMock()
+    cur = db.cursor.return_value
+    cur.fetchall.return_value = [{"id": 8, "encrypted_config": "opaque"}]
+    context = MagicMock()
+    context.__enter__.return_value = db
+    monkeypatch.setattr(operator_control, "get_db_connection", lambda: context)
+    monkeypatch.setattr(operator_control, "decrypt_credential_blob", lambda _: (
+        '{"futu_host":"host.docker.internal","futu_port":11112,'
+        '"trade_env":"demo","trade_market":"HK","market_category":"HKStock",'
+        '"security_firm":"FUTUSECURITIES","acc_id":99}'
+    ))
+    selected = FutuConfig(host="host.docker.internal", port=11112, trade_market="HK",
+                          market_category="HKStock", acc_id=99)
+    assert operator_control.ensure_saved_account_credential(1, selected) == 8
+    assert operator_control.ensure_saved_account_credential(1, selected) == 8
+    assert db.commit.call_count == 2
+    assert not any("INSERT" in str(call.args[0]) for call in cur.execute.call_args_list)
+
+
 def test_pause_can_identify_order_accepted_before_binding_was_written(monkeypatch):
     cursor = MagicMock()
     cursor.fetchall.return_value = [{

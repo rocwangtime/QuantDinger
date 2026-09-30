@@ -277,7 +277,7 @@ class FutuClient:
                 })
         self._accounts = accounts
         # Never infer a trading account from list order. An operator must
-        # explicitly choose the US SIMULATE acc_id after a read-only probe.
+        # explicitly choose the market's STOCK SIMULATE acc_id after a probe.
 
     # ------------------------------------------------------------------
     # Diagnostics
@@ -377,8 +377,13 @@ class FutuClient:
         if account is None or "SIMULATE" not in str(account.get("trd_env") or "").upper():
             raise ValueError("FUTU_SELECTED_ACCOUNT_NOT_SIMULATE")
         authorized = account.get("trdmarket_auth")
-        if authorized and "US" not in str(authorized).upper():
-            raise ValueError("FUTU_SELECTED_ACCOUNT_NOT_US")
+        if not authorized or self.config.trade_market not in str(authorized).upper():
+            raise ValueError("FUTU_SELECTED_ACCOUNT_WRONG_MARKET")
+        sim_type = str(account.get("sim_acc_type") or "").upper()
+        if self.config.trade_market == "HK" and sim_type != "STOCK":
+            raise ValueError("FUTU_HK_STOCK_SIM_ACCOUNT_REQUIRED")
+        if self.config.trade_market == "US" and sim_type not in {"STOCK", "STOCK_AND_OPTION"}:
+            raise ValueError("FUTU_US_STOCK_SIM_ACCOUNT_REQUIRED")
         return account_id
 
     @staticmethod
@@ -389,6 +394,15 @@ class FutuClient:
 
         minute = pd.Timestamp.now(tz="UTC").floor("min")
         return bool(calendars.get_calendar("XNYS").is_open_on_minute(minute))
+
+    @staticmethod
+    def _is_regular_hk_session_now() -> bool:
+        """Use the HKEX calendar; its lunch break and holidays are closed."""
+        import exchange_calendars as calendars
+        import pandas as pd
+
+        minute = pd.Timestamp.now(tz="UTC").floor("min")
+        return bool(calendars.get_calendar("XHKG").is_open_on_minute(minute))
 
     def _place_order(
         self,
@@ -407,11 +421,14 @@ class FutuClient:
                 self._ensure_connected()
                 ft = _ensure_futu()
                 market = market_type or infer_market_category(symbol)
-                if market != "USStock":
+                expected_market = "USStock" if self.config.trade_market == "US" else "HKStock"
+                if market != expected_market:
                     return OrderResult(success=False, message=f"Unsupported market_type: {market}")
                 if str(order_type or "").strip().lower() != "limit":
                     return OrderResult(success=False, message="FUTU_LIMIT_ORDERS_ONLY")
                 code = to_futu_code(symbol, market)
+                if not code.startswith(f"{self.config.trade_market}."):
+                    return OrderResult(success=False, message="FUTU_SYMBOL_MARKET_MISMATCH")
                 qty = float(quantity or 0.0)
                 if qty <= 0:
                     return OrderResult(success=False, message="quantity must be > 0")
@@ -434,6 +451,8 @@ class FutuClient:
 
                 # Lot-size validation (best effort)
                 lot = self._query_lot_size_unlocked(code)
+                if market == "HKStock" and lot <= 0:
+                    return OrderResult(success=False, message="FUTU_HK_LOT_SIZE_UNAVAILABLE")
                 if lot and lot > 1:
                     # Reject non-multiples instead of silently rounding up
                     if abs(qty % lot) > 1e-8:
@@ -442,8 +461,25 @@ class FutuClient:
                             message=f"FUTU_INVALID_LOT_SIZE: qty={qty} lot_size={lot}",
                         )
 
-                if not self._is_regular_us_session_now():
+                in_session = (
+                    self._is_regular_us_session_now() if market == "USStock"
+                    else self._is_regular_hk_session_now()
+                )
+                if not in_session:
                     return OrderResult(success=False, message="FUTU_REGULAR_SESSION_ONLY")
+
+                if market == "HKStock":
+                    quote = self.get_simulate_execution_quote(symbol)
+                    if not quote.get("simulate_execution_eligible"):
+                        return OrderResult(success=False, message="FUTU_HK_FRESH_QUOTE_REQUIRED")
+                    reference = safe_float(quote.get("price"))
+                    limit = safe_float(price)
+                    if reference <= 0 or limit <= 0 or abs(limit / reference - 1) > 0.02:
+                        return OrderResult(success=False, message="FUTU_HK_LIMIT_PRICE_OUT_OF_RANGE")
+                    if str(side or "").lower() == "buy":
+                        maximum = self._max_cash_buy_unlocked(code, limit, account_id)
+                        if maximum < qty:
+                            return OrderResult(success=False, message="FUTU_HK_MAX_CASH_BUY_INSUFFICIENT")
 
                 ot = order_type_to_futu(order_type)
                 px = float(price or 0.0)
@@ -659,12 +695,13 @@ class FutuClient:
             with self._lock:
                 self._ensure_connected()
                 ft = _ensure_futu()
-                currency = getattr(getattr(ft, "Currency", None), "USD", None)
+                currency_code = "USD" if self.config.trade_market == "US" else "HKD"
+                currency = getattr(getattr(ft, "Currency", None), currency_code, None)
                 query = {
                     "trd_env": self._trd_env(ft),
                     "acc_id": self._acc_id_arg(),
                 }
-                if self.config.trade_market == "US" and currency is not None:
+                if currency is not None:
                     query["currency"] = currency
                 ret, data = self._trade_ctx.accinfo_query(
                     **query,
@@ -673,12 +710,12 @@ class FutuClient:
                     return {"success": False, "error": "FUTU_ACCOUNT_QUERY_FAILED"}
                 row = data.iloc[0] if hasattr(data, "iloc") and len(data) else data
                 summary = account_row_to_dict(row)
-                if self.config.trade_market == "US" and currency is not None:
+                if currency is not None:
                     # Futu's universal-account funds are denominated in the
                     # requested query currency; a US single-market account
                     # ignores the parameter and is USD-denominated.
-                    summary["currency"] = "USD"
-                    summary["currency_basis"] = "futu_usd_query"
+                    summary["currency"] = currency_code
+                    summary["currency_basis"] = f"futu_{currency_code.lower()}_query"
                 return {
                     "success": True,
                     "account": self._acc_id,
@@ -834,7 +871,7 @@ class FutuClient:
             return {"success": False, "error": f"{code_err}:{msg}"}
 
     def get_simulate_execution_quote(self, symbol: str) -> Dict[str, Any]:
-        """Fresh subscribed US quote for SIMULATE risk checks, never REAL authorization."""
+        """Fresh subscribed market quote for SIMULATE risk checks, never REAL authorization."""
         from app.services.futu_trading.execution_quote import describe_futu_quote
 
         with self._lock:
@@ -842,7 +879,10 @@ class FutuClient:
             if self._quote_ctx is None:
                 raise RuntimeError("FUTU_QUOTE_CONTEXT_REQUIRED")
             ft = _ensure_futu()
-            code = to_futu_code(symbol, "USStock")
+            market_type = "USStock" if self.config.trade_market == "US" else "HKStock"
+            code = to_futu_code(symbol, market_type)
+            if not code.startswith(f"{self.config.trade_market}."):
+                raise ValueError("FUTU_SYMBOL_MARKET_MISMATCH")
             ret, _ = self._quote_ctx.subscribe([code], [ft.SubType.QUOTE], subscribe_push=False)
             if ret != ft.RET_OK:
                 raise RuntimeError("FUTU_QUOTE_SUBSCRIPTION_REQUIRED")
@@ -856,11 +896,13 @@ class FutuClient:
                 symbol, {"last": safe_float(raw.get("last_price")),
                          "bid": safe_float(raw.get("bid_price")),
                          "ask": safe_float(raw.get("ask_price")), "raw": raw},
+                market_type=market_type,
             )
             snapshot["market_status"] = state
             snapshot["subscribed"] = True
             snapshot["simulate_execution_eligible"] = bool(
-                state == "AFTERNOON" and not snapshot["is_stale"]
+                state in ({"AFTERNOON"} if market_type == "USStock" else {"MORNING", "AFTERNOON"})
+                and not snapshot["is_stale"]
                 and snapshot["price"] and snapshot["bid"] and snapshot["ask"]
                 and snapshot["bid"] <= snapshot["ask"]
             )
@@ -890,6 +932,34 @@ class FutuClient:
             return max(0, lot)
         except Exception:
             return 0
+
+    def get_lot_size(self, symbol: str) -> int:
+        """Read broker snapshot lot size; HK execution must never guess it."""
+        with self._lock:
+            self._ensure_connected()
+            market = "USStock" if self.config.trade_market == "US" else "HKStock"
+            return self._query_lot_size_unlocked(to_futu_code(symbol, market))
+
+    def _max_cash_buy_unlocked(self, code: str, price: float, account_id: int) -> float:
+        """Ask Futu for this stock's exact cash-buy limit; never infer from cash."""
+        ft = _ensure_futu()
+        ret, data = self._trade_ctx.acctradinginfo_query(
+            order_type=ft.OrderType.NORMAL, code=code, price=float(price),
+            trd_env=self._trd_env(ft), acc_id=account_id,
+        )
+        if ret != ft.RET_OK or data is None or len(data) == 0:
+            raise RuntimeError("FUTU_MAX_CASH_BUY_QUERY_FAILED")
+        row = data.iloc[0] if hasattr(data, "iloc") else data[0]
+        return safe_float(row.get("max_cash_buy") if hasattr(row, "get") else getattr(row, "max_cash_buy", 0))
+
+    def get_max_cash_buy(self, symbol: str, price: float) -> float:
+        with self._lock:
+            self._ensure_connected()
+            market = "USStock" if self.config.trade_market == "US" else "HKStock"
+            code = to_futu_code(symbol, market)
+            if not code.startswith(f"{self.config.trade_market}."):
+                raise ValueError("FUTU_SYMBOL_MARKET_MISMATCH")
+            return self._max_cash_buy_unlocked(code, price, self._acc_id_arg())
 
     # ------------------------------------------------------------------
     # History K-line (used by data_sources.futu)

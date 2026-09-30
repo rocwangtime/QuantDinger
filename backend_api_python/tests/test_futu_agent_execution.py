@@ -63,7 +63,8 @@ def test_us_simulate_funds_explicitly_request_usd(monkeypatch):
     client._connected = True
     client._trade_ctx = MagicMock()
     client._quote_ctx = MagicMock()
-    client._accounts = [{"acc_id": 123, "trd_env": "SIMULATE", "trdmarket_auth": "US"}]
+    client._accounts = [{"acc_id": 123, "trd_env": "SIMULATE", "trdmarket_auth": "US",
+                         "sim_acc_type": "STOCK_AND_OPTION"}]
     client._trade_ctx.accinfo_query.return_value = (0, [{"power": 1000, "currency": "N/A"}])
     result = client.get_account_summary()
     assert result["summary"]["currency"] == "USD"
@@ -71,8 +72,41 @@ def test_us_simulate_funds_explicitly_request_usd(monkeypatch):
     assert client._trade_ctx.accinfo_query.call_args.kwargs["currency"] == "USD"
 
 
+def test_hk_simulate_quote_accepts_morning_and_funds_use_hkd(monkeypatch):
+    from app.services.futu_trading import client as client_module
+
+    ft = SimpleNamespace(RET_OK=0, SubType=SimpleNamespace(QUOTE="QUOTE"),
+                         Currency=SimpleNamespace(HKD="HKD"),
+                         TrdEnv=SimpleNamespace(SIMULATE="SIMULATE"))
+    monkeypatch.setattr(client_module, "_ensure_futu", lambda: ft)
+    client = FutuClient(FutuConfig(trade_market="HK", market_category="HKStock", acc_id=123))
+    client._connected = True
+    client._trade_ctx = MagicMock()
+    client._quote_ctx = MagicMock()
+    client._acc_id = 123
+    client._accounts = [{"acc_id": 123, "trd_env": "SIMULATE", "trdmarket_auth": "HK",
+                         "sim_acc_type": "STOCK"}]
+    client._quote_ctx.subscribe.return_value = (0, None)
+    client._quote_ctx.get_market_state.return_value = (0, [{"market_state": "MORNING"}])
+    stamp = datetime.now(ZoneInfo("Asia/Hong_Kong")).strftime("%Y-%m-%d %H:%M:%S")
+    client._quote_ctx.get_market_snapshot.return_value = (0, [{
+        "last_price": 420, "bid_price": 419.8, "ask_price": 420.0,
+        "update_time": stamp,
+    }])
+    quote = client.get_simulate_execution_quote("00700.HK")
+    assert quote["simulate_execution_eligible"] is True
+    assert quote["market"] == "HK"
+    client._quote_ctx.get_market_state.return_value = (0, [{"market_state": "REST"}])
+    assert client.get_simulate_execution_quote("00700.HK")["simulate_execution_eligible"] is False
+    client._trade_ctx.accinfo_query.return_value = (0, [{"power": 100000, "currency": "N/A"}])
+    summary = client.get_account_summary()
+    assert summary["summary"]["currency"] == "HKD"
+    assert client._trade_ctx.accinfo_query.call_args.kwargs["currency"] == "HKD"
+
+
 def test_preflight_requires_fresh_eligible_quote_and_usd_power():
     client = MagicMock()
+    client.config.trade_market = "US"
     client.get_simulate_execution_quote.return_value = _quote(simulate_execution_eligible=False)
     with pytest.raises(IntentError, match="Fresh subscribed"):
         gateway._preflight(client, _order())
@@ -88,12 +122,36 @@ def test_preflight_requires_fresh_eligible_quote_and_usd_power():
 
 def test_preflight_rejects_fractional_or_far_limit_before_broker_call():
     client = MagicMock()
+    client.config.trade_market = "US"
     client.get_simulate_execution_quote.return_value = _quote()
     with pytest.raises(IntentError, match="whole shares"):
         gateway._preflight(client, {**_order(), "qty": 0.5})
     with pytest.raises(IntentError, match="deviates"):
         gateway._preflight(client, {**_order(), "limit_price": 104.0})
     client.place_limit_order.assert_not_called()
+
+
+def test_hk_preflight_requires_broker_lot_and_hkd_power():
+    client = MagicMock()
+    client.config.trade_market = "HK"
+    client.get_lot_size.return_value = 100
+    client.get_max_cash_buy.return_value = 1000
+    client.get_simulate_execution_quote.return_value = _quote(price=420.0)
+    client.get_account_summary.return_value = {
+        "success": True, "summary": {"power": 100000, "currency": "HKD"},
+    }
+    order = {**_order(), "market": "HKStock", "symbol": "00700.HK",
+             "qty": 100.0, "limit_price": 420.0}
+    assert gateway._preflight(client, order)[1] == 420.0
+    with pytest.raises(IntentError, match="lot multiple"):
+        gateway._preflight(client, {**order, "qty": 50.0})
+    client.get_max_cash_buy.return_value = 0
+    with pytest.raises(IntentError, match="max cash buy"):
+        gateway._preflight(client, order)
+    client.get_max_cash_buy.return_value = 1000
+    client.get_account_summary.return_value["summary"]["currency"] = "USD"
+    with pytest.raises(IntentError, match="buying power"):
+        gateway._preflight(client, order)
 
 
 def test_non_proposed_intent_is_read_only_even_if_called_twice(monkeypatch):

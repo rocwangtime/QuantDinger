@@ -94,14 +94,14 @@ def test_futu_credential_requires_and_cross_validates_market():
     schema = CredentialCreateRequestSchema()
     with pytest.raises(ValidationError, match="trade_market"):
         schema.load({"exchange_id": "futu"})
-    with pytest.raises(ValidationError, match="FUTU_US_MARKET_ONLY"):
+    with pytest.raises(ValidationError, match="trade_market does not match market_category"):
         schema.load({
             "exchange_id": "futu",
             "trade_market": "US",
             "market_category": "HKStock",
             "acc_id": 99,
         })
-    with pytest.raises(ValidationError, match="FUTU_US_MARKET_ONLY"):
+    with pytest.raises(ValidationError, match="FUTU_STOCK_MARKET_ONLY"):
         schema.load({"exchange_id": "futu", "trade_market": "unsupported", "acc_id": 99})
     loaded = schema.load({
         "exchange_id": "futu",
@@ -110,6 +110,12 @@ def test_futu_credential_requires_and_cross_validates_market():
         "acc_id": 99,
     })
     assert loaded["trade_market"] == "US"
+    hk = schema.load({
+        "exchange_id": "futu", "trade_market": "HK",
+        "market_category": "HKStock", "acc_id": 100,
+    })
+    assert hk["trade_market"] == "HK"
+    assert config_from_exchange_config(hk).trade_market == "HK"
 
 
 def test_futu_web_endpoint_is_saved_without_schema_defaults_overriding_it(app, monkeypatch):

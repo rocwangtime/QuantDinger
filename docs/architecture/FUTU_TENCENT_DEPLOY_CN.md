@@ -1,5 +1,7 @@
 # 富途美股模拟盘：腾讯云广州轻量服务器部署准备
 
+港股股票模拟盘的增量部署和验收见 [港股模拟盘补充说明](FUTU_HK_PAPER_ADDENDUM_CN.md)。本页保留美股 MVP 的原始操作约束；两种市场均不允许实盘。
+
 本方案只运行美股 `SIMULATE`，不启用实盘。广州机房可作为技术验证起点；是否能稳定连到富途服务，要以服务器上 OpenD 的实际登录和探测为准。富途官方说明 OpenD 可运行在 [Ubuntu 云服务器](https://openapi.futunn.com/futu-api-doc/en/opend/opend-intro.html)。
 
 ## 资源与访问方式

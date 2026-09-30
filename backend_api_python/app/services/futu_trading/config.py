@@ -107,7 +107,7 @@ class FutuConfig:
     host: str = "127.0.0.1"
     port: int = 11111
     trade_env: str = "demo"  # demo -> SIMULATE, live -> REAL
-    trade_market: str = "US"  # This MVP supports US paper accounts only.
+    trade_market: str = "US"  # US/HK stock paper accounts only.
     security_firm: str = "FUTUSECURITIES"
     acc_id: int = 0
     unlock_password: str = ""
@@ -124,8 +124,11 @@ class FutuConfig:
         self.trade_market = normalize_trade_market(self.trade_market, market_category=self.market_category)
         if self.trade_env != "demo":
             raise ValueError("FUTU_SIMULATE_ONLY")
-        if self.trade_market != "US":
-            raise ValueError("FUTU_US_MARKET_ONLY")
+        if self.trade_market not in {"US", "HK"}:
+            raise ValueError("FUTU_STOCK_MARKET_ONLY")
+        expected_category = "USStock" if self.trade_market == "US" else "HKStock"
+        if self.market_category and self.market_category != expected_category:
+            raise ValueError("FUTU_MARKET_CATEGORY_MISMATCH")
         self.security_firm = normalize_security_firm(self.security_firm)
         if self.unlock_password:
             raise ValueError("FUTU_UNLOCK_PASSWORD_NOT_ACCEPTED")

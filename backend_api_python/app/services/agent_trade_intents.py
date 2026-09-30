@@ -90,8 +90,8 @@ def normalize_order(body: dict[str, Any]) -> dict[str, Any]:
         raise IntentError("Futu proposals require a saved credential_id")
     if broker == "platform" and credential_id:
         raise IntentError("Platform paper proposals cannot select a broker credential")
-    if broker == "futu" and (market != "USStock" or order_type != "limit"):
-        raise IntentError("Futu proposals are USStock limit orders only")
+    if broker == "futu" and (market not in {"USStock", "HKStock"} or order_type != "limit"):
+        raise IntentError("Futu proposals are stock SIMULATE limit orders only")
     return {
         "broker": broker,
         "credential_id": credential_id or None,
@@ -117,8 +117,11 @@ def account_scope(user_id: int, order: dict[str, Any]) -> tuple[str, str]:
     if str(cfg.get("exchange_id") or "").lower() != "futu":
         raise IntentError("Futu credential is not available to this user", 403)
     config = config_from_exchange_config(cfg)
-    if config.acc_id <= 0 or config.trade_env != "demo" or config.trade_market != "US":
-        raise IntentError("Only an explicitly selected US SIMULATE account is supported", 403)
+    if config.acc_id <= 0 or config.trade_env != "demo" or config.trade_market not in {"US", "HK"}:
+        raise IntentError("An explicitly selected stock SIMULATE account is required", 403)
+    expected = "USStock" if config.trade_market == "US" else "HKStock"
+    if order["market"] != expected:
+        raise IntentError("Futu proposal market does not match the saved account", 403)
     return "futu", f"credential:{credential_id}"
 
 
@@ -196,8 +199,8 @@ def set_policy(user_id: int, broker: str, account_ref: str, body: dict[str, Any]
     if mode == "PAPER_AUTO":
         if not markets or not symbols or "*" in markets or "*" in symbols:
             raise IntentError("PAPER_AUTO requires exact market and symbol allowlists")
-        if broker == "futu" and (markets != ["USSTOCK"] or allow_market):
-            raise IntentError("Futu PAPER_AUTO permits only USStock limit orders")
+        if broker == "futu" and (markets not in (["USSTOCK"], ["HKSTOCK"]) or allow_market):
+            raise IntentError("Futu PAPER_AUTO permits one stock market and limit orders only")
         raw = str(body.get("enabled_until") or "")
         try:
             enabled_until = datetime.fromisoformat(raw.replace("Z", "+00:00"))

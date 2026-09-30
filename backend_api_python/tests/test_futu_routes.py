@@ -2,6 +2,7 @@
 
 import inspect
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 from flask import g
 
@@ -9,7 +10,7 @@ from app.routes import futu
 from app.utils.broker_session import BrokerSessionRegistry
 
 
-def test_probe_replaces_connection_when_operator_changes_opend_host(app, monkeypatch):
+def test_probe_uses_form_host_without_replacing_connected_account(app, monkeypatch):
     created = []
 
     class FakeClient:
@@ -35,6 +36,8 @@ def test_probe_replaces_connection_when_operator_changes_opend_host(app, monkeyp
     monkeypatch.setattr(futu, "FutuClient", FakeClient)
     monkeypatch.setattr(futu, "_sessions", BrokerSessionRegistry("futu"))
     monkeypatch.setattr(futu, "local_desktop_brokers_allowed", lambda: True)
+    current = SimpleNamespace(config=SimpleNamespace(host="current.local"), disconnected=False)
+    futu._sessions.set(current)
 
     for host in ("127.0.0.1", "host.docker.internal"):
         with app.test_request_context("/api/futu/probe", method="POST", json={"host": host}):
@@ -44,7 +47,50 @@ def test_probe_replaces_connection_when_operator_changes_opend_host(app, monkeyp
 
     assert len(created) == 2
     assert created[0].disconnected is True
-    assert created[1].disconnected is False
+    assert created[1].disconnected is True
+    assert futu._sessions.get() is current
+    assert current.disconnected is False
+
+
+def test_connect_confirms_and_reuses_saved_account_without_arming(app, monkeypatch):
+    class FakeClient:
+        def __init__(self, config):
+            self.config = config
+            self.connected = True
+
+        def connect(self):
+            return True
+
+        def get_connection_status(self):
+            return {"connected": True, "account_ready": True, "acc_id": self.config.acc_id,
+                    "trade_market": self.config.trade_market}
+
+        def disconnect(self):
+            self.connected = False
+
+    monkeypatch.setattr(futu, "FutuClient", FakeClient)
+    monkeypatch.setattr(futu, "_sessions", BrokerSessionRegistry("futu"))
+    monkeypatch.setattr(futu, "local_desktop_brokers_allowed", lambda: True)
+    monkeypatch.setattr(futu, "state_for_user", lambda *_: [])
+    saved = MagicMock(return_value=7)
+    monkeypatch.setattr(futu, "ensure_saved_account_credential", saved)
+    payload = {"host": "host.docker.internal", "port": 11112, "trade_market": "HK",
+               "market_category": "HKStock", "acc_id": 99}
+
+    with app.test_request_context("/api/futu/connect", method="POST", json=payload):
+        g.user_id = 17
+        response, code = inspect.unwrap(futu.connect)()
+        assert code == 400
+        assert response.get_json()["error"] == "FUTU_ACCOUNT_CONFIRMATION_REQUIRED"
+    saved.assert_not_called()
+
+    with app.test_request_context("/api/futu/connect", method="POST",
+                                  json={**payload, "confirm_acc_id": "99"}):
+        g.user_id = 17
+        response = inspect.unwrap(futu.connect)()
+        assert response.get_json()["data"]["credential_id"] == 7
+        assert response.get_json()["data"]["trade_market"] == "HK"
+    saved.assert_called_once()
 
 
 def test_account_route_does_not_report_failed_broker_query_as_success(app, monkeypatch):

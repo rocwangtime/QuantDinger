@@ -36,11 +36,16 @@ def _submission_status(result: OrderResult) -> str:
 
 
 def _preflight(client: FutuClient, order: dict[str, Any]) -> tuple[dict, float]:
-    if order["broker"] != "futu" or order["market"] != "USStock" or order["order_type"] != "limit":
-        raise IntentError("Only Futu USStock SIMULATE limit orders can execute", 403)
+    market = "USStock" if client.config.trade_market == "US" else "HKStock"
+    if order["broker"] != "futu" or order["market"] != market or order["order_type"] != "limit":
+        raise IntentError("Only matching Futu stock SIMULATE limit orders can execute", 403)
     qty = float(order["qty"])
     if not qty.is_integer() or qty <= 0:
         raise IntentError("Futu execution requires whole shares", 400)
+    if market == "HKStock":
+        lot = client.get_lot_size(order["symbol"])
+        if lot <= 0 or qty % lot != 0:
+            raise IntentError("Futu HK quantity must be an exact broker lot multiple", 400)
     quote = client.get_simulate_execution_quote(order["symbol"])
     if not quote.get("simulate_execution_eligible"):
         raise IntentError("Fresh subscribed regular-session Futu quote is required", 409)
@@ -53,10 +58,17 @@ def _preflight(client: FutuClient, order: dict[str, Any]) -> tuple[dict, float]:
     if order["side"] == "buy":
         account = client.get_account_summary()
         summary = account.get("summary") or {}
-        power = float(summary.get("power") or 0)
-        if (not account.get("success") or str(summary.get("currency") or "").upper() != "USD"
-                or not math.isfinite(power) or power < qty * limit):
+        currency = "USD" if market == "USStock" else "HKD"
+        if not account.get("success") or str(summary.get("currency") or "").upper() != currency:
             raise IntentError("Futu buying power could not be verified", 409)
+        if market == "HKStock":
+            maximum = client.get_max_cash_buy(order["symbol"], limit)
+            if not math.isfinite(maximum) or maximum < qty:
+                raise IntentError("Futu HK max cash buy is insufficient", 409)
+        else:
+            power = float(summary.get("power") or 0)
+            if not math.isfinite(power) or power < qty * limit:
+                raise IntentError("Futu buying power could not be verified", 409)
     else:
         # The client repeats a broker-side can_sell_qty check immediately
         # before submission; this preflight is only a preliminary guard.
@@ -78,11 +90,11 @@ def _load_client(user_id: int, account_ref: str) -> FutuClient:
         if str(cfg.get("exchange_id") or "").lower() != "futu":
             raise ValueError("wrong broker")
         config = config_from_exchange_config(cfg)
-        if config.acc_id <= 0 or config.trade_market != "US" or config.trade_env != "demo":
+        if config.acc_id <= 0 or config.trade_market not in {"US", "HK"} or config.trade_env != "demo":
             raise ValueError("wrong trading account")
         return FutuClient(config)
     except (TypeError, ValueError, KeyError) as exc:
-        raise IntentError("A saved US SIMULATE account is required", 403) from exc
+        raise IntentError("A saved stock SIMULATE account is required", 403) from exc
 
 
 def _read_owned_intent(user_id: int, intent_id: int, token_id: int | None = None) -> dict:
@@ -179,7 +191,7 @@ def execute_simulate_intent(user_id: int, token: dict, intent_id: int) -> dict:
         try:
             result = client.place_limit_order(
                 order["symbol"], order["side"], order["qty"], order["limit_price"],
-                "USStock", remark=remark,
+                order["market"], remark=remark,
             )
         except Exception:
             result = OrderResult(success=False, message="FUTU_SUBMISSION_OUTCOME_UNKNOWN",

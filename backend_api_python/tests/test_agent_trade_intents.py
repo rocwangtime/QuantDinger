@@ -26,11 +26,16 @@ def test_order_hash_input_is_canonical_and_rejects_unreviewed_fields():
         intents.normalize_order(_order(limit_price=float("nan")))
 
 
-def test_futu_is_only_a_us_paper_limit_proposal(monkeypatch):
-    with pytest.raises(intents.IntentError, match="USStock limit"):
+def test_futu_is_only_a_stock_paper_limit_proposal(monkeypatch):
+    with pytest.raises(intents.IntentError, match="stock SIMULATE limit"):
         intents.normalize_order(_order(broker="futu", credential_id=2))
     with pytest.raises(intents.IntentError, match="credential_id"):
         intents.normalize_order(_order(broker="futu"))
+    hk = intents.normalize_order(_order(
+        broker="futu", credential_id=2, market="HKStock",
+        symbol="00700.HK", qty=100,
+    ))
+    assert hk["market"] == "HKStock"
 
 
 def test_real_modes_cannot_be_configured_even_with_confirmation():
@@ -47,7 +52,7 @@ def test_platform_paper_requires_human_expiry_and_exact_allowlist():
         intents.set_policy(1, "futu", "credential:2", {
             "mode": "PAPER_AUTO", "confirm_mode": "PAPER_AUTO",
         })
-    with pytest.raises(intents.IntentError, match="USStock limit"):
+    with pytest.raises(intents.IntentError, match="stock market and limit"):
         intents.set_policy(1, "futu", "credential:2", {
             "mode": "PAPER_AUTO", "confirm_mode": "PAPER_AUTO",
             "allowed_markets": ["Crypto"], "allowed_symbols": ["AAPL"],

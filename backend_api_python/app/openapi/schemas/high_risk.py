@@ -109,9 +109,11 @@ class CredentialCreateRequestSchema(Schema):
                 market_category=market_category,
             )
             expected = {"HKStock": "HK", "USStock": "US"}.get(market_category)
-            if normalized_trade_market != "US" or (market_category and market_category != "USStock"):
+            if normalized_trade_market not in {"US", "HK"} or (
+                market_category and market_category not in {"USStock", "HKStock"}
+            ):
                 raise ValidationError(
-                    "FUTU_US_MARKET_ONLY",
+                    "FUTU_STOCK_MARKET_ONLY",
                     field_name="trade_market",
                 )
             if expected and normalized_trade_market != expected:

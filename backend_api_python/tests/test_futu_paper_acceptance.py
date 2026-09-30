@@ -39,6 +39,22 @@ def test_completed_one_share_roundtrip_matches_broker(evidence):
     }
 
 
+def test_completed_hk_board_lot_roundtrip_matches_broker(evidence):
+    for group in ("pending_orders", "broker_orders"):
+        for row in evidence[group]:
+            row["symbol"] = "HK.00700" if group == "broker_orders" else "HKStock:00700"
+            row["filled"] = 100
+            if group == "broker_orders":
+                row["quantity"] = 100
+            else:
+                row["amount"] = 100
+    for row in evidence["trades"]:
+        row["amount"] = 100
+    assert verify_roundtrip(**evidence, expected_symbol="00700.HK", expected_quantity=100) == {
+        "passed": True, "orders": 2, "fill_rows": 2, "final_hk_quantity": 0,
+    }
+
+
 @pytest.mark.parametrize("path,key,value,code", [
     ("pending_orders", "filled", 0, "ORDER_QUANTITY_MISMATCH"),
     ("pending_orders", "avg_price", 599, "ORDER_AVERAGE_PRICE_MISMATCH"),
