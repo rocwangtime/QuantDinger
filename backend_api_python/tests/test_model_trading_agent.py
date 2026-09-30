@@ -134,7 +134,7 @@ def test_provider_status_never_returns_api_keys(client, monkeypatch):
     assert response.status_code == 200
     assert "super-secret-provider-key" not in response.get_data(as_text=True)
     assert {item["provider"] for item in response.get_json()["data"]["providers"]} == {
-        "deepseek", "openai"}
+        "deepseek", "openai", "volcengine"}
 
 
 def test_disabled_model_agent_denies_before_provider_call(client, monkeypatch):
@@ -173,7 +173,7 @@ def test_provider_adapters_use_documented_chat_tool_shapes(monkeypatch):
         return Response()
 
     monkeypatch.setattr(runner.LLMService, "_llm_post", fake_post)
-    for provider in ("deepseek", "openai"):
+    for provider in ("deepseek", "openai", "volcengine"):
         service = runner.LLMService(provider)
         assert runner._completion(service, "test-model", "test-key", [{"role": "user", "content": "x"}],
                                   runner._tools_for("observe"))["content"] == "done"
@@ -182,6 +182,26 @@ def test_provider_adapters_use_documented_chat_tool_shapes(monkeypatch):
     assert seen[0][1]["max_tokens"] == 2048
     assert seen[1][1]["parallel_tool_calls"] is False
     assert seen[1][1]["max_completion_tokens"] == 2048
+    assert seen[2][0] == "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
+    assert seen[2][1]["parallel_tool_calls"] is False
+    assert seen[2][1]["max_completion_tokens"] == 2048
+
+
+def test_volcengine_is_distinct_from_official_deepseek(monkeypatch):
+    from app.config import APIKeys
+    from app.services.llm import LLMProvider
+    from app.routes.settings import CONFIG_SCHEMA
+
+    monkeypatch.setenv("VOLCENGINE_API_KEY", "ark-test-key")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "deepseek-test-key")
+    assert APIKeys.VOLCENGINE_API_KEY == "ark-test-key"
+    assert runner.LLMService("volcengine").get_api_key(LLMProvider.VOLCENGINE) == "ark-test-key"
+    assert runner.LLMService("deepseek").get_api_key(LLMProvider.DEEPSEEK) == "deepseek-test-key"
+    ai_items = {item["key"]: item for item in CONFIG_SCHEMA["ai"]["items"]}
+    assert ai_items["VOLCENGINE_API_KEY"]["group"] == "volcengine"
+    assert ai_items["VOLCENGINE_BASE_URL"]["default"].endswith("/api/v3")
+    providers = {option["value"] for option in ai_items["LLM_PROVIDER"]["options"]}
+    assert {"deepseek", "volcengine", "openai"}.issubset(providers)
 
 
 def test_hk_quote_tool_is_read_only_and_tagged_not_execution_eligible(client, monkeypatch):

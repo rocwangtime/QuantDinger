@@ -96,6 +96,7 @@ class LLMProvider(Enum):
     OPENAI = "openai"
     GOOGLE = "google"
     DEEPSEEK = "deepseek"
+    VOLCENGINE = "volcengine"
     GROK = "grok"
     ATLASCLOUD = "atlascloud"
     CUSTOM = "custom"
@@ -124,6 +125,11 @@ PROVIDER_CONFIGS = {
         "base_url": "https://api.deepseek.com/v1",
         "default_model": "deepseek-chat",
         "fallback_model": "deepseek-chat",
+    },
+    LLMProvider.VOLCENGINE: {
+        "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+        "default_model": "deepseek-v4-1-flash-260910",
+        "fallback_model": "",
     },
     LLMProvider.GROK: {
         "base_url": "https://api.x.ai/v1",
@@ -191,6 +197,7 @@ class LLMService:
         # Priority: DeepSeek > AtlasCloud > Grok > MiniMax > OpenAI > Google > OpenRouter
         # (LiteLLM excluded from auto-detect; must be set explicitly via LLM_PROVIDER=litellm)
         priority_order = [
+            LLMProvider.VOLCENGINE,
             LLMProvider.DEEPSEEK,
             LLMProvider.ATLASCLOUD,
             LLMProvider.GROK,
@@ -217,6 +224,7 @@ class LLMService:
             LLMProvider.OPENAI: APIKeys.OPENAI_API_KEY,
             LLMProvider.GOOGLE: APIKeys.GOOGLE_API_KEY,
             LLMProvider.DEEPSEEK: APIKeys.DEEPSEEK_API_KEY,
+            LLMProvider.VOLCENGINE: APIKeys.VOLCENGINE_API_KEY,
             LLMProvider.GROK: APIKeys.GROK_API_KEY,
             LLMProvider.ATLASCLOUD: APIKeys.ATLASCLOUD_API_KEY,
             LLMProvider.CUSTOM: APIKeys.CUSTOM_API_KEY,
@@ -1048,6 +1056,7 @@ class LLMService:
                 'openai': LLMProvider.OPENAI,
                 'google': LLMProvider.GOOGLE,
                 'deepseek': LLMProvider.DEEPSEEK,
+                'volcengine': LLMProvider.VOLCENGINE,
                 'x-ai': LLMProvider.GROK,
                 'xai': LLMProvider.GROK,
                 'atlascloud': LLMProvider.ATLASCLOUD,
@@ -1082,6 +1091,7 @@ class LLMService:
             'openai': LLMProvider.OPENAI,
             'google': LLMProvider.GOOGLE,
             'deepseek': LLMProvider.DEEPSEEK,
+            'volcengine': LLMProvider.VOLCENGINE,
             'x-ai': LLMProvider.GROK,
             'xai': LLMProvider.GROK,
             'atlascloud': LLMProvider.ATLASCLOUD,
@@ -1163,7 +1173,7 @@ class LLMService:
                 )
             # If no API key for current provider, try to find any available provider
             if try_alternative_providers:
-                for alt_provider in [LLMProvider.DEEPSEEK, LLMProvider.ATLASCLOUD, LLMProvider.GROK, LLMProvider.MINIMAX, LLMProvider.OPENAI, LLMProvider.GOOGLE, LLMProvider.OPENROUTER]:
+                for alt_provider in [LLMProvider.VOLCENGINE, LLMProvider.DEEPSEEK, LLMProvider.ATLASCLOUD, LLMProvider.GROK, LLMProvider.MINIMAX, LLMProvider.OPENAI, LLMProvider.GOOGLE, LLMProvider.OPENROUTER]:
                     if alt_provider != p and self.get_api_key(alt_provider):
                         logger.warning(f"No API key for {p.value}, switching to {alt_provider.value}")
                         p = alt_provider
@@ -1364,6 +1374,7 @@ class LLMService:
         Priority: DeepSeek > AtlasCloud > Grok > MiniMax > OpenAI > Google > OpenRouter
         """
         priority_order = [
+            LLMProvider.VOLCENGINE,
             LLMProvider.DEEPSEEK,
             LLMProvider.ATLASCLOUD,
             LLMProvider.GROK,

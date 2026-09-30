@@ -22,7 +22,7 @@ from app.utils.agent_auth import instrument_allowed, market_allowed
 
 
 TIERS = ("observe", "plan", "paper")
-PROVIDERS = ("deepseek", "openai")
+PROVIDERS = ("deepseek", "openai", "volcengine")
 MAX_STEPS = 4
 MAX_GOAL_CHARS = 4000
 DEFAULT_MAX_COMPLETION_TOKENS = 2048
@@ -96,7 +96,7 @@ def provider_status() -> list[dict[str, Any]]:
 def _select_provider(requested: str | None) -> tuple[LLMService, str, str]:
     selected = str(requested or os.getenv("AGENT_MODEL_PROVIDER") or LLMService().provider.value).lower().strip()
     if selected not in PROVIDERS:
-        raise ModelAgentError("Configure DeepSeek or OpenAI for the model Agent", 400)
+        raise ModelAgentError("Configure DeepSeek, OpenAI or Volcengine Ark for the model Agent", 400)
     service = LLMService(selected)
     provider = LLMProvider(selected)
     key = service.get_api_key(provider)
@@ -120,9 +120,9 @@ def _completion(service: LLMService, model: str, key: str, messages: list, tools
         "tools": tools,
         "tool_choice": "auto",
     }
-    if provider == "openai":
+    if provider in {"openai", "volcengine"}:
         payload["parallel_tool_calls"] = False
-    payload["max_completion_tokens" if provider == "openai" else "max_tokens"] = token_cap
+    payload["max_completion_tokens" if provider in {"openai", "volcengine"} else "max_tokens"] = token_cap
     try:
         response = service._llm_post(
             f"{service.get_base_url()}/chat/completions",

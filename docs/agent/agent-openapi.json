@@ -199,7 +199,7 @@
         "required": ["goal"],
         "properties": {
           "goal": { "type": "string", "minLength": 1, "maxLength": 4000 },
-          "provider": { "type": "string", "enum": ["deepseek", "openai"], "description": "Optional; otherwise AGENT_MODEL_PROVIDER or configured LLM_PROVIDER. Model and key remain server-owned." }
+          "provider": { "type": "string", "enum": ["deepseek", "openai", "volcengine"], "description": "Optional; otherwise AGENT_MODEL_PROVIDER or configured LLM_PROVIDER. Model and key remain server-owned. Volcengine is separate from DeepSeek official API." }
         }
       }
     }
@@ -207,7 +207,7 @@
   "security": [{ "AgentToken": [] }],
   "paths": {
     "/api/agent/v1/model-agent/providers": {
-      "get": { "summary": "Show enabled state and configured DeepSeek/OpenAI models without credentials", "x-scope-class": "R", "responses": { "200": { "description": "Provider readiness" } } }
+      "get": { "summary": "Show enabled state and configured DeepSeek/OpenAI/Volcengine models without credentials", "x-scope-class": "R", "responses": { "200": { "description": "Provider readiness" } } }
     },
     "/api/agent/v1/model-agent/observe": {
       "post": { "summary": "Run a bounded read-only model Agent", "x-scope-class": "R", "parameters": [{ "in": "header", "name": "Idempotency-Key", "required": true, "schema": { "type": "string", "maxLength": 120 } }], "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ModelAgentRunRequest" } } } }, "responses": { "200": { "description": "Answer and tool receipts" }, "403": { "description": "Model Agent disabled" } } }

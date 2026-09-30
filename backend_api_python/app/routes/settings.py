@@ -429,6 +429,7 @@ CONFIG_SCHEMA = {
                     {'value': 'openai', 'label': 'OpenAI Direct'},
                     {'value': 'google', 'label': 'Google Gemini'},
                     {'value': 'deepseek', 'label': 'DeepSeek'},
+                    {'value': 'volcengine', 'label': 'Volcengine Ark (pay-as-you-go)'},
                     {'value': 'grok', 'label': 'xAI Grok'},
                     {'value': 'atlascloud', 'label': 'AtlasCloud'},
                     {'value': 'custom', 'label': 'Custom API (OpenAI-compatible)'},
@@ -544,6 +545,33 @@ CONFIG_SCHEMA = {
                 'default': 'https://api.deepseek.com/v1',
                 'description': 'DeepSeek API endpoint',
                 'group': 'deepseek'
+            },
+            # Hosted DeepSeek via Volcengine Ark is a separate biller and credential.
+            {
+                'key': 'VOLCENGINE_API_KEY',
+                'label': 'Volcengine Ark API Key',
+                'type': 'password',
+                'required': False,
+                'link': 'https://ark.volcengine.com/region:cn-beijing/apikey',
+                'link_text': 'settings.link.getApiKey',
+                'description': '火山方舟标准按量 API Key；不要填 DeepSeek 官方 API Key',
+                'group': 'volcengine'
+            },
+            {
+                'key': 'VOLCENGINE_MODEL',
+                'label': 'Volcengine Model ID / Endpoint ID',
+                'type': 'text',
+                'default': 'deepseek-v4-1-flash-260910',
+                'description': '模型品牌与 API 服务商分开配置；也可填写自定义推理接入点 ep-... ID',
+                'group': 'volcengine'
+            },
+            {
+                'key': 'VOLCENGINE_BASE_URL',
+                'label': 'Volcengine Ark Base URL',
+                'type': 'text',
+                'default': 'https://ark.cn-beijing.volces.com/api/v3',
+                'description': '标准按量 API 使用 /api/v3；Coding/Agent Plan 地址不同，错误地址可能额外计费',
+                'group': 'volcengine'
             },
             # xAI Grok
             {

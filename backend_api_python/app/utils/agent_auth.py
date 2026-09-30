@@ -512,7 +512,7 @@ def _audit(scope_class: str, status_code: int, response_summary: Any, duration_m
             provider = payload.get("provider") if isinstance(payload, dict) else None
             req_summary["json"] = {
                 "provider": provider if isinstance(provider, str) and
-                provider in {"deepseek", "openai"} else "other",
+                provider in {"deepseek", "openai", "volcengine"} else "other",
                 "goal_chars": len(goal),
                 "goal_sha256": hashlib.sha256(goal.encode()).hexdigest(),
             }
