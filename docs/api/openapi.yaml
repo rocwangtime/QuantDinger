@@ -6831,7 +6831,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HumanSuccessEnvelope'
-      summary: Explicitly arm only the connected, saved US SIMULATE account.
+      summary: Explicitly arm only the connected, saved stock SIMULATE account.
       tags:
       - Futu
       operationId: postApiFutuAutomationArm
