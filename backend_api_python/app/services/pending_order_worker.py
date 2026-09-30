@@ -3355,7 +3355,6 @@ class PendingOrderWorker(
             self._mark_failed(order_id=order_id, error="futu_credential_market_mismatch")
             _notify_live_best_effort(status="failed", error="futu_credential_market_mismatch")
             return
-        market_type_for_client = mc
         client_remark = make_client_order_id(exchange_id="futu", strategy_id=strategy_id, order_id=order_id)
         submission_prepared = False
 
@@ -3368,7 +3367,7 @@ class PendingOrderWorker(
             self._prepare_submission(
                 order_id=order_id,
                 exchange_id="futu",
-                market_type=market_type_for_client,
+                market_type=mc,
                 client_order_id=client_remark,
             )
             submission_prepared = True
@@ -3385,7 +3384,7 @@ class PendingOrderWorker(
                     side=action,
                     quantity=amount,
                     price=limit_price,
-                    market_type=market_type_for_client,
+                    market_type=mc,
                     remark=client_remark,
                 )
 
@@ -3469,7 +3468,7 @@ class PendingOrderWorker(
                         cumulative_filled=filled,
                         cumulative_average_price=avg_price,
                         exchange_config=exchange_config,
-                        market_type=str(market_type_for_client or "HKStock"),
+                        market_type=mc,
                         order_id=int(order_id),
                         fill_source="worker_futu",
                         commission=commission,
