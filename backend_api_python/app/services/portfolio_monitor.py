@@ -208,6 +208,14 @@ def _bump_monitor_schedule(
                     """,
                     (interval, result_json, monitor_id),
                 )
+            status = 'skipped' if skipped else ('completed' if isinstance(last_result, dict) and last_result.get('success') else 'failed')
+            cur.execute(
+                """
+                INSERT INTO qd_position_monitor_runs (monitor_id, user_id, status, result_json, created_at)
+                SELECT id, user_id, ?, ?, NOW() FROM qd_position_monitors WHERE id = ?
+                """,
+                (status, result_json, monitor_id),
+            )
             db.commit()
             cur.close()
     except Exception as e:

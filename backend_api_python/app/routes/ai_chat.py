@@ -72,6 +72,7 @@ from app.services.ai_report_pdf import build_ai_report_pdf
 from app.services.ai_report_share import create_report_share, get_public_report_share
 from app.services.kline import KlineService
 from app.services.llm import LLMAPIError, LLMService
+from app.services.llm_cost import build_usage_display
 from app.services.search import get_search_service
 from app.config.data_sources import AkshareConfig, TradingEconomicsConfig
 from app.data.market_symbols_seed import search_symbols as seed_search_symbols
@@ -3813,7 +3814,8 @@ def chat_message():
             db.commit()
             cur.close()
 
-        raw = LLMService().call_llm_api(llm_messages, temperature=0.35, use_json_mode=True)
+        llm_service = LLMService()
+        raw = llm_service.call_llm_api(llm_messages, temperature=0.35, use_json_mode=True)
         parsed = _parse_llm_json(raw)
         answer = str(parsed.get("answer") or raw or "").strip()
         if not answer:
@@ -3824,6 +3826,14 @@ def chat_message():
         usage_action = _agent_usage_action(agent_plan, context, language)
         if usage_action:
             actions = [usage_action, *actions]
+        llm_usage = build_usage_display(
+            provider=getattr(llm_service, "last_provider", ""),
+            model=getattr(llm_service, "last_model", ""),
+            usage=getattr(llm_service, "last_usage", None),
+            estimated_input_tokens=context_usage.get("estimated_input_tokens") or 0,
+            estimated_output_tokens=estimate_tokens(answer),
+        )
+        actions = [{"key": "llm-usage", "type": "llm_usage", "payload": llm_usage}, *actions]
         with get_db_connection() as db:
             cur = db.cursor()
             assistant_id = _insert_message(
@@ -3865,6 +3875,7 @@ def chat_message():
                 "artifact": parsed.get("artifact") or {"type": "none"},
                 "costs": costs,
                 "context_usage": {**context_usage, **context_meta},
+                "llm_usage": llm_usage,
             },
         })
     except Exception as e:
@@ -3937,6 +3948,12 @@ def _stream_llm_with_recovery(llm_messages: list[dict], temperature: float = 0.3
         if not recovered:
             raise ValueError("LLM recovery returned empty content") from stream_error
         yield "replace", {"text": recovered, "recovered": True}
+    if getattr(service, "last_model", ""):
+        yield "usage", {
+            "usage": getattr(service, "last_usage", None),
+            "model": service.last_model,
+            "provider": getattr(service, "last_provider", ""),
+        }
 
 
 @ai_chat_blp.route("/chat/message/stream", methods=["POST"])
@@ -4093,10 +4110,13 @@ def chat_message_stream():
                 "context_usage": {**context_usage, **context_meta},
             })
             timings["prompt_ready_seconds"] = perf_counter() - started_at
+            provider_usage = {}
             for stream_event, stream_payload in _stream_llm_with_recovery(llm_messages, temperature=0.35):
                 if stream_payload.get("text"):
                     timings.setdefault("first_text_seconds", perf_counter() - started_at)
-                if stream_event == "replace":
+                if stream_event == "usage":
+                    provider_usage = stream_payload
+                elif stream_event == "replace":
                     text = str(stream_payload.get("text") or "")
                     chunks = [text]
                     stream_result["recovered"] = True
@@ -4122,6 +4142,16 @@ def chat_message_stream():
                     yield _sse("replace", {"text": chart_answer})
                 chunks = [chart_answer]
                 answer = chart_answer
+            llm_usage = build_usage_display(
+                provider=provider_usage.get("provider") or "",
+                model=provider_usage.get("model") or "",
+                usage=provider_usage.get("usage"),
+                estimated_input_tokens=context_usage.get("estimated_input_tokens") or 0,
+                estimated_output_tokens=estimate_tokens(answer),
+            )
+            response_actions = [{"key": "llm-usage", "type": "llm_usage", "payload": llm_usage}]
+            if usage_action:
+                response_actions.insert(0, usage_action)
             with get_db_connection() as db:
                 cur = db.cursor()
                 assistant_id = _insert_message(
@@ -4132,7 +4162,7 @@ def chat_message_stream():
                     content=answer,
                     attachments=[],
                     intent=intent,
-                    actions=[usage_action] if usage_action else [],
+                    actions=response_actions,
                 )
                 if request_usage_id:
                     store_update_request_usage(
@@ -4153,10 +4183,11 @@ def chat_message_stream():
                 "intent": intent,
                 "confidence": None,
                 "agent_usage": usage_action.get("payload") if usage_action else None,
-                "actions": [usage_action] if usage_action else [],
+                "actions": response_actions,
                 "costs": costs,
                 "memory_candidates": _detect_memory_candidates(message, language),
                 "context_usage": {**context_usage, **context_meta},
+                "llm_usage": llm_usage,
                 **stream_result,
             })
         except Exception as e:
