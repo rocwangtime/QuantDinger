@@ -179,7 +179,8 @@ class LLMService:
         """Keep only token counts and route metadata; never retain request secrets."""
         self.last_usage = usage if isinstance(usage, dict) else None
         self.last_model = str(model or "")
-        self.last_provider = "volcengine" if "volcengine.com" in str(base_url).lower() else str(provider or "")
+        ark_host = any(host in str(base_url).lower() for host in ("volcengine.com", "volces.com"))
+        self.last_provider = "volcengine" if ark_host else str(provider or "")
         if self.last_usage and isinstance(self.last_usage.get("prompt_tokens"), int):
             self.usage_events.append({
                 "provider": self.last_provider,
@@ -890,7 +891,9 @@ class LLMService:
             "max_tokens": self.get_max_tokens(),
             "stream": True,
         }
-        if provider in {LLMProvider.OPENAI, LLMProvider.DEEPSEEK} or "volcengine.com" in str(base_url).lower():
+        if provider in {LLMProvider.OPENAI, LLMProvider.DEEPSEEK, LLMProvider.VOLCENGINE} or any(
+            host in str(base_url).lower() for host in ("volcengine.com", "volces.com")
+        ):
             data["stream_options"] = {"include_usage": True}
         response = self._llm_post(url, headers=headers, json_payload=data, timeout=timeout, stream=True)
         if response.status_code >= 400:

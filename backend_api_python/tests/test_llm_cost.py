@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
 from app.services.llm_cost import aggregate_usage_display, build_usage_display
+from app.services.llm import LLMProvider, LLMService
 
 
 def test_volcengine_flash_peak_price_uses_cached_input():
@@ -48,3 +49,31 @@ def test_multi_call_strategy_generation_includes_repair_tokens():
     assert result["request_count"] == 2
     assert result["total_tokens"] == 430
     assert result["currency"] == "CNY"
+
+
+def test_ark_stream_requests_provider_usage(monkeypatch):
+    captured = {}
+
+    class FakeResponse:
+        status_code = 200
+        headers = {}
+
+        def iter_lines(self, decode_unicode=False):
+            return [b"data: [DONE]"]
+
+        def close(self):
+            pass
+
+    service = LLMService(provider="volcengine")
+
+    def fake_post(url, **kwargs):
+        captured.update(kwargs)
+        return FakeResponse()
+
+    monkeypatch.setattr(service, "_llm_post", fake_post)
+    list(service._stream_openai_compatible(
+        [{"role": "user", "content": "hello"}], "deepseek-v4-1-flash-260910",
+        0.2, "dummy", "https://ark.cn-beijing.volces.com/api/v3", 30,
+        provider=LLMProvider.VOLCENGINE,
+    ))
+    assert captured["json_payload"]["stream_options"] == {"include_usage": True}
