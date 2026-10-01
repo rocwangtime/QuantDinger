@@ -27,7 +27,7 @@ def _is_peak(provider: str, now: datetime) -> bool:
 def _price(provider: str, model: str, now: datetime):
     model = model.lower().strip().replace("_", "-")
     if provider == "volcengine":
-        if model in {"deepseek-v4-1-flash", "deepseek-v4.1-flash"}:
+        if model in {"deepseek-v4-1-flash", "deepseek-v4.1-flash", "deepseek-v4-1-flash-260910"}:
             return (2.0, 0.04, 8.0, "CNY", VOLC_PRICE_URL) if _is_peak(provider, now) else (1.0, 0.02, 4.0, "CNY", VOLC_PRICE_URL)
         if model == "deepseek-v4-pro":
             return 9.0, 0.30, 27.0, "CNY", VOLC_PRICE_URL

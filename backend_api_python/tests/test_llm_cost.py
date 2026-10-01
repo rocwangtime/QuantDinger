@@ -6,7 +6,7 @@ from app.services.llm_cost import aggregate_usage_display, build_usage_display
 def test_volcengine_flash_peak_price_uses_cached_input():
     result = build_usage_display(
         provider="volcengine",
-        model="deepseek-v4-1-flash",
+        model="deepseek-v4-1-flash-260910",
         usage={"prompt_tokens": 1000, "completion_tokens": 500, "prompt_tokens_details": {"cached_tokens": 200}},
         estimated_input_tokens=1,
         estimated_output_tokens=1,
