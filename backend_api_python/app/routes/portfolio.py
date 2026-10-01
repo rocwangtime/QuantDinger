@@ -400,6 +400,47 @@ def get_monitors():
         return jsonify({'code': 0, 'msg': str(e), 'data': []}), 500
 
 
+@portfolio_blp.route('/monitors/<int:monitor_id>/runs', methods=['GET'])
+@login_required
+def get_monitor_runs(monitor_id):
+    """Read an owned monitor's durable research runs; never exposes other users' runs."""
+    try:
+        user_id = int(g.user_id)
+        limit = max(1, min(int(request.args.get('limit') or 20), 50))
+        with get_db_connection() as db:
+            cur = db.cursor()
+            cur.execute(
+                'SELECT 1 FROM qd_position_monitors WHERE id = ? AND user_id = ?',
+                (monitor_id, user_id),
+            )
+            if not cur.fetchone():
+                cur.close()
+                return jsonify({'code': 0, 'msg': 'Monitor not found', 'data': None}), 404
+            cur.execute(
+                """
+                SELECT id, status, result_json, created_at
+                FROM qd_position_monitor_runs
+                WHERE monitor_id = ? AND user_id = ?
+                ORDER BY id DESC LIMIT ?
+                """,
+                (monitor_id, user_id, limit),
+            )
+            rows = cur.fetchall() or []
+            cur.close()
+        return jsonify({'code': 1, 'msg': 'success', 'data': [
+            {
+                'id': row.get('id'),
+                'status': row.get('status'),
+                'result': _safe_json_loads(row.get('result_json'), {}),
+                'created_at': _serialize_monitor_ts(row.get('created_at')),
+            }
+            for row in rows
+        ]})
+    except Exception as e:
+        logger.error('get_monitor_runs failed: %s', e, exc_info=True)
+        return jsonify({'code': 0, 'msg': str(e), 'data': []}), 500
+
+
 @portfolio_blp.route('/monitors', methods=['POST'])
 @login_required
 def add_monitor():

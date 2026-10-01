@@ -17,6 +17,7 @@ from app.services.ai_generation_contracts import (
     SCRIPT_STRATEGY_REPAIR_REQUIREMENTS,
 )
 from app.services.ai_copilot_context import fit_messages_to_budget
+from app.services.llm_cost import aggregate_usage_display
 from app.services.ai_authoring_intent import resolve_authoring_intent
 from app.services.ai_code_edits import (
     CODE_EDIT_SYSTEM_SUFFIX,
@@ -399,6 +400,7 @@ def generate_strategy():
             }
         return _ok({
             "code": code,
+            "llm_usage": aggregate_usage_display(getattr(llm, "usage_events", [])),
             "manifest": program.manifest.metadata(),
             "validation": {
                 "success": True,
