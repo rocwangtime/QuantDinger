@@ -170,6 +170,22 @@ class LLMService:
             provider: Override the default provider (openrouter, openai, google, deepseek, grok, atlascloud, custom, minimax)
         """
         self._provider_override = provider
+        self.last_usage = None
+        self.last_model = ""
+        self.last_provider = ""
+        self.usage_events = []
+
+    def _record_usage(self, usage, model: str, provider: str, base_url: str = ""):
+        """Keep only token counts and route metadata; never retain request secrets."""
+        self.last_usage = usage if isinstance(usage, dict) else None
+        self.last_model = str(model or "")
+        self.last_provider = "volcengine" if "volcengine.com" in str(base_url).lower() else str(provider or "")
+        if self.last_usage and isinstance(self.last_usage.get("prompt_tokens"), int):
+            self.usage_events.append({
+                "provider": self.last_provider,
+                "model": self.last_model,
+                "usage": self.last_usage,
+            })
 
     @property
     def provider(self) -> LLMProvider:
@@ -492,6 +508,7 @@ class LLMService:
                     finish_reason=finish_reason,
                     retryable=False,
                 )
+            self._record_usage(result.get("usage"), result.get("model") or model, self.last_provider or self.provider.value, base_url)
             content = (choice.get("message") or {}).get("content")
             if not content:
                 raise ValueError(f"Model {model} returned empty content")
@@ -873,6 +890,8 @@ class LLMService:
             "max_tokens": self.get_max_tokens(),
             "stream": True,
         }
+        if provider in {LLMProvider.OPENAI, LLMProvider.DEEPSEEK} or "volcengine.com" in str(base_url).lower():
+            data["stream_options"] = {"include_usage": True}
         response = self._llm_post(url, headers=headers, json_payload=data, timeout=timeout, stream=True)
         if response.status_code >= 400:
             err_text = self._extract_provider_error(response)
@@ -920,6 +939,8 @@ class LLMService:
                 if not isinstance(payload, dict):
                     continue
                 generation_id = str(payload.get("id") or generation_id or "").strip()[:200]
+                if isinstance(payload.get("usage"), dict):
+                    self._record_usage(payload["usage"], payload.get("model") or model, provider_name, base_url)
                 stream_error = payload.get("error")
                 if stream_error:
                     error_text = self._format_provider_error_value(stream_error)
@@ -1220,6 +1241,7 @@ class LLMService:
         
         for current_model in models_to_try:
             try:
+                self._record_usage(None, current_model, p.value, base_url)
                 if p == LLMProvider.LITELLM:
                     return self._call_litellm(
                         messages, current_model, temperature,
@@ -1354,6 +1376,7 @@ class LLMService:
             return
 
         model = self._normalize_model_for_provider(model, p)
+        self._record_usage(None, model, p.value, base_url)
         config = load_addon_config()
         timeout = int(config.get(p.value, {}).get('timeout', 120))
         yield from self._stream_openai_compatible(
