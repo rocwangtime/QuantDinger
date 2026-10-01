@@ -17,7 +17,7 @@ beautifulsoup4==4.15.0
 billiard==4.2.4
 blinker==1.9.0
 build==1.5.0
-ccxt==4.5.73
+ccxt==4.5.85
 celery==5.6.3
 certifi==2026.6.17
 cffi==2.0.0
@@ -61,7 +61,7 @@ jsonschema==4.26.0
 jsonschema-specifications==2025.9.1
 kombu==5.6.2
 korean-lunar-calendar==0.4.0
-litellm==1.93.1
+litellm==1.93.2
 lxml==6.1.1
 markdown-it-py==4.2.0
 markupsafe==3.0.3
@@ -123,7 +123,7 @@ typing-extensions==4.16.0
 typing-inspection==0.4.2
 tzdata==2026.3
 tzlocal==5.4.4
-urllib3==2.7.0
+urllib3==2.8.0
 uvloop==0.22.1
 vine==5.1.0
 wcwidth==0.8.2
