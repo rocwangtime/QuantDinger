@@ -20,8 +20,8 @@ litellm>=1.93.0,<1.94
 certifi>=2026.6.17
 PySocks>=1.7.1
 akshare>=1.18.80
-# GHSA-752w-5fwx-jx9f (crit header); 2.12.0+
-PyJWT>=2.13.0,<3
+# PyJWT 2.14.0 fixes the September 2026 JWK/JWKS and redirect advisories.
+PyJWT>=2.14.0,<3
 python-dotenv>=1.2.2
 # GHSA-g6cj-pr64-35w5 (PKCS#7 Bleichenbacher oracle); 50.0.0+
 # ccxt 4.5.73 currently constrains cryptography to the 50.x release line.

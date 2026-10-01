@@ -57,6 +57,63 @@ def place_platform_paper_order():
     return submit_trade_intent_request(body, require_paper_execution=True)
 
 
+@agent_v1_bp.route("/simulate-orders/place", methods=["POST"])
+@agent_required(SCOPE_T)
+def place_futu_simulate_order():
+    """Explicit one-call direct order, under human policy and operator arm."""
+    body, err = get_json_or_400()
+    if err:
+        return err
+    try:
+        from app.services.agent_trade_intents import normalize_order
+        from app.services.futu_agent_execution import execute_simulate_intent
+
+        order = normalize_order(body)
+        if order["broker"] != "futu":
+            return error(403, "This endpoint is for Futu SIMULATE only", http=403)
+        if not market_allowed(order["market"]) or not instrument_allowed(order["symbol"]):
+            return error(403, "Market or instrument is not allowed for this token", http=403)
+        proposal = submit_intent(
+            current_user_id(), current_token(), body,
+            (request.headers.get("Idempotency-Key") or "").strip(),
+        )
+        result = execute_simulate_intent(current_user_id(), current_token(), int(proposal["id"]))
+        return envelope(result, message="futu-simulate-order", status=201)
+    except IntentError as exc:
+        return error(exc.status, str(exc), http=exc.status)
+
+
+@agent_v1_bp.route("/trade-intents/<int:intent_id>/execute-simulate", methods=["POST"])
+@agent_required(SCOPE_T)
+def agent_execute_futu_intent(intent_id: int):
+    try:
+        from app.services.futu_agent_execution import execute_simulate_intent
+
+        row = get_intent(current_user_id(), intent_id)
+        if row is None:
+            return error(404, "Trade intent not found", http=404)
+        order = row["order_spec"]
+        if not market_allowed(order["market"]) or not instrument_allowed(order["symbol"]):
+            return error(403, "Market or instrument is not allowed for this token", http=403)
+        return envelope(execute_simulate_intent(current_user_id(), current_token(), intent_id))
+    except IntentError as exc:
+        return error(exc.status, str(exc), http=exc.status)
+
+
+@agent_v1_bp.route("/trade-intents/<int:intent_id>/reconcile-simulate", methods=["POST"])
+@agent_required(SCOPE_T)
+def agent_reconcile_futu_intent(intent_id: int):
+    try:
+        from app.services.futu_agent_execution import reconcile_simulate_intent
+
+        row = get_intent(current_user_id(), intent_id)
+        if row is None or int(row.get("agent_token_id") or 0) != int(current_token()["id"]):
+            return error(404, "Trade intent not found", http=404)
+        return envelope(reconcile_simulate_intent(current_user_id(), intent_id))
+    except IntentError as exc:
+        return error(exc.status, str(exc), http=exc.status)
+
+
 @agent_v1_bp.route("/trade-intents", methods=["GET"])
 @agent_required(SCOPE_R)
 def agent_list_trade_intents():

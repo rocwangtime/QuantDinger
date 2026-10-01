@@ -109,6 +109,11 @@ def load_addon_config() -> Dict[str, Any]:
         ('DEEPSEEK_API_KEY', 'deepseek.api_key', 'string'),
         ('DEEPSEEK_BASE_URL', 'deepseek.base_url', 'string'),
         ('DEEPSEEK_MODEL', 'deepseek.model', 'string'),
+
+        # Volcengine Ark standard pay-as-you-go API (model brand is independent).
+        ('VOLCENGINE_API_KEY', 'volcengine.api_key', 'string'),
+        ('VOLCENGINE_BASE_URL', 'volcengine.base_url', 'string'),
+        ('VOLCENGINE_MODEL', 'volcengine.model', 'string'),
         
         # xAI Grok
         ('GROK_API_KEY', 'grok.api_key', 'string'),

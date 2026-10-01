@@ -36,6 +36,11 @@ class _Db:
 
 
 def test_legacy_exchange_cancel_ack_requires_manual_review(monkeypatch):
+    from app.services import futu_agent_execution
+    monkeypatch.setattr(futu_agent_execution, "cancel_open_simulate_agent_orders",
+                        lambda _user_id: {"futu_cancel_requests_accepted": 0,
+                                          "futu_unresolved_intent_ids": [],
+                                          "futu_manual_review_required": False})
     row = {
         "id": 3, "credential_id": 8, "symbol": "BTCUSDT",
         "market_type": "spot", "exchange_order_id": "ex-17", "raw_result": {},
@@ -62,6 +67,11 @@ def test_legacy_exchange_cancel_ack_requires_manual_review(monkeypatch):
 
 
 def test_paper_cancel_updates_intent_without_revoking_or_liquidating(monkeypatch):
+    from app.services import futu_agent_execution
+    monkeypatch.setattr(futu_agent_execution, "cancel_open_simulate_agent_orders",
+                        lambda _user_id: {"futu_cancel_requests_accepted": 0,
+                                          "futu_unresolved_intent_ids": [],
+                                          "futu_manual_review_required": False})
     seen = []
 
     @contextmanager

@@ -81,7 +81,8 @@ def _client_with_mocks():
     client._trade_ctx = trade
     client._connected = True
     client._acc_id = 99
-    client._accounts = [{"acc_id": 99, "trd_env": "SIMULATE", "trdmarket_auth": ["US"]}]
+    client._accounts = [{"acc_id": 99, "trd_env": "SIMULATE", "trdmarket_auth": ["US"],
+                         "sim_acc_type": "STOCK_AND_OPTION"}]
     return client, quote, trade
 
 
@@ -130,6 +131,40 @@ def test_place_limit_order_success(_ensure):
 
 
 @patch("app.services.futu_trading.client._ensure_futu", return_value=_FakeFT)
+def test_hk_stock_simulate_requires_exact_lot_and_hk_session(_ensure):
+    client, quote, trade = _client_with_mocks()
+    client.config = FutuConfig(trade_market="HK", market_category="HKStock", acc_id=99)
+    client._accounts = [{"acc_id": 99, "trd_env": "SIMULATE", "trdmarket_auth": ["HK"],
+                         "sim_acc_type": "STOCK"}]
+    client._is_regular_hk_session_now = lambda: True
+    client.get_simulate_execution_quote = lambda _: {"simulate_execution_eligible": True, "price": 420.0}
+    quote.get_market_snapshot.return_value = (_FakeFT.RET_OK, pd.DataFrame([{"lot_size": 100}]))
+    trade.acctradinginfo_query.return_value = (_FakeFT.RET_OK, pd.DataFrame([{"max_cash_buy": 1000}]))
+    trade.place_order.return_value = (_FakeFT.RET_OK, pd.DataFrame([{
+        "order_id": "HK-1", "order_status": "SUBMITTED", "qty": 100,
+        "code": "HK.00700", "price": 420.0, "trd_side": "BUY",
+    }]))
+    with patch("app.services.futu_trading.operator_gate.submission_permit", return_value=nullcontext()):
+        bad = client.place_limit_order("00700.HK", "buy", 50, 420.0, "HKStock", remark="qd_1_2")
+        good = client.place_limit_order("00700.HK", "buy", 100, 420.0, "HKStock", remark="qd_1_2")
+    assert "FUTU_INVALID_LOT_SIZE" in bad.message
+    assert good.success and trade.place_order.call_args.kwargs["code"] == "HK.00700"
+    assert trade.acctradinginfo_query.call_args.kwargs["acc_id"] == 99
+    client._is_regular_hk_session_now = lambda: False
+    closed = client.place_limit_order("00700.HK", "buy", 100, 420.0, "HKStock", remark="qd_1_3")
+    assert closed.message == "FUTU_REGULAR_SESSION_ONLY"
+
+
+def test_hk_option_simulate_account_cannot_be_used_for_stock_orders():
+    client = FutuClient(FutuConfig(trade_market="HK", market_category="HKStock", acc_id=99))
+    client._acc_id = 99
+    client._accounts = [{"acc_id": 99, "trd_env": "SIMULATE", "trdmarket_auth": ["HK"],
+                         "sim_acc_type": "OPTION"}]
+    with pytest.raises(ValueError, match="FUTU_HK_STOCK_SIM_ACCOUNT_REQUIRED"):
+        client._acc_id_arg()
+
+
+@patch("app.services.futu_trading.client._ensure_futu", return_value=_FakeFT)
 def test_place_limit_order_is_default_denied_without_operator_arm(_ensure, monkeypatch):
     client, quote, trade = _client_with_mocks()
     monkeypatch.delenv("FUTU_PAPER_AUTOTRADE_ALLOWED", raising=False)
@@ -141,6 +176,7 @@ def test_place_limit_order_is_default_denied_without_operator_arm(_ensure, monke
     result = client.place_limit_order("AAPL", "buy", 1, 100.0, "USStock", remark="qd_1_2")
 
     assert not result.success
+    assert result.submission_attempted is False
     assert "FUTU_PAPER_AUTOTRADE_HARD_DISABLED" in result.message
     trade.place_order.assert_not_called()
 
@@ -294,6 +330,16 @@ def test_get_order_status_and_find_by_remark(_ensure):
     found = client.find_order_by_remark("futu-remark")
     assert found is not None
     assert found.order_id == "OID-9"
+
+
+@patch("app.services.futu_trading.client._ensure_futu", return_value=_FakeFT)
+def test_duplicate_broker_remark_cannot_be_used_as_unique_order_identity(_ensure):
+    client, _quote, trade = _client_with_mocks()
+    trade.order_list_query.return_value = (_FakeFT.RET_OK, pd.DataFrame([
+        {"order_id": "OID-1", "remark": "qd_agent_9", "order_status": "SUBMITTED"},
+        {"order_id": "OID-2", "remark": "qd_agent_9", "order_status": "SUBMITTED"},
+    ]))
+    assert client.find_order_by_remark("qd_agent_9", refresh_cache=True) is None
 
 
 @patch("app.services.futu_trading.client._ensure_futu", return_value=_FakeFT)

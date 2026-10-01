@@ -132,6 +132,16 @@ class MetaAPIKeys(type):
         from app.utils.config_loader import load_addon_config
         val = load_addon_config().get('deepseek', {}).get('api_key')
         return val if val else ''
+
+    @property
+    def VOLCENGINE_API_KEY(cls):
+        """Volcengine Ark key (distinct from DeepSeek's official API key)."""
+        env_val = os.getenv('VOLCENGINE_API_KEY', '').strip()
+        if env_val:
+            return env_val
+        from app.utils.config_loader import load_addon_config
+        val = load_addon_config().get('volcengine', {}).get('api_key')
+        return val if val else ''
     
     @property
     def GROK_API_KEY(cls):

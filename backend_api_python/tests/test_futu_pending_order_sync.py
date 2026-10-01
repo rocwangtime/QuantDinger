@@ -12,10 +12,10 @@ from app.services.pending_order_worker import PendingOrderWorker
     [
         ("market", 0, "USStock", "futu_explicit_limit_price_required"),
         ("limit", 0, "USStock", "futu_explicit_limit_price_required"),
-        ("limit", 100, "HKStock", "futu_us_stocks_only"),
+        ("limit", 100, "HKStock", "futu_credential_market_mismatch"),
     ],
 )
-def test_futu_worker_rejects_non_us_or_non_explicit_limit_orders(
+def test_futu_worker_rejects_wrong_market_or_non_explicit_limit_orders(
     order_type, limit_price, market_category, expected_error,
 ):
     worker = PendingOrderWorker.__new__(PendingOrderWorker)

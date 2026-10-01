@@ -687,7 +687,7 @@ def test_strict_market_data_failure_is_not_silenced(monkeypatch):
     def get_kline(**_kwargs):
         raise RuntimeError("FUTU_OPEND_UNREACHABLE")
 
-    monkeypatch.setattr(market_data.DataSourceFactory, "get_kline", get_kline)
+    monkeypatch.setattr(market_data.DataSourceFactory, "get_kline_with_diagnostics", get_kline)
 
     with pytest.raises(RuntimeError, match="executionMarketDataUnavailable"):
         market_data.load_strategy_frame(

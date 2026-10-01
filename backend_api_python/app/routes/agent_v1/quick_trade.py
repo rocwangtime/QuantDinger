@@ -68,6 +68,9 @@ def place_order():
 
 def cancel_agent_orders(user_id: int) -> dict:
     """Best-effort cancellation only; never liquidates a position."""
+    from app.services.futu_agent_execution import cancel_open_simulate_agent_orders
+
+    futu_cancellation = cancel_open_simulate_agent_orders(user_id)
     live_cancel_requests_accepted = 0
     live_failures: list[dict] = []
     with get_db_connection() as db:
@@ -143,6 +146,7 @@ def cancel_agent_orders(user_id: int) -> dict:
         db.commit()
         cur.close()
     return {
+        **futu_cancellation,
         "cancelled_open_paper_orders": int(paper_affected or 0),
         "cancelled_paper_intents": int(intent_affected or 0),
         "live_cancel_requests_accepted": live_cancel_requests_accepted,
@@ -162,7 +166,17 @@ def kill_switch():
     from app.services.agent_trade_intents import emergency_stop_user
 
     emergency_stop_user(user_id)
-    cancellation = cancel_agent_orders(user_id)
+    try:
+        cancellation = cancel_agent_orders(user_id)
+    except Exception:
+        # A broker or cancellation query failure must not prevent revoking T
+        # tokens. The policy stop was already persisted and manual review is
+        # mandatory until broker open orders are verified.
+        cancellation = {
+            "manual_review_required": True,
+            "futu_manual_review_required": True,
+            "cancel_verification_failed": True,
+        }
     with get_db_connection() as db:
         cur = db.cursor()
         cur.execute(

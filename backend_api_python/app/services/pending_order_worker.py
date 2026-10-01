@@ -902,8 +902,8 @@ class PendingOrderWorker(
         if str(exchange_config.get("exchange_id") or "").strip().lower() != "futu":
             return False
         market_category = sc.get("market_category") or (sc.get("trading_config") or {}).get("market_category") or "USStock"
-        if market_category != "USStock":
-            logger.error("Futu fill sync rejected non-US strategy market: pending_id=%s", order_id)
+        if market_category not in {"USStock", "HKStock"}:
+            logger.error("Futu fill sync rejected non-stock strategy market: pending_id=%s", order_id)
             return False
 
         client = None
@@ -3316,7 +3316,7 @@ class PendingOrderWorker(
         _notify_live_best_effort,
         _console_print,
     ) -> None:
-        """Execute a US-stock limit order in the Futu paper account."""
+        """Execute a US/HK stock limit order in the selected Futu paper account."""
         signal_type = payload.get("signal_type") or order_row.get("signal_type")
         symbol = payload.get("symbol") or order_row.get("symbol")
         amount = float(payload.get("amount") or order_row.get("amount") or 0.0)
@@ -3350,11 +3350,11 @@ class PendingOrderWorker(
                 or exchange_config.get("market_category")
                 or "USStock"
             ).strip()
-        if mc != "USStock":
-            self._mark_failed(order_id=order_id, error="futu_us_stocks_only")
-            _notify_live_best_effort(status="failed", error="futu_us_stocks_only")
+        expected_market = "USStock" if str(exchange_config.get("trade_market") or "US").upper() == "US" else "HKStock"
+        if mc != expected_market:
+            self._mark_failed(order_id=order_id, error="futu_credential_market_mismatch")
+            _notify_live_best_effort(status="failed", error="futu_credential_market_mismatch")
             return
-        market_type_for_client = "USStock"
         client_remark = make_client_order_id(exchange_id="futu", strategy_id=strategy_id, order_id=order_id)
         submission_prepared = False
 
@@ -3367,7 +3367,7 @@ class PendingOrderWorker(
             self._prepare_submission(
                 order_id=order_id,
                 exchange_id="futu",
-                market_type=market_type_for_client,
+                market_type=mc,
                 client_order_id=client_remark,
             )
             submission_prepared = True
@@ -3384,7 +3384,7 @@ class PendingOrderWorker(
                     side=action,
                     quantity=amount,
                     price=limit_price,
-                    market_type=market_type_for_client,
+                    market_type=mc,
                     remark=client_remark,
                 )
 
@@ -3468,7 +3468,7 @@ class PendingOrderWorker(
                         cumulative_filled=filled,
                         cumulative_average_price=avg_price,
                         exchange_config=exchange_config,
-                        market_type=str(market_type_for_client or "HKStock"),
+                        market_type=mc,
                         order_id=int(order_id),
                         fill_source="worker_futu",
                         commission=commission,

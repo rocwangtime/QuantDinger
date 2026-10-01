@@ -647,6 +647,9 @@ _MCP_EXTENSION_ROUTES = {
     "get_futu_quote_status": "/api/agent/v1/trading/accounts/{credential_id}/futu-quote-status",
     "get_futu_order_book": "/api/agent/v1/trading/accounts/{credential_id}/futu-order-book",
     "place_platform_paper_order": "/api/agent/v1/paper-orders/place",
+    "place_futu_simulate_order": "/api/agent/v1/simulate-orders/place",
+    "execute_futu_simulate_intent": "/api/agent/v1/trade-intents/{intent_id}/execute-simulate",
+    "reconcile_futu_simulate_intent": "/api/agent/v1/trade-intents/{intent_id}/reconcile-simulate",
     "cancel_job": "/api/agent/v1/jobs/{job_id}/cancel",
     "link_indicator_config": "/api/agent/v1/indicators/link-config",
     "list_universes": "/api/agent/v1/research/universes",
@@ -675,6 +678,9 @@ _MCP_EXTENSION_WRITES = {
     "emergency_stop_trading",
     "create_trade_intent",
     "place_platform_paper_order",
+    "place_futu_simulate_order",
+    "execute_futu_simulate_intent",
+    "reconcile_futu_simulate_intent",
     "cancel_trade_intent",
     "cancel_agent_orders",
     "cancel_job",
@@ -709,6 +715,7 @@ MCP_AGENT_TOOLS = MCP_AGENT_TOOLS + tuple(
         produces=("tool_result",),
         risk_level=("trading" if name in {
             "create_trade_intent", "cancel_trade_intent", "cancel_agent_orders", "place_platform_paper_order",
+            "place_futu_simulate_order", "execute_futu_simulate_intent",
         } else "write_config" if name in _MCP_EXTENSION_WRITES else "read"),
         read_only=name not in _MCP_EXTENSION_WRITES,
         priority=80,
@@ -718,7 +725,9 @@ MCP_AGENT_TOOLS = MCP_AGENT_TOOLS + tuple(
             else ""
         ),
         layer=("plan" if name in {"create_trade_intent", "cancel_trade_intent"}
-               else "execute" if name in {"place_platform_paper_order", "cancel_agent_orders", "emergency_stop_trading"}
+               else "execute" if name in {"place_platform_paper_order", "place_futu_simulate_order",
+                                           "execute_futu_simulate_intent", "reconcile_futu_simulate_intent",
+                                           "cancel_agent_orders", "emergency_stop_trading"}
                else ""),
     )
     for name, route in _MCP_EXTENSION_ROUTES.items()

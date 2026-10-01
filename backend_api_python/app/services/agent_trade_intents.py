@@ -1,7 +1,6 @@
-"""Server-owned Agent trading policies, proposals and internal paper execution.
+"""Server-owned Agent trading policies, proposals and paper execution.
 
-Futu intents remain proposals until a separately reviewed SIMULATE execution
-gateway exists; REAL trading is deliberately absent.
+REAL trading is deliberately absent.
 """
 
 from __future__ import annotations
@@ -91,8 +90,8 @@ def normalize_order(body: dict[str, Any]) -> dict[str, Any]:
         raise IntentError("Futu proposals require a saved credential_id")
     if broker == "platform" and credential_id:
         raise IntentError("Platform paper proposals cannot select a broker credential")
-    if broker == "futu" and (market != "USStock" or order_type != "limit"):
-        raise IntentError("Futu proposals are USStock limit orders only")
+    if broker == "futu" and (market not in {"USStock", "HKStock"} or order_type != "limit"):
+        raise IntentError("Futu proposals are stock SIMULATE limit orders only")
     return {
         "broker": broker,
         "credential_id": credential_id or None,
@@ -118,8 +117,11 @@ def account_scope(user_id: int, order: dict[str, Any]) -> tuple[str, str]:
     if str(cfg.get("exchange_id") or "").lower() != "futu":
         raise IntentError("Futu credential is not available to this user", 403)
     config = config_from_exchange_config(cfg)
-    if config.acc_id <= 0 or config.trade_env != "demo" or config.trade_market != "US":
-        raise IntentError("Only an explicitly selected US SIMULATE account is supported", 403)
+    if config.acc_id <= 0 or config.trade_env != "demo" or config.trade_market not in {"US", "HK"}:
+        raise IntentError("An explicitly selected stock SIMULATE account is required", 403)
+    expected = "USStock" if config.trade_market == "US" else "HKStock"
+    if order["market"] != expected:
+        raise IntentError("Futu proposal market does not match the saved account", 403)
     return "futu", f"credential:{credential_id}"
 
 
@@ -178,8 +180,8 @@ def set_policy(user_id: int, broker: str, account_ref: str, body: dict[str, Any]
         raise IntentError("Invalid trading policy mode")
     if body.get("confirm_mode") != mode:
         raise IntentError("Type the exact mode in confirm_mode")
-    if mode == "PAPER_AUTO" and (broker, account_ref) != ("platform", "default"):
-        raise IntentError("PAPER_AUTO currently supports internal platform paper only")
+    if mode == "PAPER_AUTO" and broker not in {"platform", "futu"}:
+        raise IntentError("PAPER_AUTO requires a platform or saved Futu account")
     markets = _list(body.get("allowed_markets", []), "allowed_markets")
     symbols = _list(body.get("allowed_symbols", []), "allowed_symbols")
     per_order = _positive(body.get("max_order_notional", 1000), "max_order_notional")
@@ -197,6 +199,8 @@ def set_policy(user_id: int, broker: str, account_ref: str, body: dict[str, Any]
     if mode == "PAPER_AUTO":
         if not markets or not symbols or "*" in markets or "*" in symbols:
             raise IntentError("PAPER_AUTO requires exact market and symbol allowlists")
+        if broker == "futu" and (markets not in (["USSTOCK"], ["HKSTOCK"]) or allow_market):
+            raise IntentError("Futu PAPER_AUTO permits one stock market and limit orders only")
         raw = str(body.get("enabled_until") or "")
         try:
             enabled_until = datetime.fromisoformat(raw.replace("Z", "+00:00"))
@@ -300,7 +304,8 @@ def _risk(cur, user_id: int, policy: dict, order: dict, price: float) -> tuple[b
         """SELECT COALESCE(SUM(notional),0) AS used, COUNT(*) AS orders
            FROM qd_agent_trade_intents WHERE user_id=%s AND broker=%s AND account_ref=%s
              AND created_at >= date_trunc('day', NOW())
-             AND status IN ('SUBMITTED','FILLED')""",
+             AND status IN ('EXECUTING','UNCERTAIN','SUBMITTED','PARTIALLY_FILLED',
+                            'FILLED','CANCELLED','FAILED')""",
         (user_id, policy["broker"], policy["account_ref"]),
     )
     daily = cur.fetchone() or {}
@@ -308,7 +313,7 @@ def _risk(cur, user_id: int, policy: dict, order: dict, price: float) -> tuple[b
         return False, {"reason": "max_daily_notional"}
     if int(daily.get("orders") or 0) >= int(policy["max_orders_per_day"]):
         return False, {"reason": "max_orders_per_day"}
-    if order["side"] == "sell" and not policy["allow_short"]:
+    if order["side"] == "sell" and not policy["allow_short"] and order["broker"] == "platform":
         cur.execute(
             """SELECT COALESCE(SUM(CASE WHEN side='buy' THEN qty ELSE -qty END),0) AS held
                FROM qd_agent_paper_orders

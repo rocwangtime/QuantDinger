@@ -1,5 +1,7 @@
 # 富途美股模拟盘：腾讯云广州轻量服务器部署准备
 
+港股股票模拟盘的增量部署和验收见 [港股模拟盘补充说明](FUTU_HK_PAPER_ADDENDUM_CN.md)。本页保留美股 MVP 的原始操作约束；两种市场均不允许实盘。
+
 本方案只运行美股 `SIMULATE`，不启用实盘。广州机房可作为技术验证起点；是否能稳定连到富途服务，要以服务器上 OpenD 的实际登录和探测为准。富途官方说明 OpenD 可运行在 [Ubuntu 云服务器](https://openapi.futunn.com/futu-api-doc/en/opend/opend-intro.html)。
 
 ## 资源与访问方式
@@ -14,7 +16,7 @@
 2. Docker Engine 和 Compose V2 已安装；2 GB 内存可先联调，但要观察内存、swap 和磁盘占用，持续运行时可考虑升级至 4 GB。
 3. 官方 OpenD 10.11 命令行版本已安装至 `/opt/futu-opend`，由无 sudo 权限的 `futuopend` 用户持有。用户在自己的 SSH 终端执行 `sudo -u futuopend -H sh -c 'cd /opt/futu-opend && ./FutuOpenD -api_ip=127.0.0.1 -api_port=11111 -lang=chs'`，只在交互提示里输入牛牛号、密码及二次验证；是否使用 OpenD 自带的“记住密码”由用户决定。登录密码及二次验证不要写入 Git、项目 `.env`、服务启动命令、聊天或日志。当前 OpenD 以交互进程运行，`deploy/systemd/quantdinger-futu-opend.service` 尚未启用；整机重启后需要用户重新确认 OpenD 登录，不能假定会自动恢复。服务只监听 `127.0.0.1:11111`。富途 [命令行 OpenD 指南](https://openapi.futunn.com/futu-api-doc/en/opend/opend-cmd.html)。
 4. 首次在服务器项目目录执行 `sh scripts/bootstrap_futu_paper_env.sh`，生成仅服务器本地保存的项目根 `.env` 和 `backend_api_python/.env`（Git 已忽略，权限 600）。脚本拒绝覆盖已有配置，生成独立的 PostgreSQL、Redis、管理员、签名及凭证加密密钥；不要将这些文件同步回开发机、提交到 Git、粘贴到聊天或放入日志。管理员初始密码仅由用户通过自己的 SSH 会话在服务器查看 `backend_api_python/.env`。
-5. Web 账户中心先“探测账户”，再选择返回的美股 `SIMULATE` `acc_id`。牛牛登录号不等于 OpenAPI 交易账户 ID；不要把登录密码或交易解锁密码填进 QuantDinger。
+5. Web 账户中心先选择美股或港股，再“探测账户”，选择返回的股票 `SIMULATE` `acc_id` 并手动输入该 ID 确认。牛牛登录号不等于 OpenAPI 交易账户 ID；不要把登录密码或交易解锁密码填进 QuantDinger。
 
 ## 代码与服务启动
 
@@ -31,7 +33,7 @@ sudo docker compose -f docker-compose.yml -f docker-compose.futu-paper.yml -f do
 
 OpenD 登录并通过 `127.0.0.1:11111` 探测后，启动 `--profile local-brokers` 的 `opend-relay`。在此之前，Web 可先检查，但账户和自动交易不能连上富途。不要把模拟策略部署到无法确认 OpenD 连接和账户 ID 的服务。
 
-创建富途凭证时填写 `host.docker.internal:11112`、`trade_env=demo`、`trade_market=US`、探测获得的模拟 `acc_id`。Web 页面连接只是诊断会话；自动策略使用单独保存的加密交易凭证。将 [`futu_us_paper_roundtrip.py`](../trading/futu_us_paper_roundtrip.py) 粘贴进策略 IDE，先验证并回测，再部署为模拟盘。它在一个 SPY 分钟线上只尝试买卖各一次、只下明确价格的限价单，并持久化运行状态；若订单未成交、被拒或行情中断，不会无限重试，需在富途和 Web 中人工检查并停止部署。第一笔务必有人值守，核对模拟账户和数量为 1 股。
+Web 连接时填写 `host.docker.internal:11112`，选择美股或港股股票 SIMULATE 账户并二次确认交易账户 ID。连接会自动复用或加密保存策略账户配置，但**不会启用自动交易**；部署策略时选择页面显示的对应配置 ID。美股验收样例为 [`futu_us_paper_roundtrip.py`](../trading/futu_us_paper_roundtrip.py)，港股验收样例及额外检查见[港股增量说明](FUTU_HK_PAPER_ADDENDUM_CN.md)。先验证并回测，再部署到模拟盘；订单未成交、被拒或行情中断时不无限重试，需在富途和 Web 中人工检查并停止部署。第一笔务必有人值守。
 
 广州服务器无法从公共数据源取得美股历史分钟线，因此本项目的富途模拟盘 Compose 叠加文件默认将 `STRATEGY_V2_BACKTEST_STOCK_DATA_SOURCE` 设为 `futu`，让美股/港股回测读取本机 OpenD 的**只读历史 K 线**（容器地址 `host.docker.internal:11112`）。OpenD 不可用或行情权限不足时会直接报错，不会悄悄改用另一数据源。不使用富途 Compose 时默认仍为公共数据源；需要恢复公共数据源时，可在服务器项目根 `.env` 显式设为 `public` 并重建后端容器。历史 K 线查询会使用富途的行情额度，建议先用最近数个交易日、小范围回测；此设置不启用自动交易，也不影响实盘下单门禁。
 
@@ -47,7 +49,7 @@ OpenD 登录并通过 `127.0.0.1:11111` 探测后，启动 `--profile local-brok
 
 ## 当前 GitHub 镜像发布与手工导入兜底
 
-后端分支为 `rocwangtime/QuantDinger` 的 `codex/futu-paper-mvp`，前端分支为用户 fork `rocwangtime/QuantDinger-Vue` 的 `codex/futu-paper-dashboard`，上游前端仓库仍是 `OpenByteInc/QuantDinger-Vue`。前后端是两个独立 Git 仓库。服务器 `.env`、OpenD 登录文件、交易密码和验证码绝不推送到 GitHub。
+当前开发分支为后端 `rocwangtime/QuantDinger` 的 `codex/futu-agent-gateway`、前端 fork `rocwangtime/QuantDinger-Vue` 的 `codex/futu-agent-policy-ui`；上游前端仓库仍是 `OpenByteInc/QuantDinger-Vue`。前后端是两个独立 Git 仓库。服务器 `.env`、OpenD 登录文件、交易密码和验证码绝不推送到 GitHub。
 
 两个 fork 的 GitHub Actions 工作流已启用，并发布过通过测试的前后端镜像。使用工作流生成的对应 commit 镜像；能直接拉取时优先用 registry digest 固定版本。服务器 Git 拉取后，将完整镜像引用写入**仅服务器本地**的项目根 `.env`：`FUTU_BACKEND_IMAGE_REF`、`FUTU_FRONTEND_IMAGE_REF`。叠加 [`docker-compose.futu-paper.images.yml`](../../docker-compose.futu-paper.images.yml) 后，应用服务不在服务器上构建源码。该覆盖文件的 `pull_policy: missing` 允许预先拉取或手工导入镜像后离线切换，不会在每次 `up` 时强制重拉：
 
@@ -72,4 +74,4 @@ sudo docker compose -f docker-compose.yml -f docker-compose.futu-paper.yml -f do
   exec -T backend python -m app.commands.futu_paper_acceptance --strategy-id <策略ID>
 ```
 
-命令从服务器本地加密凭证解析 SIMULATE 账户，不接受或输出登录密码、交易密码、令牌或账户 ID；它要求恰好一笔 SPY 买入和一笔卖出，每笔 1 股，逐笔比对富途与平台的订单 ID、累计数量、均价和平台成交记录，并要求双方最终 SPY 持仓为零。任一证据缺失时返回失败，不能把“无记录”当作通过。完成交易进程重启、OpenD 断线重连与重复回报重放后须再次运行，确认仍然通过且成交行数不增加；还要在富途牛牛模拟账户界面人工核对订单。若账户原先持有 SPY，应先停止验收并另选干净的模拟账户，不能误把外部持仓计入策略闭环。
+命令从服务器本地加密凭证解析 SIMULATE 账户，不接受或输出登录密码、交易密码、令牌或账户 ID；它要求美股 SPY 每边 1 股或港股 00700 每边 100 股的恰好一买一卖，逐笔比对富途与平台的订单 ID、累计数量、均价和平台成交记录，并要求双方最终空仓。任一证据缺失时返回失败，不能把“无记录”当作通过。完成交易进程重启、OpenD 断线重连与重复回报重放后须再次运行，确认仍然通过且成交行数不增加；还要在富途牛牛模拟账户界面人工核对订单。若账户原先持有该标的，应先停止验收并另选干净的模拟账户，不能误把外部持仓计入策略闭环。

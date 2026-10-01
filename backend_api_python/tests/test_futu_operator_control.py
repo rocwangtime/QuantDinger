@@ -32,6 +32,54 @@ def test_submission_permit_checks_saved_credential_and_pending_order_under_lock(
     assert query.args[1] == (5, 3, 1, 2, 4)
 
 
+def test_agent_submit_permit_binds_immutable_order_and_human_policy(monkeypatch):
+    monkeypatch.setenv("FUTU_PAPER_AUTOTRADE_ALLOWED", "true")
+    cursor = MagicMock()
+    cursor.fetchone.return_value = {"?column?": 1}
+    db = MagicMock()
+    db.cursor.return_value = cursor
+
+    @contextmanager
+    def fake_connection():
+        yield db
+
+    monkeypatch.setattr(operator_gate, "get_db_connection", fake_connection)
+    with operator_gate.submission_permit(
+        user_id=1, credential_id=2, acc_id=3, remark="qd_agent_9",
+        market="USStock", symbol="AAPL", side="buy", qty=1, limit_price=100,
+    ):
+        assert db.rollback.call_count == 0
+    statements = [call.args[0] for call in cursor.execute.call_args_list]
+    assert "pg_advisory_xact_lock(824111" in statements[0]
+    assert "intent.order_spec->>'symbol'" in statements[-1]
+    assert "policy.enabled_until > NOW()" in statements[-1]
+    assert "min_agent_intent_id" in statements[-1]
+    assert "intent.order_spec->>'market' = %s" in statements[-1]
+    assert cursor.execute.call_args.args[1] == (9, 3, 1, 2, "qd_agent_9", "AAPL", "buy", 1.0, 100.0, "USStock")
+
+
+def test_hk_agent_submit_permit_binds_hk_market_to_saved_intent(monkeypatch):
+    monkeypatch.setenv("FUTU_PAPER_AUTOTRADE_ALLOWED", "true")
+    cursor = MagicMock()
+    cursor.fetchone.return_value = {"?column?": 1}
+    db = MagicMock()
+    db.cursor.return_value = cursor
+
+    @contextmanager
+    def fake_connection():
+        yield db
+
+    monkeypatch.setattr(operator_gate, "get_db_connection", fake_connection)
+    with operator_gate.submission_permit(
+        user_id=1, credential_id=2, acc_id=3, remark="qd_agent_9",
+        market="HKStock", symbol="02800.HK", side="buy", qty=500, limit_price=25,
+    ):
+        pass
+    statement, params = cursor.execute.call_args.args
+    assert "intent.order_spec->>'market' = %s" in statement
+    assert params == (9, 3, 1, 2, "qd_agent_9", "02800.HK", "buy", 500.0, 25.0, "HKStock")
+
+
 def test_submission_permit_does_not_send_expected_denial_or_broker_error_to_db_logger(monkeypatch):
     monkeypatch.setenv("FUTU_PAPER_AUTOTRADE_ALLOWED", "true")
     cursor = MagicMock()
@@ -100,6 +148,28 @@ def test_duplicate_saved_account_uses_newest_credential_unless_pinned(monkeypatc
     monkeypatch.setattr(operator_control, "decrypt_credential_blob", lambda _: '{"acc_id":3,"trade_env":"demo","trade_market":"US"}')
     assert operator_control.saved_account_credential(1, 3)[0] == 8
     assert operator_control.saved_account_credential(1, 3, credential_id=7)[0] == 7
+
+
+def test_connect_reuses_matching_saved_paper_account(monkeypatch):
+    from app.services.futu_trading.config import FutuConfig
+
+    db = MagicMock()
+    cur = db.cursor.return_value
+    cur.fetchall.return_value = [{"id": 8, "encrypted_config": "opaque"}]
+    context = MagicMock()
+    context.__enter__.return_value = db
+    monkeypatch.setattr(operator_control, "get_db_connection", lambda: context)
+    monkeypatch.setattr(operator_control, "decrypt_credential_blob", lambda _: (
+        '{"futu_host":"host.docker.internal","futu_port":11112,'
+        '"trade_env":"demo","trade_market":"HK","market_category":"HKStock",'
+        '"security_firm":"FUTUSECURITIES","acc_id":99}'
+    ))
+    selected = FutuConfig(host="host.docker.internal", port=11112, trade_market="HK",
+                          market_category="HKStock", acc_id=99)
+    assert operator_control.ensure_saved_account_credential(1, selected) == 8
+    assert operator_control.ensure_saved_account_credential(1, selected) == 8
+    assert db.commit.call_count == 2
+    assert not any("INSERT" in str(call.args[0]) for call in cur.execute.call_args_list)
 
 
 def test_pause_can_identify_order_accepted_before_binding_was_written(monkeypatch):

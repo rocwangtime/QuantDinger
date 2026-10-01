@@ -119,23 +119,31 @@ curl -X POST http://localhost:8888/api/agent/v1/trade-intents \
 ```
 
 The server verifies that the credential belongs to the token's tenant and is
-an explicitly selected US `SIMULATE` account, but a Futu intent is **always a
-plan**. It does not use the existing strategy's Futu SIMULATE order path, and
-it cannot address a REAL account. Agent tokens can read the effective policy
+an explicitly selected US `SIMULATE` account. Creating an intent is **always
+plan-only**; only the separate `/trade-intents/{intent_id}/execute-simulate`
+endpoint or one-call `/simulate-orders/place` can reach Futu OpenD. Neither
+can address a REAL account. Agent tokens can read the effective policy
 through `GET /trading-policy` and list/get/cancel unexecuted proposals under
 `/trade-intents`; they cannot change policy or approve an order.
 
 Human administrators can view and change policy under
-`/api/agent/v1/admin/trading-policy` (human JWT only). `PAPER_AUTO` currently
-supports **internal platform paper simulation only**. Enabling it requires an
+`/api/agent/v1/admin/trading-policy` (human JWT only). `PAPER_AUTO` supports
+internal platform paper or an explicitly saved Futu US SIMULATE account.
+Enabling it requires an
 exact market/symbol allowlist, per-order/daily/count limits, typed
-`confirm_mode=PAPER_AUTO`, and an expiry within 24 hours. It does not call
-Futu or another broker. The Web Agent Token page shows policy and intents.
+`confirm_mode=PAPER_AUTO`, and an expiry within 24 hours. The Web Agent Token
+page shows policy and intents.
 An Agent may call `POST /paper-orders/place` to place an **internal platform
 paper** order only while that policy is active, using a paper-only T-scope
 token and a fresh Idempotency-Key. This explicit execution route cannot select
-a Futu credential. Futu SIMULATE Agent direct order execution remains closed
-pending broker-order recovery, cancellation, and reconciliation checks.
+a Futu credential. Futu SIMULATE execution additionally requires a paper-only
+T token, `FUTU_PAPER_AUTOTRADE_ALLOWED=true`, an account explicitly armed
+*after* the intent was created, a fresh subscribed quote, US regular market
+state, whole shares, a limit within 2% of that quote, and broker-side buying
+power or sellable holdings. An ambiguous OpenD response becomes `UNCERTAIN`;
+retries never submit again, and the worker reconciles by order ID or exact
+remark. A missing broker order remains for manual review. Broker-side
+SIMULATE closed-loop testing is required before operational use.
 `LIVE_APPROVAL` and `LIVE_AUTO` are rejected, including when the old server
 environment switch is set; they require a separately authorized implementation.
 

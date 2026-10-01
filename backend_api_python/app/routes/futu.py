@@ -14,7 +14,9 @@ from app.utils.db import get_db_connection
 from app.utils.local_brokers import desktop_broker_cloud_reject_message, local_desktop_brokers_allowed
 from app.services.futu_trading import FutuClient, FutuConfig
 from app.services.futu_trading.config import normalize_trade_env, normalize_trade_market
-from app.services.futu_trading.operator_control import saved_account_credential, pause_account
+from app.services.futu_trading.operator_control import (
+    ensure_saved_account_credential, saved_account_credential, pause_account,
+)
 from app.services.futu_trading.operator_gate import (
     arm as arm_automation, begin_pause, finish_pause, hard_switch_enabled,
     state_for_user,
@@ -76,7 +78,7 @@ def _config_from_request(data: dict) -> FutuConfig:
     )
     market = normalize_trade_market(
         data.get("trade_market") or data.get("tradeMarket") or data.get("market"),
-        market_category="USStock",
+        market_category=str(data.get("market_category") or data.get("marketCategory") or "USStock"),
     )
     encrypt_raw = data.get("is_encrypt")
     if encrypt_raw is None:
@@ -122,6 +124,7 @@ def get_status():
             status = _placeholder_status()
         else:
             status = client.get_connection_status()
+        status["credential_id"] = int(getattr(client, "saved_credential_id", 0) or 0) if client else None
         status["worker_streams"] = _worker_streams_for_user()
         status["automation"] = state_for_user(int(g.user_id))
         status["automation_hard_switch"] = hard_switch_enabled()
@@ -149,6 +152,11 @@ def connect():
 
         data = request.get_json() or {}
         config = _config_from_request(data)
+        if str(data.get("confirm_acc_id") or "").strip() != str(config.acc_id) or config.acc_id <= 0:
+            return jsonify({"success": False, "error": "FUTU_ACCOUNT_CONFIRMATION_REQUIRED"}), 400
+        for row in state_for_user(int(g.user_id)):
+            if int(row["acc_id"]) != config.acc_id and row["state"] in {"armed", "stopping", "unconfirmed"}:
+                return jsonify({"success": False, "error": "FUTU_PAUSE_OTHER_ACCOUNT_FIRST"}), 409
         client = FutuClient(config)
         if not client.connect():
             return jsonify({
@@ -156,11 +164,19 @@ def connect():
                 "error": "Connection failed. Ensure FutuOpenD is running and reachable.",
             }), 400
 
+        try:
+            credential_id = ensure_saved_account_credential(int(g.user_id), config)
+        except Exception:
+            client.disconnect()
+            raise
+        client.saved_credential_id = credential_id
         _sessions.set(client)
+        status = client.get_connection_status()
+        status["credential_id"] = credential_id
         return jsonify({
             "success": True,
             "message": "Connected successfully",
-            "data": client.get_connection_status(),
+            "data": status,
         })
     except ImportError:
         return jsonify({
@@ -212,7 +228,7 @@ def automation_status():
 @futu_blp.route("/automation/arm", methods=["POST"])
 @login_required
 def automation_arm():
-    """Explicitly arm only the connected, saved US SIMULATE account."""
+    """Explicitly arm only the connected, saved stock SIMULATE account."""
     try:
         if not hard_switch_enabled():
             return jsonify({"success": False, "error": "FUTU_PAPER_AUTOTRADE_HARD_DISABLED"}), 403
@@ -226,6 +242,7 @@ def automation_arm():
             return jsonify({"success": False, "error": "FUTU_ACCOUNT_CONFIRMATION_REQUIRED"}), 400
         credential_id, config = saved_account_credential(
             int(g.user_id), acc_id, connected=client.config,
+            credential_id=int(getattr(client, "saved_credential_id", 0) or 0),
         )
         previous = next(
             (row for row in state_for_user(int(g.user_id)) if int(row["acc_id"]) == acc_id),
@@ -285,8 +302,8 @@ def probe():
             }), 403
 
         data = request.get_json() or {}
-        # A probe must reflect the host/firm currently entered in the form,
-        # not a previously cached connection for this user.
+        # Probe the form's host/firm without replacing an armed account's
+        # connected session. Selecting a new account still requires /connect.
         config = _config_from_request(data)
         client = FutuClient(config)
         if not client.connect():
@@ -294,13 +311,15 @@ def probe():
                 "success": False,
                 "error": "Connection failed. Ensure FutuOpenD is running.",
             }), 400
-        _sessions.set(client)
-
-        probe_data = client.probe_permissions()
+        try:
+            probe_data = client.probe_permissions()
+            status = client.get_connection_status()
+        finally:
+            client.disconnect()
         return jsonify({
             "success": True,
             "data": {
-                "status": client.get_connection_status(),
+                "status": status,
                 "probe": probe_data,
             },
         })

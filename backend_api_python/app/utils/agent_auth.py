@@ -170,8 +170,15 @@ def _ensure_schema() -> None:
             risk_result JSONB,
             notional DECIMAL(24,8),
             status VARCHAR(24) NOT NULL DEFAULT 'PROPOSED'
-              CHECK (status IN ('PROPOSED', 'REJECTED', 'SUBMITTED', 'FILLED', 'CANCELLED', 'EXPIRED')),
+              CHECK (status IN ('PROPOSED', 'REJECTED', 'EXECUTING', 'UNCERTAIN',
+                               'SUBMITTED', 'PARTIALLY_FILLED', 'FILLED', 'FAILED',
+                               'CANCELLED', 'EXPIRED')),
             paper_order_uid VARCHAR(40),
+            broker_order_id VARCHAR(80),
+            broker_remark VARCHAR(64),
+            filled_qty DECIMAL(24,8) NOT NULL DEFAULT 0,
+            avg_fill_price DECIMAL(24,8),
+            last_reconciled_at TIMESTAMPTZ,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             UNIQUE (agent_token_id, idempotency_key)
@@ -498,7 +505,27 @@ def _audit(scope_class: str, status_code: int, response_summary: Any, duration_m
         req_summary: dict[str, Any] = {
             "args": _redact(dict(request.args)),
         }
-        if request.is_json:
+        model_route = request.path.startswith("/api/agent/v1/model-agent/")
+        if model_route and request.is_json:
+            payload = request.get_json(silent=True) or {}
+            goal = str(payload.get("goal") or "") if isinstance(payload, dict) else ""
+            provider = payload.get("provider") if isinstance(payload, dict) else None
+            req_summary["json"] = {
+                "provider": provider if isinstance(provider, str) and
+                provider in {"deepseek", "openai", "volcengine"} else "other",
+                "goal_chars": len(goal),
+                "goal_sha256": hashlib.sha256(goal.encode()).hexdigest(),
+            }
+            if isinstance(response_summary, dict):
+                data = response_summary.get("data") or {}
+                response_summary = {
+                    "code": response_summary.get("code"),
+                    "message": response_summary.get("message"),
+                    "run_id": data.get("run_id") if isinstance(data, dict) else None,
+                    "tools": [item.get("tool") for item in data.get("tools", [])]
+                    if isinstance(data, dict) else [],
+                }
+        elif request.is_json:
             try:
                 req_summary["json"] = _redact(request.get_json(silent=True) or {})
             except Exception:
@@ -712,9 +739,10 @@ def agent_required(scope: str = SCOPE_R):
             g.agent_token = row
             g.agent_user_id = int(row["user_id"])
             idempotency_key = (request.headers.get("Idempotency-Key") or "").strip()
-            needs_idempotency = request.method.upper() not in {"GET", "HEAD", "OPTIONS"} and scope in {
-                SCOPE_W, SCOPE_B, SCOPE_N, SCOPE_T,
-            }
+            needs_idempotency = request.method.upper() not in {"GET", "HEAD", "OPTIONS"} and (
+                scope in {SCOPE_W, SCOPE_B, SCOPE_N, SCOPE_T}
+                or request.path.startswith("/api/agent/v1/model-agent/")
+            )
             if needs_idempotency:
                 if not idempotency_key:
                     response = make_response(*_err(

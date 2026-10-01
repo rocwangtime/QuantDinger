@@ -15,7 +15,7 @@ from app.services.futu_trading.config import FutuConfig, config_from_exchange_co
 from app.services.futu_trading.operator_gate import (
     begin_pause, finish_pause, wait_submission_barrier,
 )
-from app.utils.credential_crypto import decrypt_credential_blob
+from app.utils.credential_crypto import decrypt_credential_blob, encrypt_credential_blob
 from app.utils.db import get_db_connection
 
 
@@ -50,6 +50,7 @@ def saved_account_credential(
             if connected and (
                 parsed.host != connected.host or parsed.port != connected.port
                 or parsed.security_firm != connected.security_firm
+                or parsed.trade_market != connected.trade_market
             ):
                 continue
             matches.append((int(row["id"]), cfg))
@@ -60,18 +61,86 @@ def saved_account_credential(
     return matches[0]
 
 
+def ensure_saved_account_credential(user_id: int, connected: FutuConfig) -> int:
+    """Idempotently bind a confirmed paper account for strategy use.
+
+    Connecting never arms the order gate. Existing matching rows are reused,
+    including records created by the previous two-button UI.
+    """
+    if connected.acc_id <= 0 or connected.trade_env != "demo":
+        raise ValueError("FUTU_SIM_ACCOUNT_SELECTION_REQUIRED")
+    with get_db_connection() as db:
+        cur = db.cursor()
+        try:
+            cur.execute("SELECT pg_advisory_xact_lock(824112, %s)", (int(user_id),))
+            cur.execute(
+                """SELECT id, encrypted_config FROM qd_exchange_credentials
+                   WHERE user_id = %s AND LOWER(exchange_id) = 'futu' ORDER BY id DESC""",
+                (int(user_id),),
+            )
+            for row in cur.fetchall() or []:
+                try:
+                    saved = config_from_exchange_config(json.loads(decrypt_credential_blob(row["encrypted_config"])))
+                except (TypeError, ValueError, KeyError, json.JSONDecodeError):
+                    continue
+                if (
+                    saved.acc_id == connected.acc_id
+                    and saved.trade_market == connected.trade_market
+                    and saved.trade_env == "demo"
+                    and saved.host == connected.host
+                    and saved.port == connected.port
+                    and saved.security_firm == connected.security_firm
+                ):
+                    db.commit()
+                    return int(row["id"])
+            market_category = "USStock" if connected.trade_market == "US" else "HKStock"
+            config = {
+                "exchange_id": "futu", "futu_host": connected.host,
+                "futu_port": connected.port, "trade_env": "demo",
+                "environment": "demo", "trade_market": connected.trade_market,
+                "security_firm": connected.security_firm,
+                "acc_id": connected.acc_id, "market_category": market_category,
+                "unlock_password": "",
+            }
+            cur.execute(
+                """INSERT INTO qd_exchange_credentials
+                   (user_id, name, exchange_id, api_key_hint, encrypted_config, created_at, updated_at)
+                   VALUES (%s, %s, 'futu', %s, %s, NOW(), NOW()) RETURNING id""",
+                (int(user_id), f"Futu {connected.trade_market} SIMULATE",
+                 f"{connected.host}:{connected.port} (demo/{connected.trade_market})",
+                 encrypt_credential_blob(json.dumps(config, ensure_ascii=False))),
+            )
+            credential_id = int(cur.fetchone()["id"])
+            db.commit()
+            return credential_id
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            cur.close()
+
+
 def _owned_order_identities(user_id: int, credential_id: int) -> tuple[set[str], set[str]]:
     with get_db_connection() as db:
         cur = db.cursor()
         cur.execute(
-            """SELECT exchange_order_id, client_order_id, pending_order_id, strategy_id
+            """SELECT exchange_order_id, client_order_id, pending_order_id, strategy_id,
+                      NULL::BIGINT AS agent_intent_id
                FROM qd_live_order_bindings
                WHERE user_id = %s AND credential_id = %s AND LOWER(exchange_id) = 'futu'
                UNION ALL
-               SELECT exchange_order_id, client_order_id, id AS pending_order_id, strategy_id
+               SELECT exchange_order_id, client_order_id, id AS pending_order_id, strategy_id,
+                      NULL::BIGINT AS agent_intent_id
                FROM pending_orders
-               WHERE user_id = %s AND credential_id = %s AND LOWER(exchange_id) = 'futu'""",
-            (int(user_id), int(credential_id), int(user_id), int(credential_id)),
+               WHERE user_id = %s AND credential_id = %s AND LOWER(exchange_id) = 'futu'
+               UNION ALL
+               SELECT broker_order_id AS exchange_order_id, broker_remark AS client_order_id,
+                      NULL::BIGINT AS pending_order_id, NULL::BIGINT AS strategy_id,
+                      id AS agent_intent_id
+               FROM qd_agent_trade_intents
+               WHERE user_id = %s AND broker = 'futu' AND account_ref = %s""",
+            (int(user_id), int(credential_id), int(user_id), int(credential_id),
+             int(user_id), f"credential:{int(credential_id)}"),
         )
         rows = cur.fetchall() or []
         db.rollback()
@@ -85,6 +154,9 @@ def _owned_order_identities(user_id: int, credential_id: int) -> tuple[set[str],
             # it from its pending row so a crash between broker accept and DB
             # update can still be identified and cancelled safely.
             remarks.add(f"qd_{strategy_id}_{pending_order_id}")
+        agent_intent_id = int(row.get("agent_intent_id") or 0)
+        if agent_intent_id > 0:
+            remarks.add(f"qd_agent_{agent_intent_id}")
     return (
         {str(row["exchange_order_id"]) for row in rows if row.get("exchange_order_id")},
         remarks,
@@ -105,6 +177,13 @@ def _cancel_queued_orders(user_id: int, credential_id: int) -> int:
                 (int(user_id), int(credential_id)),
             )
             count = int(cur.rowcount or 0)
+            cur.execute(
+                """UPDATE qd_agent_trade_intents SET status = 'EXPIRED', updated_at = NOW()
+                   WHERE user_id = %s AND broker = 'futu' AND account_ref = %s
+                     AND status = 'PROPOSED'""",
+                (int(user_id), f"credential:{int(credential_id)}"),
+            )
+            count += int(cur.rowcount or 0)
             db.commit()
             return count
         except Exception:
@@ -127,6 +206,14 @@ def _unresolved_submit_outcomes(user_id: int, credential_id: int) -> int:
             (int(user_id), int(credential_id)),
         )
         count = int((cur.fetchone() or {}).get("n") or 0)
+        cur.execute(
+            """SELECT COUNT(*) AS n FROM qd_agent_trade_intents
+               WHERE user_id = %s AND broker = 'futu' AND account_ref = %s
+                 AND status IN ('EXECUTING', 'UNCERTAIN')
+                 AND COALESCE(broker_order_id, '') = ''""",
+            (int(user_id), f"credential:{int(credential_id)}"),
+        )
+        count += int((cur.fetchone() or {}).get("n") or 0)
         db.rollback()
         cur.close()
     return count

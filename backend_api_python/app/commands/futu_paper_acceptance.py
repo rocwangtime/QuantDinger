@@ -1,6 +1,6 @@
-"""Read-only reconciliation gate for the one-share Futu US paper roundtrip.
+"""Read-only reconciliation gate for bounded Futu US/HK paper roundtrips.
 
-Run only after the operator has finished the SPY strategy and inspected both
+Run only after the operator has finished the test strategy and inspected both
 orders in Futu. This command never submits or cancels an order. It obtains the
 SIMULATE account from the strategy's saved, encrypted credential; no account
 password, token, or account ID is accepted on the command line.
@@ -30,7 +30,9 @@ def _number(value: Any) -> Decimal:
 
 def _symbol(value: Any) -> str:
     raw = str(value or "").strip().upper()
-    return raw.split(":")[-1].removeprefix("US.")
+    raw = raw.split(":")[-1].removeprefix("US.").removeprefix("HK.")
+    raw = raw.removesuffix(".HK")
+    return raw.zfill(5) if raw.isdigit() else raw
 
 
 def _same_money(left: Any, right: Any) -> bool:
@@ -46,14 +48,20 @@ def verify_roundtrip(
     broker_orders: list[dict],
     platform_positions: list[dict],
     broker_positions: list[dict],
+    expected_symbol: str = "SPY",
+    expected_quantity: int = 1,
 ) -> dict:
-    """Prove exactly one filled SPY buy and sell, with a flat final account."""
+    """Prove exactly one bounded buy and sell, with a flat final account."""
+    symbol = _symbol(expected_symbol)
+    quantity_expected = _number(expected_quantity)
+    if not symbol or quantity_expected <= 0:
+        raise AcceptanceError("INVALID_ACCEPTANCE_TARGET")
     if len(pending_orders) != 2:
         raise AcceptanceError("EXPECTED_EXACTLY_TWO_PLATFORM_ORDERS")
     by_signal = {str(row.get("signal_type") or ""): row for row in pending_orders}
     if set(by_signal) != {"open_long", "close_long"}:
         raise AcceptanceError("EXPECTED_ONE_BUY_AND_ONE_SELL")
-    if any(_symbol(row.get("symbol")) != "SPY" for row in pending_orders):
+    if any(_symbol(row.get("symbol")) != symbol for row in pending_orders):
         raise AcceptanceError("UNEXPECTED_PLATFORM_SYMBOL")
 
     broker_by_id = {str(row.get("id") or row.get("orderId") or ""): row for row in broker_orders}
@@ -70,9 +78,9 @@ def verify_roundtrip(
             raise AcceptanceError("BROKER_ORDER_NOT_FILLED")
         if str(broker.get("side") or "").lower() != side:
             raise AcceptanceError("BROKER_SIDE_MISMATCH")
-        if _symbol(broker.get("symbol")) != "SPY":
+        if _symbol(broker.get("symbol")) != symbol:
             raise AcceptanceError("BROKER_SYMBOL_MISMATCH")
-        if any(_number(value) != 1 for value in (
+        if any(_number(value) != quantity_expected for value in (
             order.get("amount"), order.get("filled"),
             broker.get("quantity"), broker.get("filled"),
         )):
@@ -89,7 +97,7 @@ def verify_roundtrip(
         if any(str(row.get("exchange_order_id") or "") != order_id for row in own_trades):
             raise AcceptanceError("PLATFORM_FILL_ORDER_ID_MISMATCH")
         quantity = sum((_number(row.get("amount")) for row in own_trades), Decimal(0))
-        if quantity != 1:
+        if quantity != quantity_expected:
             raise AcceptanceError("PLATFORM_FILL_QUANTITY_MISMATCH")
         weighted = sum(
             (_number(row.get("amount")) * _number(row.get("price")) for row in own_trades),
@@ -102,12 +110,13 @@ def verify_roundtrip(
     if len(seen_trade_ids) != len(trades):
         raise AcceptanceError("UNMATCHED_PLATFORM_TRADES")
     for row in platform_positions:
-        if _symbol(row.get("symbol")) == "SPY" and _number(row.get("size")) != 0:
+        if _symbol(row.get("symbol")) == symbol and _number(row.get("size")) != 0:
             raise AcceptanceError("PLATFORM_POSITION_NOT_FLAT")
     for row in broker_positions:
-        if _symbol(row.get("symbol")) == "SPY" and _number(row.get("quantity")) != 0:
+        if _symbol(row.get("symbol")) == symbol and _number(row.get("quantity")) != 0:
             raise AcceptanceError("BROKER_POSITION_NOT_FLAT")
-    return {"passed": True, "orders": 2, "fill_rows": len(trades), "final_spy_quantity": 0}
+    final_key = "final_spy_quantity" if symbol == "SPY" else "final_hk_quantity"
+    return {"passed": True, "orders": 2, "fill_rows": len(trades), final_key: 0}
 
 
 def _database_rows(strategy_id: int) -> tuple[dict, list[dict], list[dict], list[dict]]:
@@ -159,10 +168,13 @@ def check_strategy(strategy_id: int) -> dict:
     strategy, orders, trades, positions = _database_rows(strategy_id)
     if not strategy:
         raise AcceptanceError("STRATEGY_NOT_FOUND")
-    if strategy.get("market_category") != "USStock" or strategy.get("execution_mode") != "live":
-        raise AcceptanceError("STRATEGY_NOT_LIVE_US_STOCK")
-    if _symbol(strategy.get("symbol")) != "SPY":
-        raise AcceptanceError("STRATEGY_NOT_SPY_ROUNDTRIP")
+    target = {
+        ("USStock", "SPY"): ("US", 1),
+        ("HKStock", "00700"): ("HK", 100),
+    }.get((strategy.get("market_category"), _symbol(strategy.get("symbol"))))
+    if strategy.get("execution_mode") != "live" or target is None:
+        raise AcceptanceError("STRATEGY_NOT_BOUNDED_FUTU_ROUNDTRIP")
+    expected_market, expected_quantity = target
     if len(orders) != 2:
         raise AcceptanceError("EXPECTED_EXACTLY_TWO_PLATFORM_ORDERS")
     if any(str(row.get("exchange_id") or "").lower() != "futu" for row in orders):
@@ -178,7 +190,7 @@ def check_strategy(strategy_id: int) -> dict:
     if int(exchange_config.get("credential_id") or 0) not in credential_ids:
         raise AcceptanceError("STRATEGY_CREDENTIAL_MISMATCH")
     config = config_from_exchange_config(exchange_config)
-    if config.acc_id <= 0:
+    if config.acc_id <= 0 or config.trade_market != expected_market:
         raise AcceptanceError("SIMULATE_ACCOUNT_NOT_SELECTED")
 
     client = FutuClient(config)
@@ -191,6 +203,8 @@ def check_strategy(strategy_id: int) -> dict:
             broker_orders=client.get_recent_orders(limit=500),
             platform_positions=positions,
             broker_positions=client.get_positions(),
+            expected_symbol=_symbol(strategy.get("symbol")),
+            expected_quantity=expected_quantity,
         )
     finally:
         client.disconnect()
