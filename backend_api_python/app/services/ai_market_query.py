@@ -327,13 +327,21 @@ def clean_ohlcv(klines: list[dict]) -> list[dict]:
     return rows
 
 
-def closed_ohlcv(klines: list[dict], timeframe: str, now_ts: float | None = None) -> tuple[list[dict], bool]:
+def closed_ohlcv(klines: list[dict], timeframe: str, now_ts: float | None = None, *, market: str = "") -> tuple[list[dict], bool]:
     rows = clean_ohlcv(klines)
     if not rows:
         return rows, False
-    seconds = TIMEFRAME_SECONDS.get(normalize_timeframe(timeframe))
+    normalized = normalize_timeframe(timeframe)
+    now_ts = float(now_ts if now_ts is not None else datetime.now(timezone.utc).timestamp())
+    if normalized == "1D" and market in {"USStock", "HKStock"}:
+        from app.services.market_schedule import equity_daily_bar_cutoff
+        # Daily provider timestamps label sessions, not 24-hour trading periods.
+        # Calendar failures propagate: never certify an unknown candle as closed.
+        cutoff = equity_daily_bar_cutoff(market, datetime.fromtimestamp(now_ts, timezone.utc)).tz_localize("UTC").timestamp()
+        closed = [row for row in rows if (stamp := _bar_time(row.get("time"))) is not None and stamp <= cutoff]
+        return closed, len(closed) != len(rows)
+    seconds = TIMEFRAME_SECONDS.get(normalized)
     last_ts = _bar_time(rows[-1].get("time"))
-    now_ts = float(now_ts or datetime.now(timezone.utc).timestamp())
     forming = bool(seconds and last_ts is not None and last_ts + seconds > now_ts)
     return (rows[:-1] if forming else rows), forming
 
@@ -476,7 +484,7 @@ def compute_technical_evidence(
     market: str = "",
 ) -> dict:
     all_rows = clean_ohlcv(klines)
-    closed_rows, forming_excluded = closed_ohlcv(klines, timeframe, now_ts=now_ts)
+    closed_rows, forming_excluded = closed_ohlcv(klines, timeframe, now_ts=now_ts, market=market)
     rows = closed_rows if closed_candle_only else all_rows
     requested = [metric for metric in (metrics or []) if metric in ALLOWED_METRICS]
     parameters = parameters if isinstance(parameters, dict) else {}
@@ -505,8 +513,12 @@ def compute_technical_evidence(
     atr = _atr(rows, 14)
     latest_volume = latest.get("volume")
     prior_volumes = [row["volume"] for row in rows[-21:-1] if row.get("volume") is not None]
-    volume_average = sum(prior_volumes) / len(prior_volumes) if prior_volumes else None
+    volume_average = sum(prior_volumes) / 20 if len(prior_volumes) == 20 else None
     volume_ratio = (latest_volume / volume_average) if latest_volume is not None and volume_average else None
+    volume_threshold = float(parameters.get("breakout_volume_threshold") or 1.2)
+    required_volume = volume_average * volume_threshold if volume_average is not None else None
+    next_volumes = [row["volume"] for row in rows[-20:] if row.get("volume") is not None]
+    next_average = sum(next_volumes) / 20 if len(next_volumes) == 20 else None
     ema20 = _ema_series(closes, 20)[-1]
     ema60 = _ema_series(closes, 60)[-1]
     ema200 = _ema_series(closes, 200)[-1]
@@ -552,7 +564,14 @@ def compute_technical_evidence(
             "periods_per_year": periods_per_year,
         }
     result["metric_metadata"]["returns"] = {"unit": "percent", "horizons_bars": return_horizons}
-    result["metric_metadata"]["volume_ratio"] = {"unit": "multiple", "baseline": "previous_20_closed_bars"}
+    result["metric_metadata"]["volume_ratio"] = {
+        "unit": "multiple", "baseline": "previous_20_closed_bars",
+        "baseline_bars": len(prior_volumes), "signal_volume": latest_volume,
+        "baseline_average": volume_average, "threshold_multiple": volume_threshold,
+        "required_volume": required_volume,
+        "next_bar_baseline_average": next_average,
+        "next_bar_required_volume": next_average * volume_threshold if next_average is not None else None,
+    }
     rsi = _rsi(closes, 14)
     values["rsi14"] = round(rsi, 4) if rsi is not None else None
     if len(closes) >= 20:
@@ -575,7 +594,6 @@ def compute_technical_evidence(
         tolerance = float(levels["tolerance"])
         upward = latest["close"] > prior_high + tolerance
         downward = latest["close"] < prior_low - tolerance
-        volume_threshold = float(parameters.get("breakout_volume_threshold") or 1.2)
         volume_confirmed = volume_ratio is not None and volume_ratio >= volume_threshold
         status = "range"
         if upward:
@@ -590,6 +608,9 @@ def compute_technical_evidence(
             "volume_confirmed": volume_confirmed,
             "volume_ratio": round(volume_ratio, 4) if volume_ratio is not None else None,
             "volume_threshold": volume_threshold,
+            "volume_average": volume_average,
+            "required_volume": required_volume,
+            "signal_volume": latest_volume,
             "reference_high": round(prior_high, 8),
             "reference_low": round(prior_low, 8),
             "tolerance": round(tolerance, 8),

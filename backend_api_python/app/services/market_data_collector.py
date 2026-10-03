@@ -15,6 +15,7 @@
 """
 
 import copy
+import math
 import os
 import tempfile
 import threading
@@ -34,6 +35,39 @@ from app.utils.logger import get_logger
 from app.config import APIKeys, FinnhubConfig
 
 logger = get_logger(__name__)
+
+
+def _macro_observation(data: dict, key: str, market: str) -> Optional[dict]:
+    """Only sourced, dated observations may become Agent macro evidence."""
+    if not isinstance(data, dict) or data.get("is_fallback") or data.get("is_estimate"):
+        return None
+    source = str(data.get("source") or "").strip()
+    if source.lower() in {"", "n/a", "unknown", "default"}:
+        return None
+    # alternative.me measures crypto sentiment, not US/HK equity sentiment.
+    if key == "FEAR_GREED" and market != "Crypto":
+        return None
+    value = data.get("yield_10y") if key == "TNX" else data.get("value")
+    try:
+        value = float(value)
+        if not math.isfinite(value) or value < 0 or (key != "FEAR_GREED" and value == 0):
+            return None
+        raw_time = data.get("data_time") or data.get("timestamp")
+        stamp = pd.to_datetime(raw_time, unit="s", utc=True) if isinstance(raw_time, (int, float)) else pd.to_datetime(raw_time, utc=True)
+        if stamp is None or pd.isna(stamp):
+            return None
+        age = (pd.Timestamp.now(tz="UTC") - stamp).total_seconds()
+        if age < -300 or age > (172800 if key == "FEAR_GREED" else 604800):
+            return None
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return {
+        "name": {"VIX": "VIX恐慌指数", "DXY": "美元指数", "TNX": "美债10年收益率", "FEAR_GREED": "加密市场恐惧贪婪指数"}[key],
+        "description": data.get("interpretation") or data.get("classification") or "",
+        "price": value, "change": data.get("change"), "changePercent": data.get("change"),
+        "level": data.get("level", "unknown"), "source": source, "data_time": stamp.isoformat(),
+        "scope": "crypto" if key == "FEAR_GREED" else "macro",
+    }
 
 
 class NonBlockingThreadPoolExecutor(ThreadPoolExecutor):
@@ -2330,142 +2364,46 @@ class MarketDataCollector:
     
     
     def _get_macro_data(self, market: str, timeout: int = 10) -> Dict[str, Any]:
-        """
-        获取宏观经济数据 - 复用 global_market.py 的函数和缓存
-        
-        优势：
-        1. 数据与全球金融页面一致
-        2. 复用30秒/5分钟缓存，降低API调用
-        3. 已有完整的数据解读和级别判断
-        """
+        """Fetch only verified macro observations; never promote UI fallback values."""
         try:
-            from app.data_providers import get_cached as _get_cached, set_cached as _set_cached
+            from app.data_providers import get_cached
             from app.data_providers.sentiment import (
-                fetch_vix as _fetch_vix,
-                fetch_dollar_index as _fetch_dollar_index,
-                fetch_yield_curve as _fetch_yield_curve,
-                fetch_fear_greed_index as _fetch_fear_greed_index,
+                fetch_vix, fetch_dollar_index, fetch_yield_curve, fetch_fear_greed_index,
             )
-            
+
+            providers = {
+                "VIX": ("vix", fetch_vix),
+                "DXY": ("dxy", fetch_dollar_index),
+                "TNX": ("yield_curve", fetch_yield_curve),
+            }
+            if market == "Crypto":
+                providers["FEAR_GREED"] = ("fear_greed", fetch_fear_greed_index)
+            cached = get_cached("market_sentiment", 21600) or {}
             result = {}
-            
-            MACRO_CACHE_TTL = 21600  # 6 hours
-            cached_sentiment = _get_cached("market_sentiment", MACRO_CACHE_TTL)
-            if cached_sentiment:
-                logger.info("Using cached sentiment data from global_market (6h cache)")
-                if cached_sentiment.get('vix'):
-                    vix = cached_sentiment['vix']
-                    result['VIX'] = {
-                        'name': 'VIX恐慌指数',
-                        'description': vix.get('interpretation', ''),
-                        'price': vix.get('value', 0),
-                        'change': vix.get('change', 0),
-                        'changePercent': vix.get('change', 0),
-                        'level': vix.get('level', 'unknown'),
-                    }
-                
-                if cached_sentiment.get('dxy'):
-                    dxy = cached_sentiment['dxy']
-                    result['DXY'] = {
-                        'name': '美元指数',
-                        'description': dxy.get('interpretation', ''),
-                        'price': dxy.get('value', 0),
-                        'change': dxy.get('change', 0),
-                        'changePercent': dxy.get('change', 0),
-                        'level': dxy.get('level', 'unknown'),
-                    }
-                
-                if cached_sentiment.get('yield_curve'):
-                    yc = cached_sentiment['yield_curve']
-                    result['TNX'] = {
-                        'name': '美债10年收益率',
-                        'description': yc.get('interpretation', ''),
-                        'price': yc.get('yield_10y', 0),
-                        'change': yc.get('change', 0),
-                        'changePercent': 0,
-                        'spread': yc.get('spread', 0),
-                        'level': yc.get('level', 'unknown'),
-                    }
-                
-                if cached_sentiment.get('fear_greed'):
-                    fg = cached_sentiment['fear_greed']
-                    result['FEAR_GREED'] = {
-                        'name': '恐惧贪婪指数',
-                        'description': fg.get('classification', 'Neutral'),
-                        'price': fg.get('value', 50),
-                        'change': 0,
-                        'changePercent': 0,
-                    }
-                
-                if result:
-                    return result
-            
-            logger.info("Fetching macro data from global_market functions")
-            
+            for key, (cache_key, _) in providers.items():
+                observation = _macro_observation(cached.get(cache_key), key, market)
+                if observation:
+                    result[key] = observation
+
             with NonBlockingThreadPoolExecutor(max_workers=4) as executor:
                 futures = {
-                    executor.submit(_fetch_vix): "VIX",
-                    executor.submit(_fetch_dollar_index): "DXY",
-                    executor.submit(_fetch_yield_curve): "TNX",
-                    executor.submit(_fetch_fear_greed_index): "FEAR_GREED",
+                    executor.submit(fetch): key
+                    for key, (_, fetch) in providers.items() if key not in result
                 }
-                
                 try:
                     for future in as_completed(futures, timeout=timeout):
                         key = futures[future]
                         try:
-                            data = future.result(timeout=5)
-                            if data:
-                                if key == 'VIX':
-                                    result[key] = {
-                                        'name': 'VIX恐慌指数',
-                                        'description': data.get('interpretation', ''),
-                                        'price': data.get('value', 0),
-                                        'change': data.get('change', 0),
-                                        'changePercent': data.get('change', 0),
-                                        'level': data.get('level', 'unknown'),
-                                    }
-                                elif key == 'DXY':
-                                    result[key] = {
-                                        'name': '美元指数',
-                                        'description': data.get('interpretation', ''),
-                                        'price': data.get('value', 0),
-                                        'change': data.get('change', 0),
-                                        'changePercent': data.get('change', 0),
-                                        'level': data.get('level', 'unknown'),
-                                    }
-                                elif key == 'TNX':
-                                    result[key] = {
-                                        'name': '美债10年收益率',
-                                        'description': data.get('interpretation', ''),
-                                        'price': data.get('yield_10y', 0),
-                                        'change': data.get('change', 0),
-                                        'changePercent': 0,
-                                        'spread': data.get('spread', 0),
-                                        'level': data.get('level', 'unknown'),
-                                    }
-                                elif key == 'FEAR_GREED':
-                                    result[key] = {
-                                        'name': '恐惧贪婪指数',
-                                        'description': data.get('classification', 'Neutral'),
-                                        'price': data.get('value', 50),
-                                        'change': 0,
-                                        'changePercent': 0,
-                                    }
-                        except Exception as e:
-                            logger.debug(f"Macro indicator {key} fetch failed: {e}")
+                            observation = _macro_observation(future.result(), key, market)
+                            if observation:
+                                result[key] = observation
+                        except Exception:
+                            logger.debug("Macro indicator %s unavailable", key)
                 except TimeoutError:
                     logger.warning("Macro data fetch timed out")
-            
-            pass
-            
             return result
-            
-        except ImportError as e:
-            logger.warning(f"Could not import from global_market: {e}")
-            return {}
-        except Exception as e:
-            logger.error(f"_get_macro_data failed: {e}")
+        except Exception:
+            logger.warning("Verified macro data unavailable")
             return {}
     
     

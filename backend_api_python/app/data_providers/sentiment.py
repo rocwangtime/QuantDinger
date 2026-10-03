@@ -48,10 +48,12 @@ def fetch_vix() -> Dict[str, Any]:
         "value": 18, "change": 0, "level": "low",
         "interpretation": "低波动 - 市场稳定",
         "interpretation_en": "Low - Market Stable",
+        "source": "N/A", "is_fallback": True,
     }
 
     current = 0.0
     change = 0.0
+    source, data_time = "yfinance", None
 
     try:
         import yfinance as yf
@@ -65,6 +67,7 @@ def fetch_vix() -> Dict[str, Any]:
             hist = None
 
         if hist is not None and not hist.empty and len(hist) >= 1:
+            data_time = hist.index[-1].isoformat()
             current = float(hist["Close"].iloc[-1])
             if current > 0:
                 prev_close = float(hist["Close"].iloc[-2]) if len(hist) >= 2 else current
@@ -81,6 +84,8 @@ def fetch_vix() -> Dict[str, Any]:
             import akshare as ak
             vix_df = ak.index_vix()
             if vix_df is not None and len(vix_df) > 0:
+                source = "akshare"
+                data_time = str(vix_df.iloc[-1].get("date") or "")
                 current = float(vix_df.iloc[-1]["close"])
                 prev_close = float(vix_df.iloc[-2]["close"]) if len(vix_df) >= 2 else current
                 change = ((current - prev_close) / prev_close) * 100 if prev_close else 0
@@ -108,6 +113,7 @@ def fetch_vix() -> Dict[str, Any]:
     return {
         "value": round(current, 2), "change": round(change, 2),
         "level": level, "interpretation": cn, "interpretation_en": en,
+        "source": source, "data_time": data_time,
     }
 
 
@@ -117,10 +123,12 @@ def fetch_dollar_index() -> Dict[str, Any]:
         "value": 104, "change": 0, "level": "moderate_strong",
         "interpretation": "美元偏强 - 关注资金流向",
         "interpretation_en": "Moderately Strong - Watch capital flows",
+        "source": "N/A", "is_fallback": True,
     }
 
     current = 0.0
     change = 0.0
+    source, data_time, is_estimate = "yfinance", None, False
 
     try:
         import yfinance as yf
@@ -134,6 +142,7 @@ def fetch_dollar_index() -> Dict[str, Any]:
             hist = None
 
         if hist is not None and not hist.empty and len(hist) >= 1:
+            data_time = hist.index[-1].isoformat()
             current = float(hist["Close"].iloc[-1])
             if current > 0:
                 prev_close = float(hist["Close"].iloc[-2]) if len(hist) >= 2 else current
@@ -152,6 +161,7 @@ def fetch_dollar_index() -> Dict[str, Any]:
             if fx_df is not None and len(fx_df) > 0:
                 usd_cny = float(fx_df.iloc[-1]["中行汇买价"]) / 100
                 current = usd_cny * 14.5
+                source, is_estimate = "akshare_usdcny_proxy", True
                 change = 0
                 logger.info("DXY estimated from akshare: %.2f", current)
             else:
@@ -178,6 +188,7 @@ def fetch_dollar_index() -> Dict[str, Any]:
     return {
         "value": round(current, 2), "change": round(change, 2),
         "level": level, "interpretation": cn, "interpretation_en": en,
+        "source": source, "data_time": data_time, "is_estimate": is_estimate,
     }
 
 
@@ -200,6 +211,7 @@ def fetch_yield_curve() -> Dict[str, Any]:
                 "yield_10y": 4.2, "yield_2y": 4.0, "spread": 0.2, "change": 0,
                 "level": "normal", "interpretation": "数据暂不可用",
                 "interpretation_en": "Data temporarily unavailable", "signal": "neutral",
+                "source": "N/A", "is_fallback": True,
             }
 
         if len(tnx_hist) >= 1:
@@ -240,6 +252,8 @@ def fetch_yield_curve() -> Dict[str, Any]:
             "yield_10y": round(yield_10y, 2), "yield_2y": round(yield_2y, 2),
             "spread": round(spread, 2), "change": round(yc_change, 3),
             "level": level, "signal": signal, "interpretation": cn, "interpretation_en": en,
+            "source": "yfinance", "is_estimate": True,
+            "estimate_note": "2Y yield is approximated as 85% of 10Y; not an observed yield curve.",
         }
     except Exception as e:
         logger.error("Failed to fetch Yield Curve: %s", e, exc_info=True)
@@ -247,6 +261,7 @@ def fetch_yield_curve() -> Dict[str, Any]:
             "yield_10y": 0, "yield_2y": 0, "spread": 0, "change": 0,
             "level": "unknown", "signal": "neutral",
             "interpretation": "数据获取失败", "interpretation_en": "Data fetch failed",
+            "source": "N/A", "is_fallback": True,
         }
 
 

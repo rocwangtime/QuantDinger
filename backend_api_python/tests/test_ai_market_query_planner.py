@@ -1,4 +1,5 @@
 import pytest
+from datetime import datetime
 
 from app.services.ai_market_query import (
     build_market_query_plan,
@@ -112,6 +113,20 @@ def test_forming_candle_is_excluded_from_closed_evidence():
     assert evidence["metrics"]["price"] == 102
 
 
+@pytest.mark.parametrize(("market", "label", "now", "expected"), [
+    ("USStock", "2026-10-02T04:00:00+00:00", "2026-10-02T21:00:00+00:00", True),
+    ("USStock", "2026-10-02T04:00:00+00:00", "2026-10-02T19:59:00+00:00", False),
+    ("USStock", "2026-10-02T04:00:00+00:00", "2026-10-03T12:00:00+00:00", True),
+    ("HKStock", "2026-10-01T16:00:00+00:00", "2026-10-02T09:00:00+00:00", True),
+    ("HKStock", "2026-10-01T16:00:00+00:00", "2026-10-02T07:00:00+00:00", False),
+])
+def test_equity_daily_candles_close_by_exchange_session(market, label, now, expected):
+    rows = [{"time": label, "close": 100, "high": 101, "low": 99, "volume": 100}]
+    closed, forming = closed_ohlcv(rows, "1D", datetime.fromisoformat(now).timestamp(), market=market)
+    assert bool(closed) is expected
+    assert forming is not expected
+
+
 def _breakout_rows(last_close=113.0, last_volume=220.0):
     rows = []
     for index in range(60):
@@ -152,6 +167,20 @@ def test_breakout_uses_prior_levels_and_closed_volume_confirmation():
     assert breakout["status"] == "confirmed_up"
     assert breakout["volume_confirmed"] is True
     assert breakout["signal_close"] == 113.0
+    assert breakout["volume_average"] == 100.0
+    assert breakout["required_volume"] == 120.0
+    metadata = evidence["metric_metadata"]["volume_ratio"]
+    assert metadata["signal_volume"] == 220.0
+    assert metadata["next_bar_baseline_average"] == 106.0
+    assert metadata["next_bar_required_volume"] == pytest.approx(127.2)
+
+
+def test_short_or_incomplete_volume_history_cannot_confirm_20_bar_ratio():
+    for rows in (_breakout_rows()[-20:], _breakout_rows()):
+        rows[-2]["volume"] = None
+        evidence = compute_technical_evidence(rows, "1D", ["volume_ratio"], now_ts=62 * 86400)
+        assert "volume_ratio" in evidence["missing_metrics"]
+        assert evidence["metric_metadata"]["volume_ratio"]["required_volume"] is None
 
 
 def test_low_volume_breakout_is_not_reported_as_confirmed():

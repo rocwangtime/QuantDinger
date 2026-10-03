@@ -1027,7 +1027,7 @@ def _build_market_snapshot(context: dict) -> dict | None:
     if market != "Crypto":
         snapshot.pop("derivatives", None)
     snapshot["data_warnings"].append("Returned bars cover the requested window only, not the instrument's entire available history. Closed markets do not produce continuous intraday candles. Use next_open for next-session opportunities.")
-    snapshot["data_warnings"].append("Latest candle may be still forming; prefer prev_closed_volume_ratio_vs_avg20 for volume confirmation.")
+    snapshot["data_warnings"].append("Use technical.closed_candle_only and forming_candle_excluded to determine candle status. Do not describe a closed signal candle as still forming. Legacy volume fields may include an open candle and must not override technical evidence.")
 
     def fetch_price():
         price = service.get_realtime_price(
@@ -3238,6 +3238,7 @@ def _build_system_prompt(language: str, context: dict, intent: str, has_image: b
             "If a comparison snapshot is marked available, never claim that symbol has no market data. "
             "Follow request.market_query_plan as the authoritative data-requirement plan. Use each timeframe's technical.metrics for indicators, support/resistance and breakout claims; these values use closed candles and take precedence over legacy convenience fields. "
             "A breakout is confirmed only when technical.metrics.breakout says confirmed_up or confirmed_down. Treat unconfirmed_up/unconfirmed_down as an intraday or low-volume warning, not a completed breakout. "
+            "For volume thresholds, quote technical.metric_metadata.volume_ratio: baseline_average is NOT required_volume (baseline times threshold_multiple). For the next bar/session use next_bar_baseline_average and next_bar_required_volume, which include the latest closed bar in the baseline. Preserve these distinctions and never substitute an average for a trigger threshold. "
             "If market_data.market_query_status.complete is false, explicitly list the missing instrument/timeframe/metrics instead of calculating or inventing them. "
             "Give concrete conclusions and relevant evidence; add caveats or next steps only when they help answer the actual question. "
             "In streaming prose, do not emit raw actions JSON or pretend to create clickable buttons. The UI provides real strategy/monitor actions. Do not claim a task, strategy or backtest was created without a tool result.\n"
