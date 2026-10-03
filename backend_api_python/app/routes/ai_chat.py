@@ -909,6 +909,16 @@ def _context_manifest(context: dict, usage: dict, meta: dict) -> dict:
         "broker_trades_included": False,
     }
 
+
+def _persisted_context_manifest(actions: list[dict]) -> dict | None:
+    """Read the safe context inventory from an assistant's stored actions."""
+    for action in actions:
+        if isinstance(action, dict) and action.get("type") == "context_manifest":
+            payload = action.get("payload")
+            return payload if isinstance(payload, dict) else None
+    return None
+
+
 def _to_float(value: Any, default: float | None = None) -> float | None:
     try:
         n = float(value)
@@ -4337,6 +4347,10 @@ def chat_message_stream():
             response_actions = [{"key": "llm-usage", "type": "llm_usage", "payload": llm_usage}]
             if usage_action:
                 response_actions.insert(0, usage_action)
+            context_manifest = _context_manifest(prepared_context, context_usage, context_meta)
+            persisted_actions = [*response_actions, {
+                "key": "context-manifest", "type": "context_manifest", "payload": context_manifest,
+            }]
             with get_db_connection() as db:
                 cur = db.cursor()
                 assistant_id = _insert_message(
@@ -4347,7 +4361,7 @@ def chat_message_stream():
                     content=answer,
                     attachments=[],
                     intent=intent,
-                    actions=response_actions,
+                    actions=persisted_actions,
                 )
                 if request_usage_id:
                     store_update_request_usage(
@@ -4372,7 +4386,7 @@ def chat_message_stream():
                 "costs": costs,
                 "memory_candidates": _detect_memory_candidates(message, language),
                 "context_usage": {**context_usage, **context_meta},
-                "context_manifest": _context_manifest(prepared_context, context_usage, context_meta),
+                "context_manifest": context_manifest,
                 "llm_usage": llm_usage,
                 **stream_result,
             })
@@ -4717,6 +4731,12 @@ def get_chat_history():
                 item = _row_to_dict(row)
                 item["attachments"] = _json_loads(item.get("attachments_json"), [])
                 item["actions"] = _json_loads(item.get("actions_json"), [])
+                if item.get("role") == "assistant" and isinstance(item["actions"], list):
+                    manifest = _persisted_context_manifest(item["actions"])
+                    if manifest is not None:
+                        item["contextManifest"] = manifest
+                        item["actions"] = [action for action in item["actions"]
+                                           if not (isinstance(action, dict) and action.get("type") == "context_manifest")]
                 report = _json_loads(item.get("report_json"), None)
                 report_target = _json_loads(item.get("report_target_json"), None)
                 if isinstance(report, dict):

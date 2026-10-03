@@ -10,7 +10,7 @@ from app.routes import ai_chat
 
 @pytest.fixture
 def stream_harness(monkeypatch):
-    state = {"connections": 0, "events": [], "classifications": 0}
+    state = {"connections": 0, "events": [], "classifications": 0, "inserted": []}
 
     class Cursor:
         def execute(self, *args):
@@ -52,6 +52,7 @@ def stream_harness(monkeypatch):
 
     def insert(cur, **kwargs):
         state["events"].append(kwargs["role"])
+        state["inserted"].append(kwargs)
         return len(state["events"])
 
     monkeypatch.setattr(ai_chat, "get_db_connection", connection)
@@ -149,6 +150,17 @@ def test_context_manifest_does_not_claim_broker_fills():
     assert manifest["symbol"] == "SPCX"
     assert manifest["price_time"] == "2026-10-02T20:00:00Z"
     assert manifest["timeframes"] == ["1D"]
+    assert manifest["broker_trades_included"] is False
+
+
+def test_stream_persists_context_manifest_for_history(stream_harness):
+    state, stream = stream_harness
+    with stream({"market": "USStock", "symbol": "SPCX"}) as events:
+        assert "event: done" in list(events)[-1]
+    assistant = next(row for row in state["inserted"] if row["role"] == "assistant")
+    manifest = ai_chat._persisted_context_manifest(assistant["actions"])
+    assert manifest["market"] == "USStock"
+    assert manifest["symbol"] == "SPCX"
     assert manifest["broker_trades_included"] is False
 
 
