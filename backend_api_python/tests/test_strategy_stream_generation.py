@@ -1,6 +1,9 @@
 """The interactive strategy path must stream and honour cancellation."""
 
 import json
+import inspect
+
+from flask import g
 
 from app.routes import strategy_stream_routes as route
 
@@ -88,3 +91,50 @@ def test_strategy_completion_can_stream_discussion_model(monkeypatch):
     ))
     assert result == "risk overview"
     assert len(events) == 2
+
+
+def test_workspace_discussion_emits_live_deltas_before_final_result(app, monkeypatch):
+    from app.services import llm as llm_module
+    from app.services import billing_service as billing_module
+
+    class Billing:
+        def check_and_consume(self, **_kwargs):
+            return True, "consumed"
+
+        def get_feature_cost(self, _feature):
+            return 1
+
+        def get_user_credits(self, _user_id):
+            return 99
+
+    class LLM:
+        usage_events = []
+
+        def is_configured(self):
+            return True
+
+        def get_default_model(self):
+            return "discussion-model"
+
+        def stream_llm_api(self, _messages, *, model, temperature):
+            assert model == "discussion-model"
+            yield "risk "
+            yield "overview"
+
+    monkeypatch.setattr(llm_module, "LLMService", LLM)
+    monkeypatch.setattr(billing_module, "get_billing_service", lambda: Billing())
+    monkeypatch.setattr(route, "generation_cancelled", lambda *_: False)
+    with app.test_request_context(
+        "/api/strategies/ai-workspace/turn/stream", method="POST",
+        json={"prompt": "Explain this strategy", "interactionMode": "discussion",
+              "request_id": "92984b3f-dda9-4f40-b06f-ec184b59d312"},
+    ):
+        g.user_id = 7
+        response = inspect.unwrap(route.stream_strategy_workspace_turn)()
+        events = list(response.response)
+    names = [event.split("\n", 1)[0] for event in events]
+    assert names[:3] == ["event: accepted", "event: progress", "event: progress"]
+    assert names[3:5] == ["event: delta", "event: delta"]
+    result = json.loads(events[-1].split("data: ", 1)[1])["data"]
+    assert result["reply_type"] == "discussion"
+    assert result["assistant_message"]["content"] == "risk overview"
