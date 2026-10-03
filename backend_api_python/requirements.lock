@@ -93,7 +93,7 @@ pygments==2.20.0
 pyjwt==2.15.1
 pyluach==2.3.0
 pyotp==2.10.0
-pypdf==6.16.2
+pypdf==6.19.0
 pyproject-hooks==1.2.0
 pysocks==1.7.1
 python-dateutil==2.9.0.post0
