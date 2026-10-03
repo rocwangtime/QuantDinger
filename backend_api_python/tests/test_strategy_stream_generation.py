@@ -2,7 +2,7 @@
 
 import json
 
-from app.routes import strategy as route
+from app.routes import strategy_stream_routes as route
 
 
 def _consume(generator):
@@ -25,7 +25,7 @@ def test_strategy_completion_streams_each_delta(monkeypatch):
             yield "def init"
             yield "ialize(): pass"
 
-    events, result = _consume(route._stream_strategy_completion(
+    events, result = _consume(route._stream_completion(
         LLM(), [{"role": "user", "content": "test"}], temperature=0.2,
         user_id=7, request_id="test", phase="generation",
     ))
@@ -51,7 +51,7 @@ def test_strategy_completion_stops_and_closes_provider(monkeypatch):
             finally:
                 closed.append(True)
 
-    events, result = _consume(route._stream_strategy_completion(
+    events, result = _consume(route._stream_completion(
         LLM(), [], temperature=0.2, user_id=7, request_id="test",
         phase="generation",
     ))
