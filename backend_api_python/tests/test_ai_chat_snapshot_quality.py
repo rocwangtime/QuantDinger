@@ -174,16 +174,22 @@ def test_explicit_single_timeframe_does_not_inherit_selected_chart_timeframe():
 
 def test_stream_recovery_replaces_partial_provider_output(monkeypatch):
     class FakeLLMService:
+        attempts = 0
+
         def stream_llm_api(self, messages, temperature):
-            yield "partial"
-            raise LLMAPIError(
-                "upstream stream closed",
-                status_code=502,
-                error_type="provider_unavailable",
-            )
+            self.attempts += 1
+            if self.attempts == 1:
+                yield "partial"
+                raise LLMAPIError(
+                    "upstream stream closed",
+                    status_code=502,
+                    error_type="provider_unavailable",
+                )
+            yield "complete "
+            yield "recovered answer"
 
         def call_llm_api(self, messages, temperature, use_json_mode):
-            return "complete recovered answer"
+            raise AssertionError("Recovery must never fall back to a blocking response")
 
     monkeypatch.setattr(ai_chat, "LLMService", FakeLLMService)
 
@@ -191,7 +197,8 @@ def test_stream_recovery_replaces_partial_provider_output(monkeypatch):
 
     assert events == [
         ("delta", {"text": "partial"}),
-        ("replace", {"text": "complete recovered answer", "recovered": True}),
+        ("replace", {"text": "complete ", "recovered": True}),
+        ("delta", {"text": "recovered answer", "recovered": True}),
     ]
 
 

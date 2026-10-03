@@ -72,11 +72,13 @@ def stream_harness(monkeypatch):
     monkeypatch.setattr(ai_chat, "_stream_llm_with_recovery", provider)
     monkeypatch.setattr(ai_chat, "_detect_memory_candidates", lambda *args: [])
     app = Flask(__name__)
+    app.secret_key = "test-only-signed-intent"
 
     @contextmanager
-    def stream(context=None):
+    def stream(context=None, **extra):
         with app.test_request_context("/api/ai/chat/message/stream", method="POST", json={
             "message": "Analyze SPCX trend and liquidity.", "context": context or {}, "language": "en-US",
+            **extra,
         }):
             g.user_id = 7
             response = inspect.unwrap(ai_chat.chat_message_stream)()
@@ -113,11 +115,76 @@ def test_stream_accepts_before_slow_work_and_releases_database_during_io(stream_
     assert state["connections"] == 0
 
 
+def test_cancelled_stream_does_not_call_model_or_research(stream_harness, monkeypatch):
+    state, stream = stream_harness
+    monkeypatch.setattr(ai_chat, "generation_cancelled", lambda user_id, request_id: True)
+    with stream(request_id="6d6271b2-cbb7-44ec-9d1a-8093940ec006") as events:
+        assert "event: accepted" in next(events)
+        assert "event: cancelled" in next(events)
+    assert "provider" not in state["events"]
+    assert "enrich" not in state["events"]
+
+
+def test_cancel_endpoint_marks_only_authenticated_users_request(monkeypatch):
+    observed = []
+    monkeypatch.setattr(ai_chat, "cancel_generation", lambda user_id, request_id: observed.append((user_id, request_id)))
+    app = Flask(__name__)
+    with app.test_request_context("/api/ai/chat/message/cancel", method="POST", json={
+        "request_id": "6d6271b2-cbb7-44ec-9d1a-8093940ec006",
+    }):
+        g.user_id = 7
+        response = inspect.unwrap(ai_chat.cancel_chat_message)()
+    assert response.get_json()["code"] == 1
+    assert observed == [(7, "6d6271b2-cbb7-44ec-9d1a-8093940ec006")]
+
+
+def test_context_manifest_does_not_claim_broker_fills():
+    manifest = ai_chat._context_manifest({
+        "market_snapshot": {
+            "market": "USStock", "symbol": "SPCX",
+            "price": {"source": "fixture", "data_time": "2026-10-02T20:00:00Z"},
+            "timeframes": {"1D": {"available": True}},
+        },
+    }, {"history_message_count": 2}, {"memory_count": 1})
+    assert manifest["symbol"] == "SPCX"
+    assert manifest["price_time"] == "2026-10-02T20:00:00Z"
+    assert manifest["timeframes"] == ["1D"]
+    assert manifest["broker_trades_included"] is False
+
+
 def test_frontend_routing_result_cannot_override_server_conversation_routing(stream_harness):
     state, stream = stream_harness
     with stream({"market": "USStock", "symbol": "SPCX", "agent_intent": {
         "intent": "market_analysis", "confidence": 95, "should_execute": False,
     }}) as events:
+        assert "event: done" in list(events)[-1]
+    assert state["classifications"] == 1
+
+
+def test_signed_routing_result_skips_duplicate_model_call(stream_harness):
+    state, stream = stream_harness
+    app = Flask(__name__)
+    app.secret_key = "test-only-signed-intent"
+    message = "Analyze SPCX trend and liquidity."
+    with app.app_context():
+        token = ai_chat._signed_intent(
+            {"intent": "market_analysis", "should_execute": False}, 7, message, [], "en-US",
+        )
+    with stream(routing_token=token) as events:
+        assert "event: done" in list(events)[-1]
+    assert state["classifications"] == 0
+
+
+def test_signed_routing_result_is_bound_to_message_and_user(stream_harness):
+    state, stream = stream_harness
+    app = Flask(__name__)
+    app.secret_key = "test-only-signed-intent"
+    with app.app_context():
+        token = ai_chat._signed_intent(
+            {"intent": "strategy_build", "should_execute": True}, 8,
+            "Analyze SPCX trend and liquidity.", [], "en-US",
+        )
+    with stream(routing_token=token) as events:
         assert "event: done" in list(events)[-1]
     assert state["classifications"] == 1
 

@@ -7,6 +7,7 @@ delegates reasoning to the configured LLM provider.
 from __future__ import annotations
 
 import json
+import hashlib
 import math
 import re
 import requests
@@ -15,7 +16,9 @@ from datetime import date, datetime, timezone
 from time import perf_counter
 from typing import Any
 
-from flask import Response, g, jsonify, request, stream_with_context
+from flask import Response, current_app, g, jsonify, request, stream_with_context
+from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
+from app.services.ai_generation_control import cancel_generation, generation_cancelled, valid_request_id
 from app.services.llm_selection import agent_model_selection, model_catalog
 
 from app.openapi.blueprint import HumanBlueprint as Blueprint
@@ -678,6 +681,45 @@ def _get_or_classify_agent_intent(message: str, attachments: list[dict], context
         return _normalize_agent_intent(existing, message, bool(attachments), context, language)
     return _classify_agent_intent(message, attachments, context, language)
 
+
+def _intent_digest(user_id: int, message: str, attachments: list[dict], language: str, session_id: int | None = None, context: dict | None = None) -> str:
+    context = context or {}
+    canonical = _json_dumps({
+        "user_id": user_id, "message": message, "language": language,
+        "session_id": session_id,
+        "target": {key: context.get(key) for key in (
+            "market", "symbol", "timeframe", "exchange_id", "market_type", "instrument_id"
+        )},
+        "attachments": [(item.get("mime_type"), item.get("data_url")) for item in attachments],
+    })
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _intent_signer():
+    if not current_app.secret_key:
+        return None
+    return URLSafeTimedSerializer(current_app.secret_key, salt="copilot-classified-intent-v1")
+
+
+def _signed_intent(plan: dict, user_id: int, message: str, attachments: list[dict], language: str, session_id: int | None = None, context: dict | None = None) -> str | None:
+    signer = _intent_signer()
+    if not signer:
+        return None
+    return signer.dumps({"digest": _intent_digest(user_id, message, attachments, language, session_id, context), "plan": plan})
+
+
+def _verified_intent(token: str, user_id: int, message: str, attachments: list[dict], language: str, session_id: int | None = None, context: dict | None = None) -> dict | None:
+    signer = _intent_signer()
+    if not signer or not isinstance(token, str) or len(token) > 12000:
+        return None
+    try:
+        payload = signer.loads(token, max_age=180)
+    except (BadSignature, SignatureExpired):
+        return None
+    if payload.get("digest") != _intent_digest(user_id, message, attachments, language, session_id, context):
+        return None
+    return payload.get("plan") if isinstance(payload.get("plan"), dict) else None
+
 def _normalize_attachments(raw_attachments: Any) -> list[dict]:
     if not raw_attachments:
         return []
@@ -823,6 +865,33 @@ def _prepare_server_context(
         "reference_rejected": bool(referenced_report_id and not valid_report_id),
     }
     return context, meta
+
+
+def _context_manifest(context: dict, usage: dict, meta: dict) -> dict:
+    """A safe, factual inventory of evidence actually assembled for this turn."""
+    snapshot = context.get("market_snapshot") if isinstance(context.get("market_snapshot"), dict) else {}
+    research = context.get("research_context") if isinstance(context.get("research_context"), dict) else {}
+    market_data = research.get("market_data") if isinstance(research.get("market_data"), dict) else {}
+    primary = market_data.get("primary_snapshot") if isinstance(market_data.get("primary_snapshot"), dict) else {}
+    selected = primary or snapshot
+    price = selected.get("price") if isinstance(selected.get("price"), dict) else {}
+    news = research.get("news") if isinstance(research.get("news"), dict) else {}
+    macro = research.get("macro") if isinstance(research.get("macro"), dict) else {}
+    return {
+        "symbol": selected.get("symbol") or context.get("resolved_symbol") or context.get("symbol"),
+        "market": selected.get("market") or context.get("resolved_market") or context.get("market"),
+        "price_source": price.get("source"),
+        "price_time": price.get("data_time"),
+        "snapshot_time": selected.get("generated_at_utc"),
+        "timeframes": [name for name, bars in (selected.get("timeframes") or {}).items()
+                       if isinstance(bars, dict) and bars.get("available")],
+        "news_count": len(news.get("web_results") or []),
+        "macro_count": len(macro.get("events") or []) if isinstance(macro.get("events"), list) else 0,
+        "history_count": usage.get("history_message_count") or 0,
+        "memory_count": meta.get("memory_count") or 0,
+        "report_referenced": bool(meta.get("report_message_id")),
+        "broker_trades_included": False,
+    }
 
 def _to_float(value: Any, default: float | None = None) -> float | None:
     try:
@@ -3612,7 +3681,24 @@ def agent_intent():
     data = request.get_json(silent=True) or {}
     message = (data.get("message") or "").strip()
     language = (data.get("language") or request.headers.get("X-App-Lang") or "zh-CN").strip()
-    context = data.get("context") if isinstance(data.get("context"), dict) else {}
+    context = sanitize_client_context(data.get("context") if isinstance(data.get("context"), dict) else {})
+    user_id = int(getattr(g, "user_id", 0) or 0)
+    try:
+        requested_session_id = int(data.get("session_id")) if data.get("session_id") else None
+    except (TypeError, ValueError):
+        requested_session_id = None
+    session_id = None
+    if requested_session_id:
+        with get_db_connection() as db:
+            cur = db.cursor()
+            session = _get_session(cur, user_id, requested_session_id)
+            if session:
+                session_id = requested_session_id
+                history = _load_recent_messages(cur, session_id, limit=8)
+                context["_routing_history"] = _compact_routing_history(history)
+                state = store_get_session_summary(cur, user_id, session_id)
+                context["_routing_target"] = (state.get("summary") or {}).get("research_target") or {}
+            cur.close()
     try:
         attachments = _normalize_attachments(data.get("attachments") or [])
     except ValueError as e:
@@ -3624,7 +3710,19 @@ def agent_intent():
         plan = _classify_agent_intent(message, attachments, context, language)
     finally:
         logger.info("Copilot intent timing seconds=%.4f", perf_counter() - started_at)
-    return jsonify({"code": 1, "msg": "success", "data": plan})
+    return jsonify({"code": 1, "msg": "success", "data": plan,
+                    "routing_token": _signed_intent(plan, user_id, message, attachments, language, session_id, context)})
+
+
+@ai_chat_blp.route("/chat/message/cancel", methods=["POST"])
+@login_required
+def cancel_chat_message():
+    data = request.get_json(silent=True) or {}
+    request_id = valid_request_id(data.get("request_id"))
+    if not request_id:
+        return jsonify({"code": 0, "msg": "Invalid request ID", "data": None}), 400
+    cancel_generation(int(getattr(g, "user_id", 0) or 0), request_id)
+    return jsonify({"code": 1, "msg": "Cancellation requested", "data": {"request_id": request_id}})
 
 
 @ai_chat_blp.route("/memory", methods=["GET"])
@@ -3946,7 +4044,7 @@ def _stream_llm_with_recovery(llm_messages: list[dict], temperature: float = 0.3
             raise
 
         logger.warning(
-            "LLM stream interrupted; regenerating once through the reliable path "
+            "LLM stream interrupted; regenerating once through a new stream "
             "(error_type=%s, finish_reason=%s, request_id=%s, generation_id=%s): %s",
             getattr(stream_error, "error_type", "") or type(stream_error).__name__,
             finish_reason,
@@ -3956,11 +4054,17 @@ def _stream_llm_with_recovery(llm_messages: list[dict], temperature: float = 0.3
             exc_info=True,
         )
         try:
-            recovered = service.call_llm_api(
-                llm_messages,
-                temperature=temperature,
-                use_json_mode=False,
-            )
+            recovered_any = False
+            for recovered in service.stream_llm_api(llm_messages, temperature=temperature):
+                if not recovered:
+                    continue
+                yield ("replace" if not recovered_any and has_partial else "delta"), {
+                    "text": recovered,
+                    "recovered": True,
+                }
+                recovered_any = True
+            if not recovered_any:
+                raise ValueError("LLM recovery returned empty content")
         except Exception as recovery_error:
             logger.error(
                 "LLM stream recovery failed after %s: %s",
@@ -3976,10 +4080,6 @@ def _stream_llm_with_recovery(llm_messages: list[dict], temperature: float = 0.3
                 error_type=str(getattr(recovery_error, "error_type", "") or "recovery_failed"),
                 retryable=False,
             ) from recovery_error
-        recovered = str(recovered or "").strip()
-        if not recovered:
-            raise ValueError("LLM recovery returned empty content") from stream_error
-        yield "replace", {"text": recovered, "recovered": True}
     if getattr(service, "last_model", ""):
         yield "usage", {
             "usage": getattr(service, "last_usage", None),
@@ -3995,6 +4095,8 @@ def chat_message_stream():
     """Send a Copilot message and stream a Markdown response."""
     user_id = int(getattr(g, "user_id", 0) or 0)
     data = request.get_json(silent=True) or {}
+    request_id = valid_request_id(data.get("request_id"))
+    routing_token = data.get("routing_token")
     message = (data.get("message") or "").strip()
     language = (data.get("language") or request.headers.get("X-App-Lang") or "zh-CN").strip()
     context = sanitize_client_context(data.get("context") if isinstance(data.get("context"), dict) else {})
@@ -4015,6 +4117,9 @@ def chat_message_stream():
     intent = _detect_intent(message, bool(attachments))
     context.update(user_message=message, intent=intent, language=language)
     agent_plan = {}
+
+    def was_cancelled():
+        return generation_cancelled(user_id, request_id)
 
     @stream_with_context
     def generate():
@@ -4065,7 +4170,12 @@ def chat_message_stream():
             yield _sse("accepted", {
                 "session_id": sid,
                 "user_message_id": user_message_id,
+                "request_id": request_id,
             })
+
+            if was_cancelled():
+                yield _sse("cancelled", {"session_id": sid})
+                return
 
             charged, charge_msg, costs = _charge(user_id, bool(attachments), f"copilot:{sid}:{user_message_id}")
             if not charged:
@@ -4074,16 +4184,24 @@ def chat_message_stream():
 
             timings["billing_ready_seconds"] = perf_counter() - started_at
             context["_routing_history"] = _compact_routing_history(routing_history[:-1])
-            agent_plan = _get_or_classify_agent_intent(message, attachments, context, language)
+            yield _sse("progress", {"phase": "routing"})
+            agent_plan = _verified_intent(routing_token, user_id, message, attachments, language, int(session_id) if session_id else None, context) or _get_or_classify_agent_intent(message, attachments, context, language)
             timings["routing_ready_seconds"] = perf_counter() - started_at
+            if was_cancelled():
+                yield _sse("cancelled", {"session_id": sid})
+                return
             intent = str(agent_plan.get("intent") or _detect_intent(message, bool(attachments)))
             context["user_message"] = message
             context["intent"] = intent
             context["agent_intent"] = agent_plan
             context["language"] = language
+            yield _sse("progress", {"phase": "context"})
             context = _enrich_context(context, has_image=bool(attachments))
 
             timings["context_ready_seconds"] = perf_counter() - started_at
+            if was_cancelled():
+                yield _sse("cancelled", {"session_id": sid})
+                return
             usage_action = _agent_usage_action(agent_plan, context, language)
             with get_db_connection() as db:
                 cur = db.cursor()
@@ -4141,29 +4259,47 @@ def chat_message_stream():
                 "actions": [usage_action] if usage_action else [],
                 "costs": costs,
                 "context_usage": {**context_usage, **context_meta},
+                "context_manifest": _context_manifest(prepared_context, context_usage, context_meta),
             })
             timings["prompt_ready_seconds"] = perf_counter() - started_at
+            if was_cancelled():
+                yield _sse("cancelled", {"session_id": sid})
+                return
+            yield _sse("progress", {"phase": "generation"})
             provider_usage = {}
-            for stream_event, stream_payload in _stream_llm_with_recovery(llm_messages, temperature=0.35):
-                if stream_payload.get("text"):
-                    timings.setdefault("first_text_seconds", perf_counter() - started_at)
-                if stream_event == "usage":
-                    provider_usage = stream_payload
-                elif stream_event == "replace":
-                    text = str(stream_payload.get("text") or "")
-                    chunks = [text]
-                    stream_result["recovered"] = True
-                    yield _sse("replace", stream_payload)
-                elif stream_event == "warning":
-                    stream_result["truncated"] = bool(stream_payload.get("truncated"))
-                    stream_result["finish_reason"] = str(
-                        stream_payload.get("finish_reason") or "length"
-                    )
-                    yield _sse("warning", stream_payload)
-                else:
-                    text = str(stream_payload.get("text") or "")
-                    chunks.append(text)
-                    yield _sse("delta", stream_payload)
+            llm_stream = _stream_llm_with_recovery(llm_messages, temperature=0.35)
+            try:
+                for stream_event, stream_payload in llm_stream:
+                    if was_cancelled():
+                        yield _sse("cancelled", {"session_id": sid})
+                        return
+                    if stream_payload.get("text"):
+                        timings.setdefault("first_text_seconds", perf_counter() - started_at)
+                    if stream_event == "usage":
+                        provider_usage = stream_payload
+                    elif stream_event == "replace":
+                        text = str(stream_payload.get("text") or "")
+                        chunks = [text]
+                        stream_result["recovered"] = True
+                        yield _sse("replace", stream_payload)
+                    elif stream_event == "warning":
+                        stream_result["truncated"] = bool(stream_payload.get("truncated"))
+                        stream_result["finish_reason"] = str(
+                            stream_payload.get("finish_reason") or "length"
+                        )
+                        yield _sse("warning", stream_payload)
+                    else:
+                        text = str(stream_payload.get("text") or "")
+                        chunks.append(text)
+                        yield _sse("delta", stream_payload)
+            finally:
+                close_stream = getattr(llm_stream, "close", None)
+                if close_stream:
+                    close_stream()
+
+            if was_cancelled():
+                yield _sse("cancelled", {"session_id": sid})
+                return
 
             answer = "".join(chunks).strip() or "The model did not return a usable answer."
             chart_answer = _ensure_grounded_research_chart(answer, context)
@@ -4220,6 +4356,7 @@ def chat_message_stream():
                 "costs": costs,
                 "memory_candidates": _detect_memory_candidates(message, language),
                 "context_usage": {**context_usage, **context_meta},
+                "context_manifest": _context_manifest(prepared_context, context_usage, context_meta),
                 "llm_usage": llm_usage,
                 **stream_result,
             })
