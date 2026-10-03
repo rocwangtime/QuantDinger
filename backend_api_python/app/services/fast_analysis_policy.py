@@ -7,8 +7,13 @@ def should_override_with_consensus(
     consensus_decision: str,
     consensus_abs: float,
     min_abs_override: float,
+    research_brief: str = "",
 ) -> bool:
     """Only directional consensus may replace the model's decision."""
+    # A personalized monitor may be waiting on a criterion the generic technical
+    # score cannot evaluate. Never turn that wait/exit into a buy via consensus.
+    if str(research_brief or "").strip():
+        return False
     decision = str(consensus_decision or "HOLD").upper()
     return decision in ("BUY", "SELL") and float(consensus_abs) >= float(min_abs_override)
 

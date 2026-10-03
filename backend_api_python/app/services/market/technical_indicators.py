@@ -81,6 +81,17 @@ def calculate_indicators(klines: List[Dict[str, Any]]) -> Dict[str, Any]:
         "ma20": round(ma20, 6),
         "trend": ma_trend,
     }
+    if len(closes) >= 21:
+        # Alignment is not a crossover. Supply the previous values so an
+        # Agent can verify an event instead of guessing it from today's MAs.
+        previous_ma5 = sum(closes[-6:-1]) / 5
+        previous_ma20 = sum(closes[-21:-1]) / 20
+        indicators["moving_averages"].update({
+            "previous_ma5": round(previous_ma5, 6),
+            "previous_ma20": round(previous_ma20, 6),
+            "cross_up_5_20": int(previous_ma5 <= previous_ma20 and ma5 > ma20),
+            "cross_down_5_20": int(previous_ma5 >= previous_ma20 and ma5 < ma20),
+        })
 
     bb_for_levels = calc_bollinger(closes, 20, 2) if len(closes) >= 20 else {}
     if len(klines) >= 2:

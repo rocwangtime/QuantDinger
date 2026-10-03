@@ -10,6 +10,7 @@ permissions or OpenD connectivity fail.
 from __future__ import annotations
 
 import os
+import math
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
@@ -110,6 +111,9 @@ class FutuDataSource(BaseDataSource):
         try:
             client = self._get_client()
             quote = client.get_quote(symbol, self.market)
+            from app.services.futu_trading.execution_quote import describe_futu_quote
+            as_of = describe_futu_quote(symbol, quote, market_type=self.market)['as_of']
+            last, prev = float(quote.get('last') or 0), float(quote.get('close') or 0)
             return {
                 "last": float(quote.get("last") or 0),
                 "bid": float(quote.get("bid") or 0),
@@ -120,6 +124,9 @@ class FutuDataSource(BaseDataSource):
                 "previousClose": float(quote.get("close") or 0),
                 "symbol": quote.get("symbol") or symbol,
                 "source": "futu",
+                "timestamp": as_of,
+                "change": last - prev if prev else 0,
+                "changePercent": (last / prev - 1) * 100 if prev else 0,
             }
         except FutuDataSourceError:
             raise
@@ -152,12 +159,22 @@ class FutuDataSource(BaseDataSource):
         if end_dt is None:
             end_dt = datetime.now(timezone.utc)
         if start_dt is None:
-            # Rough lookback; OpenD pages results.
+            # Account for closed hours/weekends rather than assuming 24h stocks.
             seconds = {
                 "1m": 60, "3m": 180, "5m": 300, "15m": 900, "30m": 1800,
                 "1H": 3600, "60m": 3600, "4H": 14400, "1D": 86400, "1W": 604800,
             }.get(tf, 86400)
-            start_dt = end_dt - timedelta(seconds=seconds * lim * 1.5)
+            sessions = lim if seconds >= 86400 else seconds * lim / (5.5 * 3600)
+            days = math.ceil(sessions * (7 if tf == '1W' else 1) * 7 / 5 * 1.25) + 7
+            start_dt = end_dt - timedelta(days=days)
+
+        # OpenD history pages oldest-first. Fetch the whole bounded lookback
+        # before taking the tail, or a larger limit would make "latest" older.
+        fetch_count = lim + 5
+        if after_time is None:
+            base_seconds = {'K_1M': 60, 'K_3M': 180, 'K_5M': 300, 'K_15M': 900,
+                            'K_30M': 1800, 'K_60M': 3600, 'K_DAY': 86400, 'K_WEEK': 604800}.get(ktype, 86400)
+            fetch_count = max(fetch_count, math.ceil((end_dt - start_dt).total_seconds() / base_seconds) + 2)
 
         try:
             from app.services.futu_trading.timezones import market_timezone
@@ -170,7 +187,7 @@ class FutuDataSource(BaseDataSource):
                 ktype=ktype,
                 start=start_dt.astimezone(exchange_tz).strftime("%Y-%m-%d"),
                 end=end_dt.astimezone(exchange_tz).strftime("%Y-%m-%d"),
-                max_count=lim + 5,
+                max_count=fetch_count,
                 autype="QFQ",
             )
         except FutuDataSourceError:

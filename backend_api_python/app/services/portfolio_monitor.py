@@ -308,7 +308,7 @@ def _get_positions_for_monitor(position_ids: List[int] = None, user_id: int = No
 MAX_PARALLEL_ANALYSIS = 5
 
 
-def _analyze_single_position(pos: Dict[str, Any], language: str, user_id: int = None) -> Dict[str, Any]:
+def _analyze_single_position(pos: Dict[str, Any], language: str, user_id: int = None, research_brief: str = "") -> Dict[str, Any]:
     """Analyze a single position (designed to run inside a thread pool)."""
     market = pos.get('market')
     symbol = pos.get('symbol')
@@ -323,7 +323,7 @@ def _analyze_single_position(pos: Dict[str, Any], language: str, user_id: int = 
         service = get_fast_analysis_service()
         analysis_result = service.analyze(
             market=market, symbol=symbol, language=language, timeframe='1D',
-            user_id=user_id,
+            user_id=user_id, research_brief=research_brief,
         )
 
         detailed = analysis_result.get('detailed_analysis', {})
@@ -371,7 +371,7 @@ def _run_ai_analysis(positions: List[Dict[str, Any]], config: Dict[str, Any], us
     """
     try:
         language = config.get('language', 'en-US')
-        custom_prompt = config.get('prompt', '')
+        custom_prompt = config.get('prompt') or config.get('focus_conditions', '')
 
         # Deduplicate by (market, symbol) to avoid repeated LLM calls.
         unique_map: Dict[str, int] = {}          # "market|symbol" -> index in unique_positions
@@ -389,7 +389,7 @@ def _run_ai_analysis(positions: List[Dict[str, Any]], config: Dict[str, Any], us
 
         with ThreadPoolExecutor(max_workers=workers) as executor:
             future_to_idx = {
-                executor.submit(_analyze_single_position, pos, language, user_id): idx
+                executor.submit(_analyze_single_position, pos, language, user_id, custom_prompt): idx
                 for idx, pos in enumerate(unique_positions)
             }
             for future in as_completed(future_to_idx):
@@ -455,13 +455,16 @@ def _run_ai_analysis(positions: List[Dict[str, Any]], config: Dict[str, Any], us
 
         analysis_report = _build_comprehensive_report(deduped_positions, position_analyses, language, custom_prompt)
 
+        analyzed_count = len([p for p in position_analyses if not p.get('error')])
         return {
-            'success': True,
+            'success': analyzed_count > 0,
+            'error': None if analyzed_count else 'AI research failed for all symbols; no valid conclusion was produced.',
+            'partial_failure': 0 < analyzed_count < len(position_analyses),
             'analysis': analysis_report,
             'position_analyses': position_analyses,
             'positions': deduped_positions,
             'position_count': len(deduped_positions),
-            'analyzed_count': len([p for p in position_analyses if not p.get('error')]),
+            'analyzed_count': analyzed_count,
             'timestamp': _now_ts()
         }
 
@@ -1417,6 +1420,22 @@ def run_single_monitor(
             }
             _bump_monitor_schedule(monitor_id, interval_minutes, skip_result, skipped=True)
             return skip_result
+
+        # Cheap deterministic checks precede billing and AI. Manual runs honor them too.
+        from app.services.research_workflow import normalize_research_config, research_gate
+        if monitor_type == 'ai':
+            config = normalize_research_config(config)
+            gate = research_gate(config)
+            if gate.get('needs_candles'):
+                from app.services.kline import KlineService
+                from app.services.research_workflow import research_data_options
+                candles = KlineService().get_kline(config['market'], config['symbol'], '1m', 5, **research_data_options(config['market']))
+                gate = research_gate(config, candles=candles)
+            if not gate['allowed']:
+                skip_result = {'success': False, 'skipped': True, 'error': gate['reason'],
+                               'trigger_check': gate, 'timestamp': _now_ts()}
+                _bump_monitor_schedule(monitor_id, interval_minutes, skip_result, skipped=True)
+                return skip_result
 
         # Billing check before running monitor analysis.
         billing = get_billing_service()

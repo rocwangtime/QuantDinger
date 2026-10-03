@@ -528,7 +528,14 @@ def add_monitor():
         monitor_type = (data.get('monitor_type') or 'ai').strip()
         config = data.get('config') or {}
         notification_config = data.get('notification_config') or {}
-        is_active = bool(data.get('is_active', True))
+        is_active = bool(data.get('is_active', False))
+
+        if monitor_type == 'ai':
+            from app.services.research_workflow import normalize_research_config
+            try:
+                config = normalize_research_config(config)
+            except (ValueError, TypeError) as exc:
+                return jsonify({'code': 0, 'msg': str(exc), 'data': None}), 400
         
         if not name:
             return jsonify({'code': 0, 'msg': 'Monitor name is required', 'data': None}), 400
@@ -610,6 +617,22 @@ def update_monitor(monitor_id):
         next_run_interval = None  # Will store interval for special handling
         if 'config' in data:
             config = data.get('config') or {}
+            with get_db_connection() as db:
+                cur = db.cursor()
+                cur.execute('SELECT config, monitor_type FROM qd_position_monitors WHERE id = ? AND user_id = ?', (monitor_id, user_id))
+                existing = cur.fetchone()
+                cur.close()
+            if not existing:
+                return jsonify({'code': 0, 'msg': 'Monitor not found', 'data': None}), 404
+            if not isinstance(config, dict):
+                return jsonify({'code': 0, 'msg': 'Config must be an object', 'data': None}), 400
+            config = {**_safe_json_loads(existing.get('config'), {}), **config}
+            if (data.get('monitor_type') or existing.get('monitor_type') or 'ai') == 'ai':
+                from app.services.research_workflow import normalize_research_config
+                try:
+                    config = normalize_research_config(config)
+                except (ValueError, TypeError) as exc:
+                    return jsonify({'code': 0, 'msg': str(exc), 'data': None}), 400
             updates.append('config = ?')
             params.append(json.dumps(config if isinstance(config, dict) else {}, ensure_ascii=False))
             

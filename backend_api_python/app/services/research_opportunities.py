@@ -1,6 +1,6 @@
 """Research-only opportunity inbox derived from completed monitor runs.
 
-An AI BUY outlook is a review lead, never a trade signal or authorization.
+An AI BUY/SELL outlook is a review lead, never a trade signal or authorization.
 The source run remains immutable evidence; this table stores only workflow state.
 """
 
@@ -19,7 +19,7 @@ _ANALYSIS_FIELDS = (
 
 
 def eligible_opportunities(result: Any) -> list[tuple[str, str]]:
-    """Extract stock BUY leads from a successful run without trusting report prose."""
+    """Extract stock entry/exit leads without trusting report prose."""
     if not isinstance(result, dict) or result.get("success") is not True:
         return []
     analyses = result.get("position_analyses")
@@ -32,7 +32,7 @@ def eligible_opportunities(result: Any) -> list[tuple[str, str]]:
         market = str(item.get("market") or "").strip()
         symbol = str(item.get("symbol") or "").strip().upper()
         decision = str(item.get("final_decision") or "").strip().upper()
-        if market in _MARKETS and _SYMBOL.fullmatch(symbol) and decision == "BUY":
+        if market in _MARKETS and _SYMBOL.fullmatch(symbol) and decision in {"BUY", "SELL"}:
             seen.add((market, symbol))
     return sorted(seen)
 

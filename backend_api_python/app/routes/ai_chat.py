@@ -553,6 +553,12 @@ def _classify_agent_intent(message: str, attachments: list[dict], context: dict,
     """Use the configured LLM as the canonical Agent intent router."""
     has_image = bool(attachments)
     fallback = _fallback_agent_intent(message, has_image, context, language)
+    from app.services.research_workflow import explicit_strategy_creation
+    if not has_image and explicit_strategy_creation(message):
+        fallback.update(intent="strategy_build", target_type="script", workflow="script_strategy",
+                        should_execute=bool(context.get("resolved_symbol") or context.get("symbol")),
+                        source="explicit_artifact_request")
+        return fallback
     system_prompt = (
         "You are the QuantDinger Agent Intent Router. Classify the user's message into a "
         "workflow plan for a global quantitative trading terminal. Return JSON only. "
@@ -928,7 +934,7 @@ def _summarize_klines(klines: list[dict], timeframe: str) -> dict:
     for i, bar in enumerate(clean[-15:]):
         prev_close = clean[-16 + i]["close"] if len(clean) >= 16 and i == 0 else clean[max(0, len(clean) - 15 + i - 1)]["close"]
         true_ranges.append(max(bar["high"] - bar["low"], abs(bar["high"] - prev_close), abs(bar["low"] - prev_close)))
-    atr14 = (sum(true_ranges[-14:]) / len(true_ranges[-14:])) if true_ranges else None
+    atr14 = (sum(true_ranges[-14:]) / 14) if len(clean) >= 15 else None
     recent_window = clean[-40:] if len(clean) >= 40 else clean
     support = min(x["low"] for x in recent_window)
     resistance = max(x["high"] for x in recent_window)
@@ -974,6 +980,9 @@ def _build_market_snapshot(context: dict) -> dict | None:
     market = (context.get("market") or "").strip()
     symbol = (context.get("symbol") or "").strip()
     exchange_id = (context.get("exchange_id") or context.get("exchangeId") or "").strip()
+    if not exchange_id:
+        from app.services.research_workflow import research_data_options
+        exchange_id = research_data_options(market).get('exchange_id', '')
     market_type = (context.get("market_type") or context.get("marketType") or "").strip()
     instrument_id = (context.get("instrument_id") or context.get("instrumentId") or "").strip()
     skip_klines = bool(context.get("skip_klines"))
@@ -1012,6 +1021,12 @@ def _build_market_snapshot(context: dict) -> dict | None:
         },
         "data_warnings": [],
     }
+    from app.services.research_workflow import market_clock
+    snapshot["market_clock"] = market_clock(market)
+    snapshot["requested_bars"] = snapshot_limit
+    if market != "Crypto":
+        snapshot.pop("derivatives", None)
+    snapshot["data_warnings"].append("Returned bars cover the requested window only, not the instrument's entire available history. Closed markets do not produce continuous intraday candles. Use next_open for next-session opportunities.")
     snapshot["data_warnings"].append("Latest candle may be still forming; prefer prev_closed_volume_ratio_vs_avg20 for volume confirmation.")
 
     def fetch_price():
@@ -1032,6 +1047,7 @@ def _build_market_snapshot(context: dict) -> dict | None:
                 "low": _round_num(price.get("low"), 6),
                 "open": _round_num(price.get("open"), 6),
                 "source": price.get("source"),
+                "data_time": price.get("data_time") or price.get("timestamp") or price.get("time"),
             }
         return None
 
@@ -1046,6 +1062,9 @@ def _build_market_snapshot(context: dict) -> dict | None:
             instrument_id=instrument_id or None,
         )
         summary = _summarize_klines(klines, timeframe)
+        summary["requested_bars"] = snapshot_limit
+        summary["first_time_utc"] = _format_kline_time_utc(klines[0].get("time")) if klines else None
+        summary["source"] = klines[-1].get("source") if klines else None
         if market_query_plan:
             summary["technical"] = compute_technical_evidence(
                 klines,
@@ -3156,7 +3175,9 @@ def _build_system_prompt(language: str, context: dict, intent: str, has_image: b
         "If symbol, interval, notification preference, and focus conditions are already clear, include an action with type=create_monitor_task and payload "
         "{\"target\":{\"market\":\"...\",\"symbol\":\"...\"},\"interval_min\":60,\"notify_channels\":[\"browser\"],\"focus_conditions\":\"...\",\"name\":\"...\"}. "
         "Never create tasks silently; the UI will ask the user to confirm the returned action. "
-        "If funding/open interest or other data is unavailable, say unavailable and do not invent it. "
+        "For ordinary stocks, funding rate and open interest are not applicable: omit them, not missing data. "
+        "Use market_snapshot.market_clock for holidays, closed sessions and next_open. Do not describe a weekend as six consecutive 4H stock candles. State the price timestamp (or unknown), not just the request time. "
+        "A returned bar count is a query-window count, not total available history; never infer IPO date or insufficient total history from it. Prefer current identity evidence over memorized listing status. "
         "If evidence is insufficient, still provide a conditional plan using available data and list what is missing.\n"
     )
     base += "\n" + build_skill_prompt(language, str(context.get("user_message") or ""), intent) + "\n"
@@ -3219,7 +3240,7 @@ def _build_system_prompt(language: str, context: dict, intent: str, has_image: b
             "A breakout is confirmed only when technical.metrics.breakout says confirmed_up or confirmed_down. Treat unconfirmed_up/unconfirmed_down as an intraday or low-volume warning, not a completed breakout. "
             "If market_data.market_query_status.complete is false, explicitly list the missing instrument/timeframe/metrics instead of calculating or inventing them. "
             "Give concrete conclusions and relevant evidence; add caveats or next steps only when they help answer the actual question. "
-            "When a workflow action is possible, include it in JSON actions or as a clear Markdown button-style next step.\n"
+            "In streaming prose, do not emit raw actions JSON or pretend to create clickable buttons. The UI provides real strategy/monitor actions. Do not claim a task, strategy or backtest was created without a tool result.\n"
         )
     intelligence_context = context.get("intelligence_context")
     if isinstance(intelligence_context, dict) and intelligence_context:
