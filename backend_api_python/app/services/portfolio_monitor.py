@@ -21,6 +21,7 @@ from app.services.kline import KlineService
 from app.services.billing_service import get_billing_service
 from app.services.portfolio_monitor_i18n import get_alert_message, get_alert_title
 from app.services.portfolio_monitor_notifications import resolve_notification_delivery
+from app.services.research_opportunities import insert_opportunities
 from app.utils.json_helpers import safe_json_loads
 from app.utils.resource_guard import is_fd_cooldown_active, fd_cooldown_remaining
 
@@ -213,9 +214,16 @@ def _bump_monitor_schedule(
                 """
                 INSERT INTO qd_position_monitor_runs (monitor_id, user_id, status, result_json, created_at)
                 SELECT id, user_id, ?, ?, NOW() FROM qd_position_monitors WHERE id = ?
+                RETURNING id, user_id
                 """,
                 (status, result_json, monitor_id),
             )
+            run_row = cur.fetchone()
+            if run_row and status == 'completed':
+                insert_opportunities(
+                    cur, monitor_id=monitor_id, user_id=int(run_row['user_id']),
+                    run_id=int(run_row['id']), result=last_result,
+                )
             db.commit()
             cur.close()
     except Exception as e:
