@@ -175,6 +175,29 @@ def test_signed_routing_result_skips_duplicate_model_call(stream_harness):
     assert state["classifications"] == 0
 
 
+def test_signed_routing_uses_configured_secret_when_flask_secret_is_unset(monkeypatch):
+    """Production does not populate Flask's session key from the app config."""
+    monkeypatch.setenv("SECRET_KEY", "test-only-persistent-routing-secret")
+    app_a = Flask("routing-preflight")
+    app_b = Flask("routing-stream")
+    assert app_a.secret_key is None
+    assert app_b.secret_key is None
+    context = {"market": "USStock", "symbol": "SPCX"}
+    message = "梳理 SPCX 当前最重要的下行风险。"
+    with app_a.app_context():
+        token = ai_chat._signed_intent(
+            {"intent": "market_analysis", "should_execute": False},
+            7, message, [], "zh-CN", None, context,
+        )
+    assert token
+    with app_b.app_context():
+        plan = ai_chat._verified_intent(
+            token, 7, message, [], "zh-CN", None,
+            {**context, "agent_intent": {"intent": "market_analysis"}},
+        )
+    assert plan == {"intent": "market_analysis", "should_execute": False}
+
+
 def test_signed_routing_result_is_bound_to_message_and_user(stream_harness):
     state, stream = stream_harness
     app = Flask(__name__)

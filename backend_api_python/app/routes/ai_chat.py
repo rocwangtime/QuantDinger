@@ -698,9 +698,16 @@ def _intent_digest(user_id: int, message: str, attachments: list[dict], language
 
 
 def _intent_signer():
-    if not current_app.secret_key:
+    secret = current_app.secret_key
+    if not secret:
+        from app.config import Config
+        try:
+            secret = Config.SECRET_KEY
+        except RuntimeError:
+            return None
+    if not secret:
         return None
-    return URLSafeTimedSerializer(current_app.secret_key, salt="copilot-classified-intent-v1")
+    return URLSafeTimedSerializer(secret, salt="copilot-classified-intent-v1")
 
 
 def _signed_intent(plan: dict, user_id: int, message: str, attachments: list[dict], language: str, session_id: int | None = None, context: dict | None = None) -> str | None:
