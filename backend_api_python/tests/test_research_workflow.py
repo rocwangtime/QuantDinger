@@ -131,3 +131,24 @@ def test_stock_authoring_does_not_inherit_generic_crypto_capabilities():
     intent = resolve_strategy_generation_intent(prompt='Target: USStock:SPCX\n日线，只做多，5日均线上穿20日均线买入，止损5%，不加杠杆', context={'market': 'USStock', 'symbol': 'SPCX'})
     assert 'crypto_swap' not in intent.capabilities
     assert 'protection' in intent.capabilities
+
+
+def test_research_uses_only_configured_quote_source(monkeypatch):
+    from app.services.research_workflow import research_data_options
+    monkeypatch.delenv('FUTU_OPEND_HOST', raising=False)
+    assert research_data_options('USStock') == {}
+    monkeypatch.setenv('FUTU_OPEND_HOST', 'opend-relay')
+    assert research_data_options('USStock') == {'exchange_id': 'futu'}
+    assert research_data_options('Crypto') == {}
+
+
+def test_futu_four_hour_history_fetches_enough_hourly_rows_for_latest_tail():
+    from app.data_sources.futu import FutuDataSource
+    from unittest.mock import MagicMock
+    source = FutuDataSource(market='USStock')
+    source._client = MagicMock()
+    source._client.get_history_kline.return_value = []
+    source.get_kline('SPCX', '4H', 120, before_time=int(utc('2026-10-03T11:00:00').timestamp()))
+    kwargs = source._client.get_history_kline.call_args.kwargs
+    assert kwargs['ktype'] == 'K_60M'
+    assert kwargs['max_count'] >= 480

@@ -980,6 +980,9 @@ def _build_market_snapshot(context: dict) -> dict | None:
     market = (context.get("market") or "").strip()
     symbol = (context.get("symbol") or "").strip()
     exchange_id = (context.get("exchange_id") or context.get("exchangeId") or "").strip()
+    if not exchange_id:
+        from app.services.research_workflow import research_data_options
+        exchange_id = research_data_options(market).get('exchange_id', '')
     market_type = (context.get("market_type") or context.get("marketType") or "").strip()
     instrument_id = (context.get("instrument_id") or context.get("instrumentId") or "").strip()
     skip_klines = bool(context.get("skip_klines"))
@@ -1061,6 +1064,7 @@ def _build_market_snapshot(context: dict) -> dict | None:
         summary = _summarize_klines(klines, timeframe)
         summary["requested_bars"] = snapshot_limit
         summary["first_time_utc"] = _format_kline_time_utc(klines[0].get("time")) if klines else None
+        summary["source"] = klines[-1].get("source") if klines else None
         if market_query_plan:
             summary["technical"] = compute_technical_evidence(
                 klines,

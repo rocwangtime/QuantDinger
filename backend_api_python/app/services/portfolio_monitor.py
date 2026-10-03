@@ -1425,7 +1425,8 @@ def run_single_monitor(
             gate = research_gate(config)
             if gate.get('needs_candles'):
                 from app.services.kline import KlineService
-                candles = KlineService().get_kline(config['market'], config['symbol'], '1m', 5)
+                from app.services.research_workflow import research_data_options
+                candles = KlineService().get_kline(config['market'], config['symbol'], '1m', 5, **research_data_options(config['market']))
                 gate = research_gate(config, candles=candles)
             if not gate['allowed']:
                 skip_result = {'success': False, 'skipped': True, 'error': gate['reason'],

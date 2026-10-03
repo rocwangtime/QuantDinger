@@ -2,8 +2,16 @@
 from __future__ import annotations
 
 import math
+import os
 import re
 from datetime import datetime, timezone
+
+
+def research_data_options(market: str) -> dict:
+    """Prefer the configured quote-only OpenD path; factory retains public fallback."""
+    if market in {'USStock', 'HKStock'} and os.getenv('FUTU_OPEND_HOST'):
+        return {'exchange_id': 'futu'}
+    return {}
 
 
 def explicit_strategy_creation(message: str) -> bool:

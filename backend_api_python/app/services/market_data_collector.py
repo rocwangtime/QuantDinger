@@ -340,7 +340,8 @@ class MarketDataCollector:
         获取实时价格 - 使用 kline_service (与自选列表一致)
         """
         try:
-            price_data = self.kline_service.get_realtime_price(market, symbol, force_refresh=True)
+            from app.services.research_workflow import research_data_options
+            price_data = self.kline_service.get_realtime_price(market, symbol, force_refresh=True, **research_data_options(market))
             if price_data and price_data.get('price', 0) > 0:
                 def safe_float(val, default=0.0):
                     if val is None:
@@ -359,7 +360,8 @@ class MarketDataCollector:
                     "low": safe_float(price_data.get('low'), price),
                     "open": safe_float(price_data.get('open'), price),
                     "previousClose": safe_float(price_data.get('previousClose'), price),
-                    "source": price_data.get('source', 'unknown')
+                    "source": price_data.get('source', 'unknown'),
+                    "timestamp": price_data.get('timestamp'),
                 }
         except Exception as e:
             logger.warning(f"Price fetch failed for {market}:{symbol}: {e}")
@@ -397,7 +399,8 @@ class MarketDataCollector:
         获取K线数据 - 使用 DataSourceFactory (与K线模块一致)
         """
         try:
-            klines = DataSourceFactory.get_kline(market, symbol, timeframe, limit)
+            from app.services.research_workflow import research_data_options
+            klines = DataSourceFactory.get_kline(market, symbol, timeframe, limit, **research_data_options(market))
             if klines and len(klines) > 0:
                 return klines
         except Exception as e:
