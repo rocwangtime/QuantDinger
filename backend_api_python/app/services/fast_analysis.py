@@ -974,7 +974,7 @@ class FastAnalysisService(FastAnalysisScoringMixin):
             ):
                 min_abs_override = max(min_abs_override, 55.0 if risk_context.get("panic_breakdown") else 40.0)
 
-            if should_override_with_consensus(consensus_decision, consensus_abs, min_abs_override):
+            if should_override_with_consensus(consensus_decision, consensus_abs, min_abs_override, research_brief):
                 final_decision = consensus_decision
                 if llm_decision != final_decision:
                     logger.warning(

@@ -18,7 +18,7 @@ def test_explicit_artifacts_are_not_general_chat(message):
     assert explicit_strategy_creation(message)
 
 
-@pytest.mark.parametrize('message', ['SPCX 的均线策略有什么风险？', '先不要生成策略代码，解释原理', "Don't write strategy code yet"])
+@pytest.mark.parametrize('message', ['SPCX 的均线策略有什么风险？', '如何生成可回测的策略？', '为什么生成策略代码失败了', '先不要生成策略代码，解释原理', "Don't write strategy code yet"])
 def test_advice_and_negations_do_not_create_code(message):
     assert not explicit_strategy_creation(message)
 
@@ -113,3 +113,21 @@ def test_unmet_monitor_gate_skips_billing_and_llm(monkeypatch):
     monkeypatch.setattr('app.services.research_workflow.market_clock', lambda *a, **k: {'available': True, 'is_open': False})
     result = monitor.run_single_monitor(5, user_id=7)
     assert result['skipped'] and captured
+
+
+def test_generic_consensus_cannot_override_personalized_wait_conditions():
+    from app.services.fast_analysis_policy import should_override_with_consensus
+    assert should_override_with_consensus('BUY', 90, 15)
+    assert not should_override_with_consensus('BUY', 90, 15, 'Wait for confirmed earnings release')
+
+
+def test_single_python_artifact_is_extracted_without_narration():
+    from app.routes.strategy import _strip_code_fence
+    assert _strip_code_fence('Here is the repaired code:\n```python\ndef initialize(context):\n    pass\n```\nReview before running.') == 'def initialize(context):\n    pass'
+
+
+def test_stock_authoring_does_not_inherit_generic_crypto_capabilities():
+    from app.services.strategy_ai_capabilities import resolve_strategy_generation_intent
+    intent = resolve_strategy_generation_intent(prompt='Target: USStock:SPCX\n日线，只做多，5日均线上穿20日均线买入，止损5%，不加杠杆', context={'market': 'USStock', 'symbol': 'SPCX'})
+    assert 'crypto_swap' not in intent.capabilities
+    assert 'protection' in intent.capabilities

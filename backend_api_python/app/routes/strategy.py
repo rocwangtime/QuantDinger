@@ -410,11 +410,14 @@ def generate_strategy():
         })
     except Exception as exc:
         logger.warning("strategy generation failed: %s", exc)
-        return _error("strategyV2.generationInvalid", data={"error": str(exc)})
+        return _error("strategyV2.generationInvalid", data={"error": str(exc), "llm_usage": aggregate_usage_display(getattr(locals().get("llm"), "usage_events", []))})
 
 
 def _strip_code_fence(value: str) -> str:
     text = str(value or "").strip()
+    blocks = re.findall(r"```(?:python|py)\s*\n(.*?)```", text, flags=re.IGNORECASE | re.DOTALL)
+    if len(blocks) == 1:
+        return blocks[0].strip()
     text = re.sub(r"^```(?:python)?\s*", "", text, flags=re.IGNORECASE)
     text = re.sub(r"\s*```$", "", text)
     return text.strip()

@@ -9,6 +9,8 @@ from datetime import datetime, timezone
 def explicit_strategy_creation(message: str) -> bool:
     """Route artifact requests deterministically, not strategy advice/questions."""
     text = str(message or "").lower()
+    if re.search(r"^\s*(?:如何|怎么|为什么|what\b|how\b|why\b)", text):
+        return False
     if re.search(r"(?:不要|先不|暂不|别)\s*(?:生成|写|创建|开发)|(?:do not|don't)\s+(?:generate|create|build|write)", text):
         return False
     artifact = re.search(r"策略|strategy|python|脚本", text)
