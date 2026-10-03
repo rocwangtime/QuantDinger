@@ -489,6 +489,18 @@ class FastAnalysisService(FastAnalysisScoringMixin):
             if item.get("evidence_id")
         }
         ensemble_models = []
+        def call_validated(selected_model):
+            raw = self.llm_service.safe_call_llm(
+                system_prompt, user_prompt, default_structure=dict(default_struct), model=selected_model
+            )
+            analysis = validate_llm_analysis(raw, default_struct, known_evidence_ids=evidence_ids)
+            if not analysis.get("_llm_contract", {}).get("valid"):
+                warnings = analysis.get("_llm_contract", {}).get("warnings") or []
+                # A failed call/schema is an error, never a successful HOLD and
+                # never eligible for consensus, memory or opportunity feeds.
+                raise ValueError("AI analysis response invalid: " + ", ".join(warnings))
+            return analysis
+
         if os.getenv("ENABLE_AI_ENSEMBLE", "false").lower() == "true":
             ensemble_models = [
                 item.strip()
@@ -496,25 +508,11 @@ class FastAnalysisService(FastAnalysisScoringMixin):
                 if item.strip()
             ][:3]
         if len(ensemble_models) < 2:
-            raw = self.llm_service.safe_call_llm(
-                system_prompt, user_prompt, default_structure=default_struct, model=model
-            )
-            return validate_llm_analysis(
-                raw, default_struct, known_evidence_ids=evidence_ids
-            )
+            return call_validated(model)
 
         from collections import Counter
 
-        analyses = [
-            validate_llm_analysis(
-                self.llm_service.safe_call_llm(
-                    system_prompt, user_prompt, default_structure=default_struct, model=item
-                ),
-                default_struct,
-                known_evidence_ids=evidence_ids,
-            )
-            for item in ensemble_models
-        ]
+        analyses = [call_validated(item) for item in ensemble_models]
         decisions = [str(item.get("decision") or "HOLD").upper() for item in analyses]
         vote = Counter(decisions).most_common(1)[0][0]
         selected = analyses[decisions.index(vote)].copy()

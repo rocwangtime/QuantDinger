@@ -455,13 +455,16 @@ def _run_ai_analysis(positions: List[Dict[str, Any]], config: Dict[str, Any], us
 
         analysis_report = _build_comprehensive_report(deduped_positions, position_analyses, language, custom_prompt)
 
+        analyzed_count = len([p for p in position_analyses if not p.get('error')])
         return {
-            'success': True,
+            'success': analyzed_count > 0,
+            'error': None if analyzed_count else 'AI research failed for all symbols; no valid conclusion was produced.',
+            'partial_failure': 0 < analyzed_count < len(position_analyses),
             'analysis': analysis_report,
             'position_analyses': position_analyses,
             'positions': deduped_positions,
             'position_count': len(deduped_positions),
-            'analyzed_count': len([p for p in position_analyses if not p.get('error')]),
+            'analyzed_count': analyzed_count,
             'timestamp': _now_ts()
         }
 

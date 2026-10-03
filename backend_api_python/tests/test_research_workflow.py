@@ -152,3 +152,34 @@ def test_futu_four_hour_history_fetches_enough_hourly_rows_for_latest_tail():
     kwargs = source._client.get_history_kline.call_args.kwargs
     assert kwargs['ktype'] == 'K_60M'
     assert kwargs['max_count'] >= 480
+
+
+def test_nested_model_comment_does_not_replace_valid_research_with_fallback():
+    from app.professional_report.llm_contract import validate_llm_analysis
+    result = validate_llm_analysis({
+        'decision': 'HOLD', 'summary': 'Await a confirmed daily crossover',
+        'analysis': {'technical': 'MA5 remains below MA20', '_comment': 'explanation'},
+    }, {'summary': 'Analysis failed'})
+    assert result['_llm_contract']['valid']
+    assert result['summary'] == 'Await a confirmed daily crossover'
+    assert 'unknown_llm_field:analysis._comment' in result['_llm_contract']['warnings']
+
+
+@pytest.mark.parametrize('payload', [{}, None, {'decision': 'HOLD', 'summary': 'Analysis failed'},
+                                     {'decision': 'BUY', 'summary': 'Invalid risk', 'position_size_pct': 500}])
+def test_failed_analysis_cannot_pass_model_boundary(monkeypatch, payload):
+    from app.services.fast_analysis import FastAnalysisService
+    monkeypatch.delenv('ENABLE_AI_ENSEMBLE', raising=False)
+    service = object.__new__(FastAnalysisService)
+    service.llm_service = SimpleNamespace(safe_call_llm=lambda *a, **k: payload)
+    with pytest.raises(ValueError, match='AI analysis response invalid'):
+        service._call_analysis_models('system', 'question', {'decision': 'HOLD', 'summary': 'Analysis failed'}, 'test', {})
+
+
+def test_monitor_all_failures_are_failed_not_completed(monkeypatch):
+    from app.services import portfolio_monitor as monitor
+    monkeypatch.setattr(monitor, '_analyze_single_position', lambda *a, **k: {'market': 'USStock', 'symbol': 'SPCX', 'error': 'invalid response'})
+    result = monitor._run_ai_analysis([{'market': 'USStock', 'symbol': 'SPCX'}], {}, user_id=7)
+    assert not result['success']
+    assert result['analyzed_count'] == 0
+    assert result['error']

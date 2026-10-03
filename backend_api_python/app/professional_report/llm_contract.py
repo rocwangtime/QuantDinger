@@ -65,12 +65,24 @@ def validate_llm_analysis(
     recorded.  If validation still fails, the deterministic fallback is used;
     a malformed model response never masquerades as a successful analysis.
     """
-    source = dict(payload or {})
+    source = dict(payload) if isinstance(payload, Mapping) else {}
     warnings = [f"unknown_llm_field:{key}" for key in source if key not in _ALLOWED_FIELDS]
     clean = {key: value for key, value in source.items() if key in _ALLOWED_FIELDS}
+    # Models sometimes add an explanatory `_comment` alongside the actual
+    # sections. Treat it like an unknown top-level field, not a reason to throw
+    # away an otherwise valid report. Never coerce invalid decision/risk values.
+    if isinstance(clean.get("analysis"), Mapping):
+        sections = clean["analysis"]
+        allowed_sections = set(AnalysisSections.model_fields)
+        warnings.extend(f"unknown_llm_field:analysis.{key}" for key in sections if key not in allowed_sections)
+        clean["analysis"] = {key: value for key, value in sections.items() if key in allowed_sections}
+    incomplete = not source.get("decision") or not str(source.get("summary") or "").strip()
+    failed_fallback = str(source.get("summary") or "").strip().lower() == "analysis failed"
+    if incomplete or failed_fallback:
+        warnings.append("missing_llm_analysis" if incomplete else "llm_call_failed")
     try:
         model = FastAnalysisNarrative.model_validate(clean)
-        valid = True
+        valid = not (incomplete or failed_fallback)
     except ValidationError as exc:
         warnings.extend(
             "invalid_llm_field:" + ".".join(str(part) for part in error.get("loc") or ())
