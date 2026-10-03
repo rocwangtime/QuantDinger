@@ -15,7 +15,8 @@ import re
 import time
 import traceback
 from typing import Any, Dict, List
-from flask import Response, g, jsonify, request
+from flask import Response, g, jsonify, request, stream_with_context
+from app.services.llm_selection import agent_model_selection
 from app.openapi.blueprint import HumanBlueprint as Blueprint
 
 from app.utils.db import get_db_connection
@@ -805,6 +806,7 @@ def update_indicator_ai_change_status(change_id: int):
 
 @indicator_blp.route("/aiGenerate", methods=["POST"])
 @login_required
+@agent_model_selection
 def ai_generate():
     """
     SSE endpoint to generate indicator code.
@@ -1130,8 +1132,9 @@ If the question actually requests a code modification, explain what should chang
         logger.info("ai_generate debug=%s", _sse_json(debug))
         return repaired, debug, {"executor": "model_repair", "operation": "generate_candidate"}
 
-    # Capture user_id before generator runs (generator executes outside request context)
+    # Keep validated model selection available throughout streamed generation.
     user_id = g.user_id
+    @stream_with_context
     def stream():
         nonlocal workspace_context
         from app.services.billing_service import get_billing_service

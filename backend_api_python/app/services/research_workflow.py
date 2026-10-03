@@ -59,6 +59,9 @@ def normalize_research_config(raw: dict) -> dict:
     if not isinstance(raw, dict):
         raise ValueError("Research config must be an object")
     config = dict(raw)
+    if 'llm_selection' in config:
+        from app.services.llm_selection import validate_selection
+        config['llm_selection'] = validate_selection(config['llm_selection'])
     interval = int(config.get("run_interval_minutes") or config.get("interval_minutes") or 60)
     if interval < 5 or interval > 10080:
         raise ValueError("Research interval must be between 5 and 10080 minutes")

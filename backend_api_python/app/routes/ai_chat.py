@@ -16,6 +16,7 @@ from time import perf_counter
 from typing import Any
 
 from flask import Response, g, jsonify, request, stream_with_context
+from app.services.llm_selection import agent_model_selection, model_catalog
 
 from app.openapi.blueprint import HumanBlueprint as Blueprint
 from app.services.billing_service import get_billing_service
@@ -3590,14 +3591,22 @@ def ai_skill_prompt(skill_id: str):
 
 @ai_chat_blp.route("/agent/preflight", methods=["GET"])
 @login_required
+@agent_model_selection
 def agent_preflight():
     """Return Copilot readiness checks for user guidance."""
     user_id = int(getattr(g, "user_id", 0) or 0)
     return jsonify({"code": 1, "msg": "success", "data": _build_preflight(user_id)})
 
 
+@ai_chat_blp.route("/agent/models", methods=["GET"])
+@login_required
+def agent_models():
+    return jsonify({"code": 1, "msg": "success", "data": model_catalog()})
+
+
 @ai_chat_blp.route("/agent/intent", methods=["POST"])
 @login_required
+@agent_model_selection
 def agent_intent():
     """Classify a Copilot message into a structured agent workflow plan."""
     data = request.get_json(silent=True) or {}
@@ -3712,6 +3721,7 @@ def update_user_memory(memory_id: int):
 
 @ai_chat_blp.route("/chat/message", methods=["POST"])
 @login_required
+@agent_model_selection
 def chat_message():
     """Send a Copilot message and get an LLM response."""
     user_id = int(getattr(g, "user_id", 0) or 0)
@@ -3980,6 +3990,7 @@ def _stream_llm_with_recovery(llm_messages: list[dict], temperature: float = 0.3
 
 @ai_chat_blp.route("/chat/message/stream", methods=["POST"])
 @login_required
+@agent_model_selection
 def chat_message_stream():
     """Send a Copilot message and stream a Markdown response."""
     user_id = int(getattr(g, "user_id", 0) or 0)

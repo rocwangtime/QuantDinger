@@ -9,6 +9,7 @@ import time
 from typing import Any
 
 from flask import g, jsonify, request
+from app.services.llm_selection import agent_model_selection
 
 from app import get_trading_executor
 from app.routes.strategy_blueprint import strategy_blp
@@ -294,6 +295,7 @@ def verify_strategy():
 
 @strategy_blp.route("/strategies/generate", methods=["POST"])
 @login_required
+@agent_model_selection
 def generate_strategy():
     payload = dict(request.get_json() or {})
     prompt = str(payload.get("prompt") or "").strip()

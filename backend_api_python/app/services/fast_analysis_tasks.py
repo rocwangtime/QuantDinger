@@ -97,13 +97,16 @@ def run_async_analysis_task(
     user_id: int,
     inflight_key: str,
     credits_charged: int = 0,
+    llm_selection: dict = None,
 ) -> None:
     """Execute analysis in a background worker and finalize pending history."""
     try:
         from app.services.analysis_memory import get_analysis_memory
         from app.services.fast_analysis import get_fast_analysis_service
 
-        service = get_fast_analysis_service()
+        from app.services.llm_selection import selection_scope
+        with selection_scope(llm_selection):
+            service = get_fast_analysis_service()
         memory = get_analysis_memory()
         result = service.analyze(
             market=market,
@@ -157,4 +160,3 @@ def start_async_analysis_task(*args, **kwargs):
     thread = threading.Thread(target=run_async_analysis_task, args=args, kwargs=kwargs, daemon=True)
     thread.start()
     return thread
-

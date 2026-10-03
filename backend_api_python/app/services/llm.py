@@ -162,14 +162,16 @@ PROVIDER_CONFIGS = {
 class LLMService:
     """LLM provider wrapper with multi-provider support."""
 
-    def __init__(self, provider: str = None):
+    def __init__(self, provider: str = None, selection: dict = None):
         """
         Initialize LLM service.
 
         Args:
             provider: Override the default provider (openrouter, openai, google, deepseek, grok, atlascloud, custom, minimax)
         """
-        self._provider_override = provider
+        from app.services.llm_selection import current_selection
+        self.selection = dict(current_selection() if selection is None else selection)
+        self._provider_override = self.selection.get('provider') or provider
         self.last_usage = None
         self.last_model = ""
         self.last_provider = ""
@@ -177,7 +179,9 @@ class LLMService:
 
     def _record_usage(self, usage, model: str, provider: str, base_url: str = ""):
         """Keep only token counts and route metadata; never retain request secrets."""
-        self.last_usage = usage if isinstance(usage, dict) else None
+        self.last_usage = dict(usage) if isinstance(usage, dict) else None
+        if self.last_usage and self.selection:
+            self.last_usage['reasoning_effort'] = self.selection.get('reasoning_effort', 'default')
         self.last_model = str(model or "")
         ark_host = any(host in str(base_url).lower() for host in ("volcengine.com", "volces.com"))
         self.last_provider = "volcengine" if ark_host else str(provider or "")
@@ -186,6 +190,7 @@ class LLMService:
                 "provider": self.last_provider,
                 "model": self.last_model,
                 "usage": self.last_usage,
+                "reasoning_effort": self.selection.get('reasoning_effort', 'default'),
             })
 
     @property
@@ -270,6 +275,8 @@ class LLMService:
     def get_default_model(self, provider: LLMProvider = None) -> str:
         """Get default model for the specified provider."""
         p = provider or self.provider
+        if self.selection and p.value == self.selection.get('provider'):
+            return self.selection['model']
         config = load_addon_config()
         
         provider_config = config.get(p.value, {})
@@ -282,6 +289,8 @@ class LLMService:
 
     def get_code_generation_model(self, provider: LLMProvider = None) -> str:
         """Get model for AI code generation; fallback to provider default when unset."""
+        if self.selection:
+            return self.selection['model']
         model = os.getenv('AI_CODE_GEN_MODEL', '').strip()
         if model:
             return model
@@ -411,6 +420,8 @@ class LLMService:
             "temperature": temperature,
             "max_tokens": self.get_max_tokens(),
         }
+        from app.services.llm_selection import apply_reasoning
+        apply_reasoning(data, self.provider.value, model, self.selection.get('reasoning_effort', 'default'))
         
         # AtlasCloud documents the OpenAI-compatible ChatCompletion shape, but
         # its public parameter table currently lists model/messages/temperature/
@@ -891,6 +902,8 @@ class LLMService:
             "max_tokens": self.get_max_tokens(),
             "stream": True,
         }
+        from app.services.llm_selection import apply_reasoning
+        apply_reasoning(data, (provider or self.provider).value, model, self.selection.get('reasoning_effort', 'default'))
         if provider in {LLMProvider.OPENAI, LLMProvider.DEEPSEEK, LLMProvider.VOLCENGINE} or any(
             host in str(base_url).lower() for host in ("volcengine.com", "volces.com")
         ):
@@ -1153,6 +1166,11 @@ class LLMService:
             2. Otherwise, use the configured LLM_PROVIDER with normalized model name
             3. Fall back to provider's default model if model name is incompatible
         """
+        if self.selection:
+            provider = LLMProvider(self.selection['provider'])
+            model = self.selection['model']
+            use_fallback = False
+            try_alternative_providers = False
         cfg = load_addon_config()
         explicit_provider_name = str(
             cfg.get('llm', {}).get('provider') or os.getenv('LLM_PROVIDER', '')
@@ -1366,6 +1384,8 @@ class LLMService:
 
     def stream_llm_api(self, messages: list, model: str = None, temperature: float = 0.7):
         """Stream LLM response deltas for providers with OpenAI-compatible streaming."""
+        if self.selection:
+            model = self.selection['model']
         p = self.provider
         api_key = (self.get_api_key(p) or "").strip()
         base_url = (self.get_base_url(p) or "").strip()

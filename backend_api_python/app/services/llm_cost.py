@@ -68,6 +68,7 @@ def build_usage_display(*, provider: str, model: str, usage: dict | None,
     result = {
         "provider": normalized_provider,
         "model": normalized_model,
+        "reasoning_effort": usage.get('reasoning_effort', 'default'),
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
         "total_tokens": input_tokens + output_tokens,
@@ -108,6 +109,7 @@ def aggregate_usage_display(events: list[dict]) -> dict | None:
         "currency": None,
         "price_source": None,
         "request_count": len(summaries),
+        "reasoning_effort": summaries[0]['reasoning_effort'] if len({item['reasoning_effort'] for item in summaries}) == 1 else 'multiple',
     }
     if len(currencies) == 1 and None not in currencies and all(item["estimated_cost"] is not None for item in summaries):
         result["estimated_cost"] = round(sum(item["estimated_cost"] for item in summaries), 8)
