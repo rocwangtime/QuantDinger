@@ -81,3 +81,11 @@ def test_cancelled_indicator_generation_returns_no_candidate(monkeypatch):
     assert rest == []
     assert result is None
     assert llm.closed
+
+
+def test_disconnect_closes_indicator_provider_stream(monkeypatch):
+    llm = _FakeLLM(["first", "second"])
+    source = _request(monkeypatch, llm)
+    assert next(source) == ("generation", "first")
+    source.close()
+    assert llm.closed

@@ -1035,12 +1035,15 @@ If the question actually requests a code modification, explain what should chang
         return content.strip() or bad_code
 
     def _emit_draft(source):
-        while True:
-            try:
-                phase, chunk = next(source)
-            except StopIteration as complete:
-                return complete.value
-            yield "data: " + _sse_json({"draft": chunk, "phase": phase}) + "\n\n"
+        try:
+            while True:
+                try:
+                    phase, chunk = next(source)
+                except StopIteration as complete:
+                    return complete.value
+                yield "data: " + _sse_json({"draft": chunk, "phase": phase}) + "\n\n"
+        finally:
+            source.close()
 
     def _generate_final_code() -> Generator[str, None, tuple[str, Dict[str, Any], Dict[str, Any]] | None]:
         try:
