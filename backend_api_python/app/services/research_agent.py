@@ -108,7 +108,7 @@ def requirements(domains: list, specification: dict | None) -> list[dict]:
     if not isinstance(given, list):
         given = []
     result = []
-    for domain in list(dict.fromkeys(d for d in domains if d in DOMAINS)):
+    for domain in list(dict.fromkeys(d for d in domains if isinstance(d, str) and d in DOMAINS)):
         raw = next((item for item in given if isinstance(item, dict) and item.get("domain") == domain), {})
         fields = raw.get("fields") if isinstance(raw.get("fields"), list) else DEFAULT_FIELDS.get(domain, [])
         result.append({"domain": domain, "fields": [str(f)[:64] for f in fields[:8]],
@@ -158,7 +158,7 @@ def execute_research(
     deadline = started + max(1, min(budget_seconds, 90))
     specification = specification if isinstance(specification, dict) else {}
     answer_mode = specification.get("answer_mode", "research")
-    if answer_mode not in {"knowledge", "hybrid", "research"}:
+    if not isinstance(answer_mode, str) or answer_mode not in {"knowledge", "hybrid", "research"}:
         answer_mode = "research"
     if answer_mode == "knowledge":
         return {"version": 1, "entity": entity, "question": message,
@@ -184,10 +184,10 @@ def execute_research(
     planner = planner or _model_decision
 
     def normalize(call):
-        if not isinstance(call, dict) or call.get("tool") not in TOOLS:
+        if not isinstance(call, dict) or not isinstance(call.get("tool"), str) or call["tool"] not in TOOLS:
             return None
         tool, args = call["tool"], call.get("arguments")
-        if not isinstance(args, dict) or args.get("domain") not in allowed_domains:
+        if not isinstance(args, dict) or not isinstance(args.get("domain"), str) or args["domain"] not in allowed_domains:
             return None
         domain = args["domain"]
         if tool in {"company.lookup", "company.documents"}:
@@ -289,12 +289,13 @@ def execute_research(
         valid_assessment = []
         raw_assessment = decision.get("assessment") or []
         for item in raw_assessment if isinstance(raw_assessment, list) else []:
-            if not isinstance(item, dict) or item.get("domain") not in allowed_domains:
+            if not isinstance(item, dict) or not isinstance(item.get("domain"), str) or item["domain"] not in allowed_domains:
                 continue
             raw_ids = item.get("evidence_ids") or []
             ids = [eid for eid in (raw_ids if isinstance(raw_ids, list) else [])
                    if any(e["id"] == eid and e["domain"] == item["domain"] for e in evidence)]
-            status = item.get("status") if item.get("status") in {"supported", "partial", "missing"} else "missing"
+            raw_status = item.get("status")
+            status = raw_status if isinstance(raw_status, str) and raw_status in {"supported", "partial", "missing"} else "missing"
             if status in {"supported", "partial"} and not ids:
                 continue
             valid_assessment.append({"domain": item["domain"], "status": status if ids else "missing",
