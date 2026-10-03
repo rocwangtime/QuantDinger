@@ -308,7 +308,7 @@ def _get_positions_for_monitor(position_ids: List[int] = None, user_id: int = No
 MAX_PARALLEL_ANALYSIS = 5
 
 
-def _analyze_single_position(pos: Dict[str, Any], language: str, user_id: int = None, research_brief: str = "") -> Dict[str, Any]:
+def _analyze_single_position(pos: Dict[str, Any], language: str, user_id: int = None, research_brief: str = "", llm_selection: dict = None) -> Dict[str, Any]:
     """Analyze a single position (designed to run inside a thread pool)."""
     market = pos.get('market')
     symbol = pos.get('symbol')
@@ -320,7 +320,9 @@ def _analyze_single_position(pos: Dict[str, Any], language: str, user_id: int = 
 
     try:
         logger.info(f"Running fast AI analysis for {market}:{symbol} (user={user_id})")
-        service = get_fast_analysis_service()
+        from app.services.llm_selection import selection_scope
+        with selection_scope(llm_selection):
+            service = get_fast_analysis_service()
         analysis_result = service.analyze(
             market=market, symbol=symbol, language=language, timeframe='1D',
             user_id=user_id, research_brief=research_brief,
@@ -354,6 +356,7 @@ def _analyze_single_position(pos: Dict[str, Any], language: str, user_id: int = 
             'fundamental_score': scores.get('fundamental', 50),
             'sentiment_score': scores.get('sentiment', 50),
             'key_reasons': analysis_result.get('reasons', []),
+            'llm_usage': analysis_result.get('llm_usage'),
             'error': analysis_result.get('error')
         }
         logger.info(f"Fast analysis completed for {market}:{symbol}: {analysis_result.get('decision', 'N/A')}")
@@ -389,7 +392,8 @@ def _run_ai_analysis(positions: List[Dict[str, Any]], config: Dict[str, Any], us
 
         with ThreadPoolExecutor(max_workers=workers) as executor:
             future_to_idx = {
-                executor.submit(_analyze_single_position, pos, language, user_id, custom_prompt): idx
+                executor.submit(_analyze_single_position, pos, language, user_id, custom_prompt,
+                                **({'llm_selection': config['llm_selection']} if config.get('llm_selection') else {})): idx
                 for idx, pos in enumerate(unique_positions)
             }
             for future in as_completed(future_to_idx):

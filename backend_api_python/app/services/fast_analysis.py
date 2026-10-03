@@ -501,7 +501,7 @@ class FastAnalysisService(FastAnalysisScoringMixin):
                 raise ValueError("AI analysis response invalid: " + ", ".join(warnings))
             return analysis
 
-        if os.getenv("ENABLE_AI_ENSEMBLE", "false").lower() == "true":
+        if not getattr(self.llm_service, 'selection', None) and os.getenv("ENABLE_AI_ENSEMBLE", "false").lower() == "true":
             ensemble_models = [
                 item.strip()
                 for item in (os.getenv("AI_ENSEMBLE_MODELS") or "").split(",")
@@ -594,7 +594,7 @@ class FastAnalysisService(FastAnalysisScoringMixin):
         """
         start_time = time.time()
         # Get default model if not specified
-        if not model:
+        if not model or getattr(self.llm_service, 'selection', None):
             model = self.llm_service.get_default_model()
             logger.debug(f"Using default model: {model}")
         
@@ -1140,6 +1140,8 @@ class FastAnalysisService(FastAnalysisScoringMixin):
             })
 
             self._attach_professional_report(result, data, market, symbol)
+            from app.services.llm_cost import aggregate_usage_display
+            result['llm_usage'] = aggregate_usage_display(getattr(self.llm_service, 'usage_events', []))
             
             # Store in memory for future retrieval and get memory_id for feedback
             memory_id = self._store_analysis_memory(result, user_id=user_id)
@@ -1631,15 +1633,9 @@ class FastAnalysisService(FastAnalysisScoringMixin):
             logger.warning(f"Failed to save analysis task: {e}")
             return None
     
-# Singleton instance
-_fast_analysis_service = None
-
 def get_fast_analysis_service() -> FastAnalysisService:
-    """Get singleton FastAnalysisService instance."""
-    global _fast_analysis_service
-    if _fast_analysis_service is None:
-        _fast_analysis_service = FastAnalysisService()
-    return _fast_analysis_service
+    """Keep per-call model selection and usage isolated across users/workers."""
+    return FastAnalysisService()
 
 
 def fast_analyze(market: str, symbol: str, language: str = 'en-US', 

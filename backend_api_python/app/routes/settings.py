@@ -496,6 +496,11 @@ CONFIG_SCHEMA = {
                 'description': 'Custom API endpoint (for proxies or Azure)',
                 'group': 'openai'
             },
+            {
+                'key': 'OPENAI_MODELS', 'label': 'Agent 可选模型 / Allowed models',
+                'type': 'text', 'default': '', 'group': 'openai',
+                'description': '逗号分隔的额外模型 ID；默认模型自动包含。仅填写此 API Key 有权限的模型。'
+            },
             # Google Gemini
             {
                 'key': 'GOOGLE_API_KEY',
@@ -545,6 +550,16 @@ CONFIG_SCHEMA = {
                 'default': 'https://api.deepseek.com/v1',
                 'description': 'DeepSeek API endpoint',
                 'group': 'deepseek'
+            },
+            {
+                'key': 'DEEPSEEK_MODELS', 'label': 'Agent 可选模型 / Allowed models',
+                'type': 'text', 'default': '', 'group': 'deepseek',
+                'description': '逗号分隔的额外模型 ID；默认模型自动包含。'
+            },
+            {
+                'key': 'VOLCENGINE_MODELS', 'label': 'Agent 可选模型 / Allowed models',
+                'type': 'text', 'default': '', 'group': 'volcengine',
+                'description': '逗号分隔的模型或推理接入点 ID；默认模型自动包含。未知接入点仅提供默认思考设置。'
             },
             # Hosted DeepSeek via Volcengine Ark is a separate biller and credential.
             {

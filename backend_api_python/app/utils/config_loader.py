@@ -100,6 +100,7 @@ def load_addon_config() -> Dict[str, Any]:
         ('OPENAI_API_KEY', 'openai.api_key', 'string'),
         ('OPENAI_BASE_URL', 'openai.base_url', 'string'),
         ('OPENAI_MODEL', 'openai.model', 'string'),
+        ('OPENAI_MODELS', 'openai.models', 'string'),
         
         # Google Gemini
         ('GOOGLE_API_KEY', 'google.api_key', 'string'),
@@ -107,6 +108,7 @@ def load_addon_config() -> Dict[str, Any]:
         
         # DeepSeek
         ('DEEPSEEK_API_KEY', 'deepseek.api_key', 'string'),
+        ('DEEPSEEK_MODELS', 'deepseek.models', 'string'),
         ('DEEPSEEK_BASE_URL', 'deepseek.base_url', 'string'),
         ('DEEPSEEK_MODEL', 'deepseek.model', 'string'),
 
@@ -114,6 +116,7 @@ def load_addon_config() -> Dict[str, Any]:
         ('VOLCENGINE_API_KEY', 'volcengine.api_key', 'string'),
         ('VOLCENGINE_BASE_URL', 'volcengine.base_url', 'string'),
         ('VOLCENGINE_MODEL', 'volcengine.model', 'string'),
+        ('VOLCENGINE_MODELS', 'volcengine.models', 'string'),
         
         # xAI Grok
         ('GROK_API_KEY', 'grok.api_key', 'string'),

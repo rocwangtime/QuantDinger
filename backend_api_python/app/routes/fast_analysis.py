@@ -4,6 +4,7 @@ Fast Analysis API Routes
 New high-performance analysis endpoints that replace the slow multi-agent system.
 """
 from flask import g, jsonify, request
+from app.services.llm_selection import agent_model_selection, current_selection
 from app.openapi.blueprint import HumanBlueprint as Blueprint
 
 from app.utils.auth import login_required
@@ -62,6 +63,7 @@ def _professional_response_payload(result, credits_charged=0, remaining_credits=
             'analysis_time_ms': result.get('analysis_time_ms'),
             'llm_time_ms': result.get('llm_time_ms'),
             'data_collection_time_ms': result.get('data_collection_time_ms'),
+            'llm_usage': result.get('llm_usage'),
         },
         'billing': {
             'credits_charged': credits_charged,
@@ -72,6 +74,7 @@ def _professional_response_payload(result, credits_charged=0, remaining_credits=
 
 @fast_analysis_blp.route('/analyze', methods=['POST'])
 @login_required
+@agent_model_selection
 def analyze():
     """
     Fast AI analysis for any symbol.
@@ -197,6 +200,7 @@ def analyze():
             start_async_analysis_task(
                 int(pending_id), market, symbol, language, model, timeframe,
                 int(user_id), inflight_key, int(credits_charged or 0),
+                **({'llm_selection': current_selection()} if current_selection() else {}),
             )
             # worker owns inflight release
             inflight_key = None
