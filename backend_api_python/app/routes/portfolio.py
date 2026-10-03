@@ -19,6 +19,7 @@ from app.services.portfolio.positions import (
     summarize_position_rows,
 )
 from app.services.portfolio.pricing import fetch_price_map
+from app.services.research_opportunities import public_analysis
 from app.services.symbol_name import resolve_symbol_name, normalize_crypto_symbol
 from app.data.market_symbols_seed import get_symbol_name as seed_get_symbol_name
 
@@ -439,6 +440,80 @@ def get_monitor_runs(monitor_id):
     except Exception as e:
         logger.error('get_monitor_runs failed: %s', e, exc_info=True)
         return jsonify({'code': 0, 'msg': str(e), 'data': []}), 500
+
+
+@portfolio_blp.route('/opportunities', methods=['GET'])
+@login_required
+def get_research_opportunities():
+    """List research leads owned by the caller; these are never order intents."""
+    status = str(request.args.get('status') or 'new').strip().lower()
+    if status not in {'new', 'reviewed', 'dismissed'}:
+        return jsonify({'code': 0, 'msg': 'Invalid opportunity status', 'data': []}), 400
+    try:
+        limit = max(1, min(int(request.args.get('limit') or 30), 100))
+        with get_db_connection() as db:
+            cur = db.cursor()
+            cur.execute(
+                """SELECT o.id, o.monitor_id, o.run_id, o.market, o.symbol, o.status,
+                          o.created_at, r.created_at AS run_created_at, r.result_json
+                   FROM qd_research_opportunities o
+                   JOIN qd_position_monitor_runs r
+                     ON r.id = o.run_id AND r.user_id = o.user_id
+                   WHERE o.user_id = ? AND o.status = ?
+                   ORDER BY o.id DESC LIMIT ?""",
+                (int(g.user_id), status, limit),
+            )
+            rows = cur.fetchall() or []
+            cur.close()
+        return jsonify({'code': 1, 'msg': 'success', 'data': [
+            {
+                'id': row['id'], 'monitor_id': row['monitor_id'], 'run_id': row['run_id'],
+                'market': row['market'], 'symbol': row['symbol'], 'status': row['status'],
+                'created_at': _serialize_monitor_ts(row['created_at']),
+                'run_created_at': _serialize_monitor_ts(row['run_created_at']),
+                'analysis': public_analysis(
+                    _safe_json_loads(row['result_json'], {}), row['market'], row['symbol'],
+                ),
+            }
+            for row in rows
+        ]})
+    except (TypeError, ValueError):
+        return jsonify({'code': 0, 'msg': 'Invalid limit', 'data': []}), 400
+    except Exception as exc:
+        logger.error('get_research_opportunities failed: %s', exc, exc_info=True)
+        return jsonify({'code': 0, 'msg': 'Failed to load opportunities', 'data': []}), 500
+
+
+@portfolio_blp.route('/opportunities/<int:opportunity_id>', methods=['PATCH'])
+@login_required
+def update_research_opportunity(opportunity_id):
+    """Mark an owned research lead reviewed, dismissed, or new again."""
+    payload = request.get_json(silent=True) or {}
+    status = str(payload.get('status') or '').strip().lower()
+    if status not in {'new', 'reviewed', 'dismissed'}:
+        return jsonify({'code': 0, 'msg': 'Invalid opportunity status', 'data': None}), 400
+    try:
+        with get_db_connection() as db:
+            cur = db.cursor()
+            cur.execute(
+                """UPDATE qd_research_opportunities
+                   SET status = ?, updated_at = NOW()
+                   WHERE id = ? AND user_id = ?
+                   RETURNING id, status""",
+                (status, opportunity_id, int(g.user_id)),
+            )
+            row = cur.fetchone()
+            if row:
+                db.commit()
+            else:
+                db.rollback()
+            cur.close()
+        if not row:
+            return jsonify({'code': 0, 'msg': 'Opportunity not found', 'data': None}), 404
+        return jsonify({'code': 1, 'msg': 'success', 'data': dict(row)})
+    except Exception as exc:
+        logger.error('update_research_opportunity failed: %s', exc, exc_info=True)
+        return jsonify({'code': 0, 'msg': 'Failed to update opportunity', 'data': None}), 500
 
 
 @portfolio_blp.route('/monitors', methods=['POST'])
