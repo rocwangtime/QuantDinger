@@ -58,3 +58,9 @@ def test_strategy_completion_stops_and_closes_provider(monkeypatch):
     assert result is None
     assert len(events) == 1
     assert closed == [True]
+
+
+def test_stream_route_is_registered_and_requires_login(app, client):
+    assert any(rule.rule == "/api/strategies/generate/stream" for rule in app.url_map.iter_rules())
+    response = client.post("/api/strategies/generate/stream", json={"prompt": "draft"})
+    assert response.status_code in {401, 403}
