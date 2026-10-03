@@ -183,3 +183,15 @@ def test_monitor_all_failures_are_failed_not_completed(monkeypatch):
     assert not result['success']
     assert result['analyzed_count'] == 0
     assert result['error']
+
+
+def test_research_distinguishes_ma_alignment_from_crossover():
+    from app.services.market.technical_indicators import calculate_indicators
+    def indicators(closes):
+        return calculate_indicators([{'close': c, 'high': c + 1, 'low': c - 1, 'volume': 100} for c in closes])['moving_averages']
+    crossing = indicators([100] * 20 + [105])
+    assert crossing['previous_ma5'] == crossing['previous_ma20'] == 100
+    assert crossing['cross_up_5_20'] == 1
+    aligned = indicators([100] * 20 + [105, 106])
+    assert aligned['ma5'] > aligned['ma20'] and aligned['cross_up_5_20'] == 0
+    assert 'cross_up_5_20' not in indicators([100] * 20)
