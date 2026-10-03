@@ -1176,11 +1176,7 @@ If the question actually requests a code modification, explain what should chang
                 fallback_classifier=classify_indicator_ai_intent,
             )
             resolved_interaction_mode = str(intent_decision["intent"])
-            logger.info(
-                "indicator authoring intent=%s source=%s confidence=%.2f",
-                resolved_interaction_mode, intent_decision.get("source"),
-                float(intent_decision.get("confidence") or 0.0),
-            )
+            logger.info("indicator authoring intent resolved")
         if cancelled():
             yield "data: " + _sse_json({"cancelled": True}) + "\n\n"
             yield "data: [DONE]\n\n"
