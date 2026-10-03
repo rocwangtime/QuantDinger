@@ -37,3 +37,6 @@ def list_strategy_assets():
     except Exception as exc:
         logger.error("list_strategy_assets failed: %s", exc, exc_info=True)
         return jsonify({"code": 0, "msg": str(exc), "data": {"items": [], "counts": {}}}), 500
+
+
+from app.routes import strategy_stream_routes  # noqa: E402,F401
