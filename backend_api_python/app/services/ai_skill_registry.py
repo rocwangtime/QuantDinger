@@ -692,7 +692,13 @@ def _utc_now_iso() -> str:
 
 
 def _skill_path(skill_id: str) -> Path:
-    return USER_SKILLS_DIR / f"{skill_id}.json"
+    if not isinstance(skill_id, str) or not _SKILL_ID_RE.fullmatch(skill_id):
+        raise ValueError("invalid skill id")
+    root = USER_SKILLS_DIR.resolve()
+    path = (root / f"{skill_id}.json").resolve()
+    if path.parent != root:
+        raise ValueError("invalid skill path")
+    return path
 
 
 def _contains_forbidden_field(value: Any, forbidden: set[str]) -> bool:

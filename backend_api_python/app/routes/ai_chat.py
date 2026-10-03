@@ -667,11 +667,13 @@ def _classify_agent_intent(message: str, attachments: list[dict], context: dict,
         plan = _normalize_agent_intent(raw, message, has_image, context, language)
         report = str(raw.get("report") or "")
         if report.startswith("Analysis failed:") or report.startswith("Failed to parse"):
-            fallback["error"] = raw.get("report")
+            logger.warning("Copilot intent router returned an unusable result")
+            fallback["error"] = "model_router_unavailable"
             return fallback
         return plan
     except Exception as exc:
-        fallback["error"] = str(exc)
+        logger.warning("Copilot intent routing failed: %s", type(exc).__name__)
+        fallback["error"] = "model_router_unavailable"
         return fallback
 
 
