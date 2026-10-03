@@ -10,7 +10,6 @@ from typing import Any
 
 from flask import Response, g, jsonify, request, stream_with_context
 from app.services.ai_generation_control import generation_cancelled, valid_request_id
-from app.services.strategy_validation_isolated import validate_strategy_candidate_isolated
 from app.services.llm_selection import agent_model_selection
 
 from app import get_trading_executor
@@ -443,53 +442,11 @@ def _stream_strategy_completion(llm, messages: list[dict], *, temperature: float
     return None if generation_cancelled(user_id, request_id) else "".join(parts)
 
 
-def _stream_validate_strategy(llm, prompt: str, code: str, *, asset_type: str,
-                              generation_mode: str, context: dict, system_prompt: str,
-                              existing_code: str, user_id: int,
-                              request_id: str, max_repair_attempts: int = 2):
-    candidate = code
-    for attempt in range(max(0, min(int(max_repair_attempts), 3)) + 1):
-        if generation_cancelled(user_id, request_id):
-            return None
-        validation = validate_strategy_candidate_isolated(
-            candidate, prompt=prompt, existing_code=existing_code,
-            asset_type=asset_type, generation_mode=generation_mode, context=context,
-        )
-        if validation.get("success"):
-            return candidate, validation["manifest"], validation["behavior"]
-        if attempt >= max_repair_attempts:
-            raise ValueError(str(validation.get("error") or "strategyV2.generationRepairExhausted"))
-        yield _strategy_sse("progress", {"phase": "repair", "attempt": attempt + 1})
-        validation_error = str(validation.get("error") or "strategyV2.generationInvalid")
-        repair_intent = resolve_strategy_validation_intent(
-            prompt=prompt, existing_code=existing_code, context=context,
-        )
-        capability_repairs = render_strategy_capability_repairs(repair_intent)
-        repair_prompt = "\n\n".join([
-            SCRIPT_STRATEGY_REPAIR_REQUIREMENTS,
-            capability_repairs,
-            f"Original user request:\n{prompt}",
-            f"Validation error to repair now:\n{validation_error}",
-            f"Invalid generated source:\n{candidate}",
-            "Repair the source and return the complete Python source only.",
-        ])
-        repaired = yield from _stream_strategy_completion(
-            llm, [{"role": "system", "content": system_prompt},
-                  {"role": "user", "content": repair_prompt}],
-            temperature=0.15, user_id=user_id, request_id=request_id,
-            phase="repair",
-        )
-        if repaired is None:
-            return None
-        candidate = _strip_code_fence(repaired)
-    raise RuntimeError("strategyV2.generationRepairExhausted")
-
-
 @strategy_blp.route("/strategies/generate/stream", methods=["POST"])
 @login_required
 @agent_model_selection
 def generate_strategy_stream():
-    """SSE strategy draft, validation, and explicit cancellation for interactive use."""
+    """Stream an untrusted strategy draft; the client must verify it separately."""
     payload = dict(request.get_json(silent=True) or {})
     prompt = str(payload.get("prompt") or "").strip()
     request_id = valid_request_id(payload.get("request_id"))
@@ -571,25 +528,13 @@ def generate_strategy_stream():
             else:
                 code = _strip_code_fence(content)
                 edit_plan = {"executor": "model", "operation": "generate_candidate"}
-            candidate_before_validation = code
-            yield _strategy_sse("progress", {"phase": "validation"})
-            validated = yield from _stream_validate_strategy(
-                llm, user_prompt, code, asset_type=asset_type,
-                generation_mode=generation_mode, context=context,
-                system_prompt=full_system_prompt, existing_code=existing_code,
-                user_id=user_id, request_id=request_id,
-            )
-            if validated is None:
+            if generation_cancelled(user_id, request_id):
                 yield _strategy_sse("cancelled", {})
                 return
-            code, manifest, behavior_validation = validated
-            if code != candidate_before_validation and edit_plan.get("executor") == "model_patch":
-                edit_plan = {"executor": "model_patch_repaired", "operation": "generate_candidate"}
             yield _strategy_sse("done", {"data": {
                 "code": code,
                 "llm_usage": aggregate_usage_display(getattr(llm, "usage_events", [])),
-                "manifest": manifest,
-                "validation": {"success": True, "behavior": behavior_validation,
+                "validation": {"success": False, "status": "pending",
                                "edit_plan": edit_plan},
             }})
         except Exception as exc:
