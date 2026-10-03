@@ -569,12 +569,18 @@ def resolve_strategy_generation_intent(
         conversion_request = context.pop("conversionRequest", None)
         if conversion_request is None:
             # Older clients embed the request between template and indicator source.
-            match = re.search(
-                r"User conversion request:\s*\n(.*?)\nIndicator source code:",
-                str(prompt or ""),
-                flags=re.DOTALL,
-            )
-            conversion_request = match.group(1) if match else prompt
+            source = str(prompt or "")
+            marker = "User conversion request:"
+            start = source.find(marker)
+            conversion_request = prompt
+            if start >= 0:
+                remainder = source[start + len(marker):]
+                first_newline = remainder.find("\n")
+                if first_newline >= 0 and not remainder[:first_newline].strip():
+                    request_body = remainder[first_newline + 1:]
+                    end = request_body.find("\nIndicator source code:")
+                    if end >= 0:
+                        conversion_request = request_body[:end]
         prompt = str(conversion_request or "")
     serialized_context = json.dumps(context, ensure_ascii=False, sort_keys=True)
     combined = "\n".join((str(prompt or ""), str(existing_code or ""), serialized_context))
