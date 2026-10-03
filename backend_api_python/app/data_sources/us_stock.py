@@ -40,7 +40,7 @@ class USStockDataSource(BaseDataSource):
         '15m': '15m',
         '30m': '30m',
         '1H': '1h',
-        '4H': '4h',
+        '4H': '1h',  # Yahoo has no 4h interval; aggregate inside exchange sessions.
         '1D': '1d',
         '1W': '1wk'
     }
@@ -490,8 +490,8 @@ class USStockDataSource(BaseDataSource):
             interval = self.INTERVAL_MAP.get(timeframe, '1d')
             days_func = self.DAYS_MAP.get(timeframe, lambda x: x + 1)
             merge_factor = self.MERGE_FACTOR_MAP.get(timeframe, 1)
-            effective_limit = limit * merge_factor
-            days = days_func(effective_limit)
+            effective_limit = limit * (4 if timeframe == '4H' else merge_factor)
+            days = days_func(limit if timeframe == '4H' else effective_limit)
             
             if before_time:
                 end_date = datetime.fromtimestamp(before_time)
@@ -506,13 +506,15 @@ class USStockDataSource(BaseDataSource):
             
             yahoo_limit = 0 if merge_factor > 1 else effective_limit
             klines = self._fetch_yahoo_chart(symbol, interval, start_date, end_date, yahoo_limit)
+            if klines and timeframe == '4H':
+                klines = self._merge_stock_hours(klines)
             if klines and merge_factor > 1:
                 klines = self._merge_complete_minute_buckets(klines, merge_factor)
             if not klines:
                 if timeframe in ('1m', '3m', '5m', '15m', '30m', '1H', '4H'):
                     # Nasdaq's intraday chart is a latest-session feed, not a
                     # historical range provider. Do not let it mask yfinance.
-                    if after_time is None and before_time is None:
+                    if after_time is None and before_time is None and timeframe != '4H':
                         klines = self._fetch_nasdaq_intraday_chart(symbol, timeframe, effective_limit)
                 else:
                     klines = self._fetch_nasdaq_historical(symbol, start_date, end_date, effective_limit)
@@ -536,6 +538,8 @@ class USStockDataSource(BaseDataSource):
             elif not klines:
                 conversion_limit = 0 if merge_factor > 1 else effective_limit
                 klines = self._convert_dataframe(df, conversion_limit)
+                if timeframe == '4H':
+                    klines = self._merge_stock_hours(klines)
                 if merge_factor > 1:
                     klines = self._merge_complete_minute_buckets(klines, merge_factor)
             
@@ -858,6 +862,23 @@ class USStockDataSource(BaseDataSource):
         except Exception as e:
             logger.warning(f"yfinance fetch failed: {e}")
             return None
+
+    @staticmethod
+    def _merge_stock_hours(bars: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """4h starts at 09:30 NY, never mixes dates or shifts with UTC/DST."""
+        from zoneinfo import ZoneInfo
+        from datetime import timezone
+        buckets = {}
+        for bar in sorted(bars, key=lambda item: item['time']):
+            local = datetime.fromtimestamp(bar['time'], timezone.utc).astimezone(ZoneInfo('America/New_York'))
+            minutes = local.hour * 60 + local.minute - 570
+            if not 0 <= minutes < 390:
+                continue
+            key = (local.date(), minutes // 240)
+            buckets.setdefault(key, []).append(bar)
+        return [dict(time=chunk[0]['time'], open=chunk[0]['open'], high=max(b['high'] for b in chunk),
+                     low=min(b['low'] for b in chunk), close=chunk[-1]['close'],
+                     volume=sum(b.get('volume', 0) for b in chunk)) for chunk in buckets.values()]
 
     def _merge_every_n_sorted_bars(self, bars: List[Dict[str, Any]], n: int) -> List[Dict[str, Any]]:
         if n <= 1 or len(bars) < n:
