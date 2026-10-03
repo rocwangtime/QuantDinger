@@ -574,6 +574,7 @@ def update_strategy_workspace_change(change_id: int):
 
 @strategy_blp.route("/strategies/ai-workspace/turn", methods=["POST"])
 @login_required
+@agent_model_selection
 def run_strategy_workspace_turn():
     payload = dict(request.get_json() or {})
     lang = _request_lang()
