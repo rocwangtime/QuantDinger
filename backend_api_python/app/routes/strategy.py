@@ -8,7 +8,8 @@ import re
 import time
 from typing import Any
 
-from flask import g, jsonify, request
+from flask import Response, g, jsonify, request, stream_with_context
+from app.services.ai_generation_control import generation_cancelled, valid_request_id
 from app.services.llm_selection import agent_model_selection
 
 from app import get_trading_executor
@@ -413,6 +414,190 @@ def generate_strategy():
     except Exception as exc:
         logger.warning("strategy generation failed: %s", exc)
         return _error("strategyV2.generationInvalid", data={"error": str(exc), "llm_usage": aggregate_usage_display(getattr(locals().get("llm"), "usage_events", []))})
+
+
+def _strategy_sse(event: str, payload: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+def _stream_strategy_completion(llm, messages: list[dict], *, temperature: float,
+                                user_id: int, request_id: str, phase: str):
+    """Yield source as it arrives; never continue a cancelled provider call."""
+    parts: list[str] = []
+    provider_stream = llm.stream_llm_api(
+        messages, model=llm.get_code_generation_model(), temperature=temperature,
+    )
+    try:
+        for chunk in provider_stream:
+            if generation_cancelled(user_id, request_id):
+                return None
+            if not chunk:
+                continue
+            parts.append(str(chunk))
+            yield _strategy_sse("delta", {"phase": phase, "text": str(chunk)})
+    finally:
+        close = getattr(provider_stream, "close", None)
+        if close:
+            close()
+    return None if generation_cancelled(user_id, request_id) else "".join(parts)
+
+
+def _stream_validate_strategy(llm, prompt: str, code: str, *, asset_type: str,
+                              generation_mode: str, context: dict, system_prompt: str,
+                              intent: StrategyAIGenerationIntent, user_id: int,
+                              request_id: str, max_repair_attempts: int = 2):
+    candidate = code
+    for attempt in range(max(0, min(int(max_repair_attempts), 3)) + 1):
+        if generation_cancelled(user_id, request_id):
+            return None
+        try:
+            program = validate_generated_strategy(
+                candidate, asset_type=asset_type, generation_mode=generation_mode,
+                context=context, prompt=prompt, intent=intent, compiler=compile_strategy_v2,
+            )
+            behavior = validate_strategy_ai_behavior(candidate, program.manifest, intent)
+            return candidate, program, behavior
+        except Exception as validation_error:
+            if attempt >= max_repair_attempts:
+                raise
+            yield _strategy_sse("progress", {"phase": "repair", "attempt": attempt + 1})
+            repair_prompt = "\n\n".join([
+                SCRIPT_STRATEGY_REPAIR_REQUIREMENTS,
+                render_strategy_capability_repairs(intent),
+                f"Original user request:\n{prompt}",
+                f"Validation error to repair now:\n{validation_error}",
+                f"Invalid generated source:\n{candidate}",
+                "Repair the source and return the complete Python source only.",
+            ])
+            repaired = yield from _stream_strategy_completion(
+                llm, [{"role": "system", "content": system_prompt},
+                      {"role": "user", "content": repair_prompt}],
+                temperature=0.15, user_id=user_id, request_id=request_id,
+                phase="repair",
+            )
+            if repaired is None:
+                return None
+            candidate = _strip_code_fence(repaired)
+    raise RuntimeError("strategyV2.generationRepairExhausted")
+
+
+@strategy_blp.route("/strategies/generate/stream", methods=["POST"])
+@login_required
+@agent_model_selection
+def generate_strategy_stream():
+    """SSE strategy draft, validation, and explicit cancellation for interactive use."""
+    payload = dict(request.get_json(silent=True) or {})
+    prompt = str(payload.get("prompt") or "").strip()
+    request_id = valid_request_id(payload.get("request_id"))
+    if not prompt:
+        return _error("strategyV2.promptRequired")
+    if not request_id:
+        return _error("strategyV2.requestIdRequired", 400)
+    user_id = int(g.user_id)
+
+    @stream_with_context
+    def generate():
+        llm = None
+        try:
+            from app.services.billing_service import get_billing_service
+            from app.services.llm import LLMService
+
+            yield _strategy_sse("accepted", {"request_id": request_id})
+            if generation_cancelled(user_id, request_id):
+                yield _strategy_sse("cancelled", {})
+                return
+            llm = LLMService()
+            if not llm.is_configured():
+                yield _strategy_sse("error", {"msg": "strategyV2.llmNotConfigured"})
+                return
+            asset_type = normalize_asset_type(payload.get("assetType") or payload.get("asset_type"))
+            generation_mode = str(payload.get("generationMode") or "authoring").strip().lower()
+            context = payload.get("context") if isinstance(payload.get("context"), dict) else {}
+            existing_code = str(payload.get("existingCode") or "")
+            system_prompt, _ = build_strategy_system_prompt(
+                prompt=prompt, asset_type=asset_type, existing_code=existing_code,
+                generation_mode=generation_mode, context=context,
+            )
+            full_system_prompt = system_prompt
+            use_patch_response = bool(existing_code.strip())
+            if use_patch_response:
+                system_prompt = f"{full_system_prompt}\n\n{CODE_EDIT_SYSTEM_SUFFIX}"
+            user_prompt = build_strategy_generation_request(
+                prompt=prompt, asset_type=asset_type, existing_code=existing_code,
+                generation_mode=generation_mode, context=context,
+                response_mode="patch" if use_patch_response else "full",
+            )
+            accepted, message = get_billing_service().check_and_consume(
+                user_id=user_id, feature="ai_code_gen",
+                reference_id=f"strategy_generate_{user_id}_{request_id}",
+            )
+            if not accepted:
+                yield _strategy_sse("error", {"msg": message or "strategyV2.insufficientCredits"})
+                return
+            yield _strategy_sse("progress", {"phase": "generation"})
+            content = yield from _stream_strategy_completion(
+                llm, [{"role": "system", "content": system_prompt},
+                      {"role": "user", "content": user_prompt}],
+                temperature=0.2 if use_patch_response else 0.4,
+                user_id=user_id, request_id=request_id, phase="generation",
+            )
+            if content is None:
+                yield _strategy_sse("cancelled", {})
+                return
+            if use_patch_response:
+                try:
+                    code, edit_plan = apply_model_code_edits(existing_code, content)
+                except CodeEditError:
+                    yield _strategy_sse("progress", {"phase": "full_fallback"})
+                    full_request = build_strategy_generation_request(
+                        prompt=prompt, asset_type=asset_type, existing_code=existing_code,
+                        generation_mode=generation_mode, context=context, response_mode="full",
+                    )
+                    fallback = yield from _stream_strategy_completion(
+                        llm, [{"role": "system", "content": full_system_prompt},
+                              {"role": "user", "content": full_request}],
+                        temperature=0.25, user_id=user_id, request_id=request_id,
+                        phase="full_fallback",
+                    )
+                    if fallback is None:
+                        yield _strategy_sse("cancelled", {})
+                        return
+                    code = _strip_code_fence(fallback)
+                    edit_plan = {"executor": "model_full_fallback", "operation": "generate_candidate"}
+            else:
+                code = _strip_code_fence(content)
+                edit_plan = {"executor": "model", "operation": "generate_candidate"}
+            candidate_before_validation = code
+            validation_intent = resolve_strategy_validation_intent(
+                prompt=prompt, existing_code=existing_code, context=context,
+            )
+            yield _strategy_sse("progress", {"phase": "validation"})
+            validated = yield from _stream_validate_strategy(
+                llm, user_prompt, code, asset_type=asset_type,
+                generation_mode=generation_mode, context=context,
+                system_prompt=full_system_prompt, intent=validation_intent,
+                user_id=user_id, request_id=request_id,
+            )
+            if validated is None:
+                yield _strategy_sse("cancelled", {})
+                return
+            code, program, behavior_validation = validated
+            if code != candidate_before_validation and edit_plan.get("executor") == "model_patch":
+                edit_plan = {"executor": "model_patch_repaired", "operation": "generate_candidate"}
+            yield _strategy_sse("done", {"data": {
+                "code": code,
+                "llm_usage": aggregate_usage_display(getattr(llm, "usage_events", [])),
+                "manifest": program.manifest.metadata(),
+                "validation": {"success": True, "behavior": behavior_validation,
+                               "edit_plan": edit_plan},
+            }})
+        except Exception as exc:
+            logger.warning("streamed strategy generation failed: %s", type(exc).__name__, exc_info=True)
+            yield _strategy_sse("error", {"msg": "strategyV2.generationInvalid"})
+
+    return Response(generate(), mimetype="text/event-stream", headers={
+        "Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no",
+    })
 
 
 def _strip_code_fence(value: str) -> str:
