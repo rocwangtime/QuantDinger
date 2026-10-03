@@ -176,7 +176,7 @@ def generate_indicator_code_candidate(
         try:
             return apply_model_code_edits(existing, content)
         except CodeEditError as exc:
-            logger.warning("indicator model patch rejected, retrying full candidate: %s", exc)
+            logger.warning("indicator model patch rejected, retrying full candidate: %s", type(exc).__name__)
             fallback_prompt = (
                 "# Existing QuantDinger indicator code (source of truth):\n\n```python\n"
                 + existing.strip()
@@ -199,7 +199,7 @@ def generate_indicator_code_candidate(
             plan = {
                 "executor": "model_full_fallback",
                 "operation": "generate_candidate",
-                "patch_error": str(exc),
+                "patch_error": type(exc).__name__,
             }
     else:
         plan = {"executor": "model", "operation": "generate_candidate"}

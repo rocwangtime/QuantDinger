@@ -1049,9 +1049,9 @@ If the question actually requests a code modification, explain what should chang
                 return None
             code_text, edit_plan = generated
         except Exception as e:
-            logger.error(f"ai_generate LLM failed, fallback to template. Error: {type(e).__name__}: {e}")
+            logger.error("ai_generate LLM failed, fallback to template: %s", type(e).__name__)
             code_text = _template_code()
-            edit_plan = {"executor": "template", "operation": "generate_candidate", "error": str(e)}
+            edit_plan = {"executor": "template", "operation": "generate_candidate", "error": type(e).__name__}
 
         yield "data: " + _sse_json({"phase": "validation"}) + "\n\n"
         validation = _validate_indicator_code_internal(code_text)
@@ -1076,7 +1076,7 @@ If the question actually requests a code modification, explain what should chang
             if repaired is None:
                 return None
         except Exception as e:
-            logger.error(f"ai_generate auto-fix failed, returning safe template. Error: {type(e).__name__}: {e}")
+            logger.error("ai_generate auto-fix failed, returning safe template: %s", type(e).__name__)
             fallback_code = _template_code()
             fallback_validation = _validate_indicator_code_internal(fallback_code)
             debug = {
@@ -1085,7 +1085,7 @@ If the question actually requests a code modification, explain what should chang
                 "returned_candidate": "template",
                 "initial_validation": _indicator_debug_summary(validation),
                 "final_validation": _indicator_debug_summary(fallback_validation),
-                "auto_fix_error": str(e),
+                "auto_fix_error": type(e).__name__,
             }
             debug["human_summary"] = _indicator_human_summary(
                 validation, fallback_validation, True, False, "template", lang=lang
@@ -1167,8 +1167,8 @@ If the question actually requests a code modification, explain what should chang
                 try:
                     intent_workspace = get_indicator_ai_workspace(user_id, int(indicator_id))
                     intent_messages = list(intent_workspace.get("messages") or [])
-                except Exception as exc:
-                    logger.info("indicator intent history unavailable; continuing without it: %s", exc)
+                except Exception:
+                    logger.info("indicator intent history unavailable; continuing without it")
             intent_decision = resolve_authoring_intent(
                 prompt=prompt, requested_mode=requested_interaction_mode,
                 asset_kind="chart_indicator", existing_code=existing,
@@ -1207,7 +1207,7 @@ If the question actually requests a code modification, explain what should chang
                 yield "data: [DONE]\n\n"
                 return
             except Exception as exc:
-                logger.error("begin indicator AI turn failed: %s", exc, exc_info=True)
+                logger.error("begin indicator AI turn failed: %s", type(exc).__name__)
                 yield "data: " + _sse_json({"error": "indicator_ai_workspace_unavailable"}) + "\n\n"
                 yield "data: [DONE]\n\n"
                 return
@@ -1232,7 +1232,7 @@ If the question actually requests a code modification, explain what should chang
                 yield "data: [DONE]\n\n"
                 return
             except Exception as exc:
-                logger.error("indicator AI discussion failed: %s", exc, exc_info=True)
+                logger.error("indicator AI discussion failed: %s", type(exc).__name__)
                 yield "data: " + _sse_json({"error": "indicator_ai_discussion_failed"}) + "\n\n"
                 yield "data: [DONE]\n\n"
                 return
@@ -1267,7 +1267,7 @@ If the question actually requests a code modification, explain what should chang
                 )
                 yield "data: " + _sse_json({"workspace": workspace_result}) + "\n\n"
             except Exception as exc:
-                logger.error("complete indicator AI turn failed: %s", exc, exc_info=True)
+                logger.error("complete indicator AI turn failed: %s", type(exc).__name__)
                 yield "data: " + _sse_json({"error": "indicator_ai_workspace_save_failed"}) + "\n\n"
                 yield "data: [DONE]\n\n"
                 return
