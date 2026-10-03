@@ -14,7 +14,7 @@ import json
 import re
 import time
 import traceback
-from typing import Any, Dict, List
+from typing import Any, Dict, Generator, List
 from flask import Response, g, jsonify, request, stream_with_context
 from app.services.llm_selection import agent_model_selection
 from app.openapi.blueprint import HumanBlueprint as Blueprint
@@ -27,6 +27,7 @@ from app.services.ai_generation_contracts import (
 )
 from app.services.ai_copilot_context import fit_messages_to_budget
 from app.services.ai_authoring_intent import resolve_authoring_intent
+from app.services.ai_generation_control import generation_cancelled, valid_request_id
 from app.services.indicator_ai_generation import generate_indicator_code_candidate
 from app.services.indicator_ai_workspace import (
     begin_turn as begin_indicator_ai_turn,
@@ -826,8 +827,13 @@ def ai_generate():
     source = str(data.get("source") or context.get("source") or "").strip()
     indicator_id = context.get("indicatorId")
     requested_interaction_mode = str(data.get("interactionMode") or "auto").strip().lower()
+    request_id = valid_request_id(data.get("request_id"))
+    user_id = int(g.user_id)
     resolved_interaction_mode = "modify"
     workspace_context: Dict[str, Any] | None = None
+
+    def cancelled() -> bool:
+        return bool(request_id and generation_cancelled(user_id, request_id))
 
     if not prompt:
         # Keep SSE contract (match PHP behavior) so frontend doesn't look "stuck".
@@ -841,30 +847,6 @@ def ai_generate():
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
 
-    if source == "indicator_ide":
-        intent_messages: List[Dict[str, Any]] = []
-        if requested_interaction_mode == "auto" and indicator_id not in (None, ""):
-            try:
-                intent_workspace = get_indicator_ai_workspace(g.user_id, int(indicator_id))
-                intent_messages = list(intent_workspace.get("messages") or [])
-            except Exception as exc:
-                logger.info("indicator intent history unavailable; continuing without it: %s", exc)
-        intent_decision = resolve_authoring_intent(
-            prompt=prompt,
-            requested_mode=requested_interaction_mode,
-            asset_kind="chart_indicator",
-            existing_code=existing,
-            recent_messages=intent_messages,
-            fallback_classifier=classify_indicator_ai_intent,
-        )
-        resolved_interaction_mode = str(intent_decision["intent"])
-        logger.info(
-            "indicator authoring intent=%s source=%s confidence=%.2f",
-            resolved_interaction_mode,
-            intent_decision.get("source"),
-            float(intent_decision.get("confidence") or 0.0),
-        )
-
     # QuantDinger indicator IDE: chart render only; strategies are separate script assets.
     # Marker edge contract: shift(1, fill_value=False).astype(bool)
     system_prompt = INDICATOR_IDE_SYSTEM_PROMPT + "\n\n" + INDICATOR_GENERATION_CONTRACT
@@ -875,7 +857,9 @@ def ai_generate():
 
         llm = LLMService()
         if not llm.get_api_key():
-            return _indicator_discussion_fallback(existing, context, lang)
+            fallback = _indicator_discussion_fallback(existing, context, lang)
+            yield "data: " + _sse_json({"content": fallback}) + "\n\n"
+            return fallback
 
         discussion_system = """You are QuantDinger's indicator-code reviewer.
 Answer the user's question about the currently open indicator. Use the same language as the user.
@@ -917,13 +901,22 @@ If the question actually requests a code modification, explain what should chang
         })
         messages, budget_debug = fit_messages_to_budget(messages, max_tokens=32000)
         logger.info("indicator discussion context budget=%s", _sse_json(budget_debug))
-        answer = llm.call_llm_api(
-            messages=messages,
-            model=llm.get_default_model(),
-            temperature=0.25,
-            use_json_mode=False,
+        parts: List[str] = []
+        provider_stream = llm.stream_llm_api(
+            messages=messages, model=llm.get_default_model(), temperature=0.25,
         )
-        return str(answer or "").strip() or _indicator_discussion_fallback(existing, context, lang)
+        try:
+            for chunk in provider_stream:
+                if cancelled():
+                    return None
+                if chunk:
+                    parts.append(str(chunk))
+                    yield "data: " + _sse_json({"content": str(chunk)}) + "\n\n"
+        finally:
+            close = getattr(provider_stream, "close", None)
+            if close:
+                close()
+        return None if cancelled() else "".join(parts).strip()
 
     def _template_code() -> str:
         from app.services.indicator_default_template import build_default_indicator_template
@@ -939,8 +932,8 @@ If the question actually requests a code modification, explain what should chang
             code = "# Existing code was provided as context.\n" + code
         return code
 
-    def _generate_code_via_llm() -> tuple[str, Dict[str, Any]]:
-        return generate_indicator_code_candidate(
+    def _generate_code_via_llm() -> Generator[tuple[str, str], None, tuple[str, Dict[str, Any]] | None]:
+        return (yield from generate_indicator_code_candidate(
             prompt=prompt,
             existing=existing,
             context=context,
@@ -948,7 +941,8 @@ If the question actually requests a code modification, explain what should chang
             workspace_context=workspace_context,
             template_factory=_template_code,
             logger=logger,
-        )
+            cancel_check=cancelled,
+        ))
 
     AUTO_FIX_HINT_CODES = {
         "DECLARED_PARAMS_NOT_READ_VIA_PARAMS_GET",
@@ -985,7 +979,7 @@ If the question actually requests a code modification, explain what should chang
                 issues.append(f"- Hint {code_name}")
         return "\n".join(issues) if issues else "- No issues provided"
 
-    def _repair_code_via_llm(bad_code: str, validation: Dict[str, Any]) -> str:
+    def _repair_code_via_llm(bad_code: str, validation: Dict[str, Any]) -> Generator[tuple[str, str], None, str | None]:
         from app.services.llm import LLMService
 
         llm = LLMService()
@@ -1007,15 +1001,29 @@ If the question actually requests a code modification, explain what should chang
             + INDICATOR_REPAIR_REQUIREMENTS
         )
 
-        content = llm.call_llm_api(
+        parts: List[str] = []
+        provider_stream = llm.stream_llm_api(
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": repair_prompt},
             ],
             model=current_model,
             temperature=0.2,
-            use_json_mode=False,
         )
+        try:
+            for chunk in provider_stream:
+                if cancelled():
+                    return None
+                if chunk:
+                    parts.append(str(chunk))
+                    yield "repair", str(chunk)
+        finally:
+            close = getattr(provider_stream, "close", None)
+            if close:
+                close()
+        if cancelled():
+            return None
+        content = "".join(parts)
 
         content = (content or "").strip()
         if content.startswith("```python"):
@@ -1026,14 +1034,29 @@ If the question actually requests a code modification, explain what should chang
             content = content[:-3]
         return content.strip() or bad_code
 
-    def _generate_final_code() -> tuple[str, Dict[str, Any], Dict[str, Any]]:
+    def _emit_draft(source):
         try:
-            code_text, edit_plan = _generate_code_via_llm()
-        except Exception as e:
-            logger.error(f"ai_generate LLM failed, fallback to template. Error: {type(e).__name__}: {e}")
-            code_text = _template_code()
-            edit_plan = {"executor": "template", "operation": "generate_candidate", "error": str(e)}
+            while True:
+                try:
+                    phase, chunk = next(source)
+                except StopIteration as complete:
+                    return complete.value
+                yield "data: " + _sse_json({"draft": chunk, "phase": phase}) + "\n\n"
+        finally:
+            source.close()
 
+    def _generate_final_code() -> Generator[str, None, tuple[str, Dict[str, Any], Dict[str, Any]] | None]:
+        try:
+            generated = yield from _emit_draft(_generate_code_via_llm())
+            if generated is None:
+                return None
+            code_text, edit_plan = generated
+        except Exception as e:
+            logger.error("ai_generate LLM failed, fallback to template: %s", type(e).__name__)
+            code_text = _template_code()
+            edit_plan = {"executor": "template", "operation": "generate_candidate", "error": type(e).__name__}
+
+        yield "data: " + _sse_json({"phase": "validation"}) + "\n\n"
         validation = _validate_indicator_code_internal(code_text)
         if not _needs_auto_fix(validation):
             debug = {
@@ -1051,9 +1074,12 @@ If the question actually requests a code modification, explain what should chang
 
         logger.warning("ai_generate produced code needing auto-fix: %s", _format_validation_issues(validation))
         try:
-            repaired = _repair_code_via_llm(code_text, validation)
+            yield "data: " + _sse_json({"phase": "repair"}) + "\n\n"
+            repaired = yield from _emit_draft(_repair_code_via_llm(code_text, validation))
+            if repaired is None:
+                return None
         except Exception as e:
-            logger.error(f"ai_generate auto-fix failed, returning safe template. Error: {type(e).__name__}: {e}")
+            logger.error("ai_generate auto-fix failed, returning safe template: %s", type(e).__name__)
             fallback_code = _template_code()
             fallback_validation = _validate_indicator_code_internal(fallback_code)
             debug = {
@@ -1062,7 +1088,7 @@ If the question actually requests a code modification, explain what should chang
                 "returned_candidate": "template",
                 "initial_validation": _indicator_debug_summary(validation),
                 "final_validation": _indicator_debug_summary(fallback_validation),
-                "auto_fix_error": str(e),
+                "auto_fix_error": type(e).__name__,
             }
             debug["human_summary"] = _indicator_human_summary(
                 validation, fallback_validation, True, False, "template", lang=lang
@@ -1133,17 +1159,37 @@ If the question actually requests a code modification, explain what should chang
         return repaired, debug, {"executor": "model_repair", "operation": "generate_candidate"}
 
     # Keep validated model selection available throughout streamed generation.
-    user_id = g.user_id
     @stream_with_context
     def stream():
-        nonlocal workspace_context
+        nonlocal workspace_context, resolved_interaction_mode
         from app.services.billing_service import get_billing_service
+        yield "data: " + _sse_json({"phase": "routing"}) + "\n\n"
+        if source == "indicator_ide":
+            intent_messages: List[Dict[str, Any]] = []
+            if requested_interaction_mode == "auto" and indicator_id not in (None, ""):
+                try:
+                    intent_workspace = get_indicator_ai_workspace(user_id, int(indicator_id))
+                    intent_messages = list(intent_workspace.get("messages") or [])
+                except Exception:
+                    logger.info("indicator intent history unavailable; continuing without it")
+            intent_decision = resolve_authoring_intent(
+                prompt=prompt, requested_mode=requested_interaction_mode,
+                asset_kind="chart_indicator", existing_code=existing,
+                recent_messages=intent_messages,
+                fallback_classifier=classify_indicator_ai_intent,
+            )
+            resolved_interaction_mode = str(intent_decision["intent"])
+            logger.info("indicator authoring intent resolved")
+        if cancelled():
+            yield "data: " + _sse_json({"cancelled": True}) + "\n\n"
+            yield "data: [DONE]\n\n"
+            return
         billing = get_billing_service()
         billing_feature = "ai_copilot_chat" if resolved_interaction_mode == "discussion" else "ai_code_gen"
         ok, msg = billing.check_and_consume(
             user_id=user_id,
             feature=billing_feature,
-            reference_id=f"{billing_feature}_{user_id}_{int(time.time())}"
+            reference_id=f"{billing_feature}_{user_id}_{request_id or int(time.time())}"
         )
         if not ok:
             error_msg = f"Insufficient credits: {msg}" if msg else _indicator_ai_text("insufficient_credits", lang)
@@ -1164,34 +1210,49 @@ If the question actually requests a code modification, explain what should chang
                 yield "data: [DONE]\n\n"
                 return
             except Exception as exc:
-                logger.error("begin indicator AI turn failed: %s", exc, exc_info=True)
+                logger.error("begin indicator AI turn failed: %s", type(exc).__name__)
                 yield "data: " + _sse_json({"error": "indicator_ai_workspace_unavailable"}) + "\n\n"
                 yield "data: [DONE]\n\n"
                 return
 
         if workspace_context and resolved_interaction_mode == "discussion":
             try:
-                discussion_text = _generate_discussion_via_llm()
+                yield "data: " + _sse_json({"phase": "generation"}) + "\n\n"
+                discussion_text = yield from _generate_discussion_via_llm()
+                if discussion_text is None or cancelled():
+                    yield "data: " + _sse_json({"cancelled": True}) + "\n\n"
+                    yield "data: [DONE]\n\n"
+                    return
+                if not discussion_text:
+                    discussion_text = _indicator_discussion_fallback(existing, context, lang)
+                    yield "data: " + _sse_json({"content": discussion_text}) + "\n\n"
                 workspace_result = complete_indicator_ai_discussion_turn(
                     user_id=user_id,
                     workspace=workspace_context,
                     answer=discussion_text,
                 )
                 yield "data: " + _sse_json({"workspace": workspace_result}) + "\n\n"
-                chunk_size = 240
-                for i in range(0, len(discussion_text), chunk_size):
-                    yield "data: " + _sse_json({"content": discussion_text[i : i + chunk_size]}) + "\n\n"
                 yield "data: [DONE]\n\n"
                 return
             except Exception as exc:
-                logger.error("indicator AI discussion failed: %s", exc, exc_info=True)
+                logger.error("indicator AI discussion failed: %s", type(exc).__name__)
                 yield "data: " + _sse_json({"error": "indicator_ai_discussion_failed"}) + "\n\n"
                 yield "data: [DONE]\n\n"
                 return
 
-        code_text, debug_info, edit_plan = _generate_final_code()
+        yield "data: " + _sse_json({"phase": "generation"}) + "\n\n"
+        result = yield from _generate_final_code()
+        if result is None or cancelled():
+            yield "data: " + _sse_json({"cancelled": True}) + "\n\n"
+            yield "data: [DONE]\n\n"
+            return
+        code_text, debug_info, edit_plan = result
 
         if workspace_context:
+            if cancelled():
+                yield "data: " + _sse_json({"cancelled": True}) + "\n\n"
+                yield "data: [DONE]\n\n"
+                return
             validation = _validate_indicator_code_internal(code_text)
             validation["edit_plan"] = edit_plan
             assistant_text = _indicator_ai_text("candidate_ready", lang)
@@ -1209,7 +1270,7 @@ If the question actually requests a code modification, explain what should chang
                 )
                 yield "data: " + _sse_json({"workspace": workspace_result}) + "\n\n"
             except Exception as exc:
-                logger.error("complete indicator AI turn failed: %s", exc, exc_info=True)
+                logger.error("complete indicator AI turn failed: %s", type(exc).__name__)
                 yield "data: " + _sse_json({"error": "indicator_ai_workspace_save_failed"}) + "\n\n"
                 yield "data: [DONE]\n\n"
                 return
@@ -1227,7 +1288,7 @@ If the question actually requests a code modification, explain what should chang
         stream(),
         mimetype="text/event-stream",
         headers={
-            "Cache-Control": "no-cache",
+            "Cache-Control": "no-cache, no-transform",
             "X-Accel-Buffering": "no",
         },
     )

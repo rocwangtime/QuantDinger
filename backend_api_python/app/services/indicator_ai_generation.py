@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Callable, Dict, List, Mapping
+from typing import Any, Callable, Dict, Generator, List, Mapping
 
 from app.services.ai_code_edits import (
     CODE_EDIT_SYSTEM_SUFFIX,
@@ -66,8 +66,9 @@ def generate_indicator_code_candidate(
     workspace_context: Mapping[str, Any] | None,
     template_factory: Callable[[], str],
     logger: Any,
-) -> tuple[str, Dict[str, Any]]:
-    """Generate a full candidate or apply bounded model edit operations."""
+    cancel_check: Callable[[], bool] | None = None,
+) -> Generator[tuple[str, str], None, tuple[str, Dict[str, Any]] | None]:
+    """Stream model deltas and return a full candidate or bounded edit result."""
     from app.services.llm import LLMService
 
     llm = LLMService()
@@ -148,17 +149,34 @@ def generate_indicator_code_candidate(
     )
 
     temperature = float(os.getenv("OPENROUTER_TEMPERATURE", "0.7") or 0.7)
-    content = llm.call_llm_api(
-        messages=messages,
-        model=current_model,
-        temperature=0.2 if use_patch_response else temperature,
-        use_json_mode=use_patch_response,
+    def stream_text(stream_messages, stream_temperature, phase):
+        parts = []
+        provider_stream = llm.stream_llm_api(
+            messages=stream_messages, model=current_model, temperature=stream_temperature,
+        )
+        try:
+            for chunk in provider_stream:
+                if cancel_check and cancel_check():
+                    return None
+                if chunk:
+                    parts.append(str(chunk))
+                    yield phase, str(chunk)
+        finally:
+            close = getattr(provider_stream, "close", None)
+            if close:
+                close()
+        return None if cancel_check and cancel_check() else "".join(parts)
+
+    content = yield from stream_text(
+        messages, 0.2 if use_patch_response else temperature, "generation",
     )
+    if content is None:
+        return None
     if use_patch_response:
         try:
             return apply_model_code_edits(existing, content)
         except CodeEditError as exc:
-            logger.warning("indicator model patch rejected, retrying full candidate: %s", exc)
+            logger.warning("indicator model patch rejected, retrying full candidate: %s", type(exc).__name__)
             fallback_prompt = (
                 "# Existing QuantDinger indicator code (source of truth):\n\n```python\n"
                 + existing.strip()
@@ -168,19 +186,20 @@ def generate_indicator_code_candidate(
                 + "\n\nReturn one complete replacement indicator source. Preserve behavior not "
                 "explicitly changed. Python only, without markdown or prose."
             )
-            content = llm.call_llm_api(
-                messages=[
+            content = yield from stream_text(
+                [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": fallback_prompt},
                 ],
-                model=current_model,
-                temperature=0.25,
-                use_json_mode=False,
+                0.25,
+                "full_fallback",
             )
+            if content is None:
+                return None
             plan = {
                 "executor": "model_full_fallback",
                 "operation": "generate_candidate",
-                "patch_error": str(exc),
+                "patch_error": type(exc).__name__,
             }
     else:
         plan = {"executor": "model", "operation": "generate_candidate"}
