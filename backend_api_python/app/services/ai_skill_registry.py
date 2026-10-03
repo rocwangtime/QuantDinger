@@ -7,8 +7,10 @@ do, what each skill requires, and where the user can continue the workflow.
 from __future__ import annotations
 
 import json
+import os
 import re
 import string
+from uuid import uuid4
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -691,8 +693,21 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _skill_path(skill_id: str) -> Path:
-    return USER_SKILLS_DIR / f"{skill_id}.json"
+def _skill_path(skill_id: str) -> Path | None:
+    """Find an installed skill without constructing a path from a user ID."""
+    if not isinstance(skill_id, str) or not _SKILL_ID_RE.fullmatch(skill_id):
+        raise ValueError("invalid skill id")
+    root = USER_SKILLS_DIR.resolve()
+    for path in root.glob("*.json"):
+        if path.is_symlink() or not path.is_file() or path.resolve().parent != root:
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            continue
+        if isinstance(payload, dict) and payload.get("id") == skill_id:
+            return path
+    return None
 
 
 def _contains_forbidden_field(value: Any, forbidden: set[str]) -> bool:
@@ -792,6 +807,8 @@ def _load_installed_payloads() -> list[dict[str, Any]]:
     payloads: list[dict[str, Any]] = []
     for path in sorted(USER_SKILLS_DIR.glob("*.json")):
         try:
+            if path.is_symlink() or path.resolve().parent != USER_SKILLS_DIR.resolve():
+                continue
             payload = json.loads(path.read_text(encoding="utf-8"))
             ok, _ = _validate_skill_payload(payload, updating=True)
             if ok:
@@ -853,7 +870,7 @@ def install_prompt_skill(payload: dict[str, Any], install_source: str = "manual"
         raise ValueError(msg)
     _ensure_user_dir()
     skill_id = str(payload["id"]).strip()
-    if _skill_path(skill_id).exists():
+    if _skill_path(skill_id) is not None:
         raise ValueError("skill already installed")
     now = _utc_now_iso()
     stored = dict(payload)
@@ -862,7 +879,10 @@ def install_prompt_skill(payload: dict[str, Any], install_source: str = "manual"
     stored["install_source"] = install_source
     stored["created_at"] = now
     stored["updated_at"] = now
-    _skill_path(skill_id).write_text(json.dumps(stored, ensure_ascii=False, indent=2), encoding="utf-8")
+    path = USER_SKILLS_DIR / f"{uuid4().hex}.json"
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        json.dump(stored, handle, ensure_ascii=False, indent=2)
     return stored
 
 
@@ -872,7 +892,7 @@ def set_skill_enabled(skill_id: str, enabled: bool) -> dict[str, Any]:
     if not _SKILL_ID_RE.match(skill_id or ""):
         raise ValueError("invalid skill id")
     path = _skill_path(skill_id)
-    if not path.exists():
+    if path is None:
         raise FileNotFoundError("skill not found")
     payload = json.loads(path.read_text(encoding="utf-8"))
     payload["enabled"] = bool(enabled)
@@ -887,7 +907,7 @@ def delete_installed_skill(skill_id: str) -> None:
     if not _SKILL_ID_RE.match(skill_id or ""):
         raise ValueError("invalid skill id")
     path = _skill_path(skill_id)
-    if not path.exists():
+    if path is None:
         raise FileNotFoundError("skill not found")
     path.unlink()
 

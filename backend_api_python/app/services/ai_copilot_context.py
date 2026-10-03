@@ -122,7 +122,7 @@ def merge_session_summary(
     timeframe = str(previous.get("timeframe") or "")
     matches = re.findall(
         r"(?<![a-z0-9])(1m|3m|5m|15m|30m|1h|2h|4h|6h|8h|12h|1d|1w)(?![a-z0-9])|"
-        r"(日线|周线|\d+\s*(?:分钟|小时|天|周))",
+        r"(日线|周线|\d{1,4}\s{0,2}(?:分钟|小时|天|周))",
         combined,
         re.I,
     )
