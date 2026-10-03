@@ -97,8 +97,8 @@ def agent_model_selection(fn):
                    'reasoning_effort': request.args.get('reasoning_effort', 'default')}
         try:
             g.agent_llm_selection = validate_selection(raw)
-        except ValueError as exc:
-            return jsonify({'code': 0, 'msg': str(exc), 'data': None}), 400
+        except ValueError:
+            return jsonify({'code': 0, 'msg': '模型未配置、已移除或不支持所选思考深度，请刷新模型列表 / Invalid model selection or reasoning effort', 'data': None}), 400
         return fn(*args, **kwargs)
     return wrapped
 

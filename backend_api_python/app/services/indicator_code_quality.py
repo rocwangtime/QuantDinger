@@ -61,7 +61,9 @@ def _param_read_names(code: str) -> set[str]:
     force users into one exact spelling.
     """
     raw = code or ""
-    names: set[str] = set(re.findall(r"params\s*\.?\s*get\s*\(\s*['\"](\w+)['\"]\s*,?", raw))
+    # Keep whitespace inside the optional dot branch disjoint from the first
+    # run; adjacent \s* around an optional dot cause quadratic backtracking.
+    names: set[str] = set(re.findall(r"params\s*(?:\.\s*)?get\s*\(\s*['\"](\w+)['\"]", raw))
 
     try:
         import ast
@@ -434,9 +436,9 @@ def _future_data_leak(code: str) -> List[Dict[str, str]]:
 
 def _has_strategy_annotations(code: str) -> bool:
     c = code or ""
-    if re.search(r"^\s*#\s*@strategy\s+\w+\s+\S+", c, re.MULTILINE | re.IGNORECASE):
+    if re.search(r"^[ \t]*#[ \t]*@strategy[ \t]+\w+[ \t]+\S+", c, re.MULTILINE | re.IGNORECASE):
         return True
-    if re.search(r"^\s*#?\s*(signal_form|exit_owner|flip_mode|timeframe|kline_timeframe)\s*:", c, re.MULTILINE | re.IGNORECASE):
+    if re.search(r"^[ \t]*(?:#[ \t]*)?(signal_form|exit_owner|flip_mode|timeframe|kline_timeframe)[ \t]*:", c, re.MULTILINE | re.IGNORECASE):
         return True
     return bool(re.search(r"\bfour_way\b", c, re.IGNORECASE))
 
