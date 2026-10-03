@@ -93,6 +93,26 @@ def test_short_count_is_not_short_float_percentage_and_bad_tools_are_rejected():
     assert all(t["tool"] in {"company.lookup", "web.search"} for t in result["tool_executions"])
 
 
+def test_malformed_model_tool_fields_fall_back_without_crashing_research():
+    def planner(_payload):
+        return {
+            "calls": [
+                {"tool": ["web.search"], "arguments": {"domain": "web_research"}},
+                {"tool": "web.search", "arguments": {"domain": ["web_research"], "query": "SPCX risk"}},
+            ],
+            "assessment": [{"domain": ["web_research"], "status": ["supported"], "evidence_ids": []}],
+        }
+
+    result = agent.execute_research(
+        ENTITY, "SPCX downside risk", ["web_research", ["options"]],
+        {"answer_mode": ["research"], "requirements": [{"domain": ["web_research"]}]},
+        planner=planner, search=lambda _query: [], max_calls=2, max_rounds=1,
+    )
+    assert result["answer_mode"] == "research"
+    assert result["coverage"][0]["domain"] == "web_research"
+    assert all(item["tool"] == "web.search" for item in result["tool_executions"])
+
+
 def test_tool_deduplication_and_budget():
     repeat = {"tool": "company.lookup", "arguments": {"domain": "options"}}
     result = agent.execute_research(ENTITY, "IV", ["options"], lookup=lambda *a, **k: {"data": {}},

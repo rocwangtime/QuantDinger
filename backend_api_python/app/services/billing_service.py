@@ -737,12 +737,12 @@ class BillingService:
                 db.commit()
                 cur.close()
             
-            logger.info(f"User {user_id} consumed {cost} credits for {feature}, balance: {new_balance}")
+            logger.info("Credit consumption completed")
             return True, 'consumed'
             
-        except Exception as e:
-            logger.error(f"check_and_consume failed: {e}")
-            return False, f'error:{str(e)}'
+        except Exception:
+            logger.error("Credit consumption failed")
+            return False, 'billing_unavailable'
     
     def add_credits(self, user_id: int, amount: int, action: str = 'recharge', 
                     remark: str = '', operator_id: int = None, reference_id: str = '') -> Tuple[bool, str]:
