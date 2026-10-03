@@ -713,13 +713,20 @@ def _signed_intent(plan: dict, user_id: int, message: str, attachments: list[dic
 def _verified_intent(token: str, user_id: int, message: str, attachments: list[dict], language: str, session_id: int | None = None, context: dict | None = None) -> dict | None:
     signer = _intent_signer()
     if not signer or not isinstance(token, str) or len(token) > 12000:
+        logger.info("Copilot routing token status=%s", "missing" if not token else "unusable")
         return None
     try:
         payload = signer.loads(token, max_age=180)
-    except (BadSignature, SignatureExpired):
+    except SignatureExpired:
+        logger.info("Copilot routing token status=expired")
+        return None
+    except BadSignature:
+        logger.info("Copilot routing token status=invalid_signature")
         return None
     if payload.get("digest") != _intent_digest(user_id, message, attachments, language, session_id, context):
+        logger.info("Copilot routing token status=context_mismatch")
         return None
+    logger.info("Copilot routing token status=verified")
     return payload.get("plan") if isinstance(payload.get("plan"), dict) else None
 
 def _normalize_attachments(raw_attachments: Any) -> list[dict]:
