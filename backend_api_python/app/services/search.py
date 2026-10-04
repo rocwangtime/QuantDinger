@@ -709,6 +709,9 @@ class SearchService:
     
     def __init__(self):
         self._providers: List[BaseSearchProvider] = []
+        # Process-local protection against repeatedly calling a throttled
+        # public endpoint on every research/monitor request.
+        self._cooldown_until: Dict[str, float] = {}
         self._config = {}
         self._load_config()
         self._init_providers()
@@ -784,7 +787,7 @@ class SearchService:
     @property
     def is_available(self) -> bool:
         """检查是否有可用的搜索引擎"""
-        return any(p.is_available for p in self._providers)
+        return any(p.is_available and not self._provider_cooling_down(p) for p in self._providers)
 
     def provider_status(self) -> List[Dict[str, Any]]:
         """Return configured search provider diagnostics for agent context."""
@@ -805,12 +808,15 @@ class SearchService:
         }
         active_names = {provider.name for provider in self._providers}
         active_available = {provider.name: provider.is_available for provider in self._providers}
+        cooldowns = {name: max(0, int(until - time.monotonic()) + 1)
+                     for name, until in getattr(self, "_cooldown_until", {}).items()}
         return [
             {
                 "provider": name,
                 "configured": bool(configured.get(name)),
                 "registered": name in active_names,
-                "available": bool(active_available.get(name)),
+                "available": bool(active_available.get(name)) and not cooldowns.get(name, 0),
+                "cooldown_seconds": cooldowns.get(name, 0),
                 "note": _search_provider_note(name, bool(configured.get(name)), name in active_names),
             }
             for name in ("Tavily", "SearXNG", "GDELT", "SerpAPI", "AlphaVantage", "Google", "Bing", "DuckDuckGo")
@@ -845,16 +851,35 @@ class SearchService:
     def search_research(self, query: str, max_results: int = 5) -> List[Dict[str, Any]]:
         """Use general web engines for filings, company facts and historical research."""
         for provider in self._providers:
-            if not provider.is_available or provider.name in {"GDELT", "AlphaVantage"}:
+            if not provider.is_available or self._provider_cooling_down(provider) or provider.name in {"GDELT", "AlphaVantage"}:
                 continue
-            try:
-                response = provider.search(query, max_results, days=3650)
-            except Exception as exc:
-                logger.info("Research search provider %s failed: %s", provider.name, type(exc).__name__)
-                continue
+            response = self._try_provider(provider, query, max_results, 3650)
             if response.success and response.results:
                 return response.to_list()
         return []
+
+    def _provider_cooling_down(self, provider: BaseSearchProvider) -> bool:
+        return time.monotonic() < getattr(self, "_cooldown_until", {}).get(provider.name, 0)
+
+    def _try_provider(self, provider: BaseSearchProvider, query: str, max_results: int, days: int) -> SearchResponse:
+        try:
+            response = provider.search(query, max_results, days)
+        except Exception as exc:
+            response = SearchResponse(query=query, results=[], provider=provider.name,
+                                      success=False, error_message=str(exc))
+        error = str(getattr(response, "error_message", None) or "").lower()
+        # Empty results are not an outage. Only throttle on a recognizable
+        # transient error; a later query might legitimately have matches.
+        if any(token in error for token in ("429", "rate limit", "too many requests", "quota")):
+            delay = 300
+        elif any(token in error for token in ("timeout", "timed out", "connection", "502", "503", "504")):
+            delay = 30
+        else:
+            delay = 0
+        if delay:
+            self.__dict__.setdefault("_cooldown_until", {})[provider.name] = time.monotonic() + delay
+            logger.warning("Search provider %s cooling down for %ss after a transient failure", provider.name, delay)
+        return response
 
     def search_with_fallback(self, query: str, max_results: int = 5, days: int = 7) -> SearchResponse:
         """
@@ -869,10 +894,9 @@ class SearchService:
             SearchResponse 对象
         """
         for provider in self._providers:
-            if not provider.is_available:
+            if not provider.is_available or self._provider_cooling_down(provider):
                 continue
-            
-            response = provider.search(query, max_results, days)
+            response = self._try_provider(provider, query, max_results, days)
             
             if response.success and response.results:
                 return response
@@ -899,13 +923,9 @@ class SearchService:
         providers = [provider for name in free_names for provider in self._providers if provider.name == name]
         providers.extend(provider for provider in self._providers if provider.name not in free_names)
         for provider in providers:
-            if not provider.is_available:
+            if not provider.is_available or self._provider_cooling_down(provider):
                 continue
-            try:
-                response = provider.search(query, max_results, days)
-            except Exception as exc:
-                logger.warning("Event search provider %s failed: %s", provider.name, exc)
-                continue
+            response = self._try_provider(provider, query, max_results, days)
             if response.success and response.results:
                 if result_filter is None:
                     return response
@@ -1019,4 +1039,3 @@ def reset_search_service() -> None:
     """重置搜索服务（用于测试或配置更新后）"""
     global _search_service
     _search_service = None
-

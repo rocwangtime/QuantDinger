@@ -111,6 +111,7 @@ EVIDENCE AND SAFETY CONTRACT
 - Every material factual thesis, risk, catalyst or counter-argument must cite evidence IDs in evidence_claims.
 - Separate confirmed observations from interpretation. Describe conflicts and missing inputs.
 - News and macro can affect direction only through an explicit, asset-specific transmission mechanism.
+- A news headline or search snippet is not independent confirmation of the full article or underlying event. Do not claim corroboration unless distinct supplied evidence supports it.
 - An unrelated geopolitical headline is not directional evidence and never automatically overrides market data.
 - Confidence is signal strength, not a calibrated probability. Missing or conflicting evidence lowers confidence.
 - MA alignment is not a crossover: use previous and current MA values to verify the event. A current-session daily bar is provisional until the exchange closes; never call an intraday crossover a confirmed daily signal.

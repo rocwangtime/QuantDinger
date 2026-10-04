@@ -2538,7 +2538,10 @@ class MarketDataCollector:
             if response.success and response.results:
                 for result in response.results:
                     news_list.append({
-                        "datetime": result.published_date or datetime.now().strftime('%Y-%m-%d'),
+                        # Retrieval time is not the article's publication time.
+                        # Keep undated results visible to callers, but never
+                        # make them look like fresh news in the evidence layer.
+                        "datetime": result.published_date or "",
                         "headline": result.title,
                         "summary": result.snippet[:200] if result.snippet else '',
                         "source": f"搜索:{result.source}",

@@ -106,7 +106,7 @@ class BaseSearchProvider(ABC):
     def _record_error(self, key: str) -> None:
         """Record a failed key usage."""
         self._key_errors[key] = self._key_errors.get(key, 0) + 1
-        logger.warning("[%s] API key %s... error count: %s", self._name, key[:8], self._key_errors[key])
+        logger.warning("[%s] Search provider request failed", self._name)
 
     @abstractmethod
     def _do_search(self, query: str, api_key: str, max_results: int, days: int = 7) -> SearchResponse:
