@@ -153,6 +153,29 @@ def test_context_manifest_does_not_claim_broker_fills():
     assert manifest["broker_trades_included"] is False
 
 
+def test_research_tool_progress_exposes_only_safe_result_summaries():
+    context = {"research_context": {"tool_executions": [
+        {"tool": "web_research.search", "status": "success", "input": {"secret": "private"},
+         "output": {"result_count": 3, "raw_article": "untrusted text"}},
+        {"tool": "market_data.lookup", "status": "partial", "output": {"price": 42}},
+        {"tool": "unknown.private", "status": "success", "output": {"token": "private"}},
+    ]}}
+    events = ai_chat._research_tool_result_events(context)
+    assert [item["tool"] for item in events] == ["web_research.search", "market_data.lookup"]
+    assert events[0]["detail"] == "3 条可用结果"
+    assert "private" not in str(events)
+    assert "untrusted text" not in str(events)
+
+
+def test_tool_progress_precedes_context_work(stream_harness):
+    _, stream = stream_harness
+    with stream({"market": "USStock", "symbol": "SPCX"}) as events:
+        output = list(events)
+    progress = [index for index, item in enumerate(output) if "event: tool_progress" in item]
+    meta = next(index for index, item in enumerate(output) if "event: meta" in item)
+    assert progress and min(progress) < meta
+
+
 def test_stream_persists_context_manifest_for_history(stream_harness):
     state, stream = stream_harness
     with stream({"market": "USStock", "symbol": "SPCX"}) as events:
