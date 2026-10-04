@@ -671,10 +671,10 @@ def _classify_agent_intent(message: str, attachments: list[dict], context: dict,
         if request_id and generation_cancelled(user_id, request_id):
             raise AgentGenerationCancelled()
         if request_id:
-            stream = LLMService().stream_llm_api([
+            stream = LLMService().stream_llm_api_cancellable([
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
-            ], temperature=0.2)
+            ], lambda: generation_cancelled(user_id, request_id), temperature=0.2)
             parts = []
             response_chars = 0
             try:
@@ -4089,14 +4089,19 @@ def _sse(event: str, payload: dict) -> str:
     return f"event: {event}\ndata: {_json_dumps(payload)}\n\n"
 
 
-def _stream_llm_with_recovery(llm_messages: list[dict], temperature: float = 0.35):
+def _stream_llm_with_recovery(llm_messages: list[dict], temperature: float = 0.35, cancel_check=None):
     """Recover transient provider failures once without retrying business errors."""
     service = LLMService()
     has_partial = False
     try:
-        for delta in service.stream_llm_api(llm_messages, temperature=temperature):
-            has_partial = has_partial or bool(delta)
-            yield "delta", {"text": delta}
+        first_stream = (service.stream_llm_api_cancellable(llm_messages, cancel_check, temperature=temperature)
+                        if cancel_check else service.stream_llm_api(llm_messages, temperature=temperature))
+        try:
+            for delta in first_stream:
+                has_partial = has_partial or bool(delta)
+                yield "delta", {"text": delta}
+        finally:
+            first_stream.close()
     except Exception as stream_error:
         finish_reason = str(getattr(stream_error, "finish_reason", "") or "").lower()
         if finish_reason == "length" and has_partial:
@@ -4108,9 +4113,11 @@ def _stream_llm_with_recovery(llm_messages: list[dict], temperature: float = 0.3
             }
             return
 
+        import aiohttp
+        import asyncio
         retryable = bool(getattr(stream_error, "retryable", False)) or isinstance(
             stream_error,
-            requests.exceptions.RequestException,
+            (requests.exceptions.RequestException, aiohttp.ClientError, asyncio.TimeoutError),
         )
         if not retryable:
             raise
@@ -4127,14 +4134,19 @@ def _stream_llm_with_recovery(llm_messages: list[dict], temperature: float = 0.3
         )
         try:
             recovered_any = False
-            for recovered in service.stream_llm_api(llm_messages, temperature=temperature):
-                if not recovered:
-                    continue
-                yield ("replace" if not recovered_any and has_partial else "delta"), {
-                    "text": recovered,
-                    "recovered": True,
-                }
-                recovered_any = True
+            retry_stream = (service.stream_llm_api_cancellable(llm_messages, cancel_check, temperature=temperature)
+                            if cancel_check else service.stream_llm_api(llm_messages, temperature=temperature))
+            try:
+                for recovered in retry_stream:
+                    if not recovered:
+                        continue
+                    yield ("replace" if not recovered_any and has_partial else "delta"), {
+                        "text": recovered,
+                        "recovered": True,
+                    }
+                    recovered_any = True
+            finally:
+                retry_stream.close()
             if not recovered_any:
                 raise ValueError("LLM recovery returned empty content")
         except Exception as recovery_error:
@@ -4339,7 +4351,7 @@ def chat_message_stream():
                 return
             yield _sse("progress", {"phase": "generation"})
             provider_usage = {}
-            llm_stream = _stream_llm_with_recovery(llm_messages, temperature=0.35)
+            llm_stream = _stream_llm_with_recovery(llm_messages, temperature=0.35, cancel_check=was_cancelled)
             try:
                 for stream_event, stream_payload in llm_stream:
                     if was_cancelled():

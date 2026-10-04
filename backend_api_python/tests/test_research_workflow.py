@@ -82,12 +82,31 @@ def test_intent_cancel_closes_provider_stream(monkeypatch):
             yield '"market_analysis"}'
         finally:
             closed.append(True)
-    monkeypatch.setattr(ai_chat, 'LLMService', lambda: SimpleNamespace(stream_llm_api=lambda *a, **k: deltas()))
+    monkeypatch.setattr(ai_chat, 'LLMService', lambda: SimpleNamespace(stream_llm_api_cancellable=lambda *a, **k: deltas()))
     checks = iter([False, True])
     monkeypatch.setattr(ai_chat, 'generation_cancelled', lambda *a: next(checks, True))
     with pytest.raises(ai_chat.AgentGenerationCancelled):
         ai_chat._classify_agent_intent('分析 SPCX 风险', [], {'market': 'USStock', 'symbol': 'SPCX'}, 'zh-CN', user_id=1, request_id='request')
     assert closed
+
+
+def test_cancel_interrupts_provider_before_first_token():
+    import asyncio
+    import time
+    from app.services.llm import LLMService
+    closed = []
+    async def stalled_provider():
+        try:
+            await asyncio.sleep(10)
+            yield 'too late'
+        finally:
+            closed.append(True)
+    started = time.monotonic()
+    output = list(LLMService._consume_cancellable_async(
+        stalled_provider(), lambda: time.monotonic() - started > 0.05, poll_seconds=0.01,
+    ))
+    assert output == [] and closed
+    assert time.monotonic() - started < 1
 
 
 @pytest.mark.parametrize('config', [{'run_interval_minutes': -1}, {'trigger': {'type': 'execute_trade'}}, {'session_window': 'invalid'}, {'market': 'USStock', 'symbol': 'SPCX', 'trigger': {'type': 'price_above', 'price': 'NaN'}}])
