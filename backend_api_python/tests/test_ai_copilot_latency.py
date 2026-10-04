@@ -181,6 +181,37 @@ def test_market_tool_progress_formats_quote_time_for_readers():
     assert "1790985747" not in events[0]["detail"]
 
 
+def test_simple_quote_routes_without_a_model_call(monkeypatch):
+    class UnexpectedRouter:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("A simple read-only quote must not call the model router")
+
+    monkeypatch.setattr(ai_chat, "LLMService", UnexpectedRouter)
+    plan = ai_chat._classify_agent_intent(
+        "只读验收：请查询 SPCX 最新可用价格和数据时间，用一句话回答；不要下单。",
+        [], {"symbol": "SPCX", "market": "USStock"}, "zh-CN",
+    )
+    assert plan["source"] == "deterministic_quote"
+    assert plan["intent"] == "market_analysis"
+    assert plan["workflow"] == "research"
+    assert plan["should_execute"] is False
+    assert plan["entities"]["market_task"] == "quote"
+    assert plan["entities"]["research_domains"] == ["price"]
+    assert plan["research_request"]["answer_mode"] == "research"
+
+
+@pytest.mark.parametrize("question", [
+    "查询 SPCX 和 TSLA 最新价格并比较走势",
+    "分析 SPCX 最新价格与下单机会",
+    "按 SPCX 最新价格生成交易策略",
+    "SPCX 最新价格受哪些新闻影响？",
+])
+def test_complex_or_executable_requests_do_not_use_quote_shortcut(question):
+    assert ai_chat._quick_quote_research_plan(
+        question, [], {"symbol": "SPCX", "market": "USStock"}, "zh-CN",
+    ) is None
+
+
 def test_tool_progress_precedes_context_work(stream_harness):
     _, stream = stream_harness
     with stream({"market": "USStock", "symbol": "SPCX"}) as events:

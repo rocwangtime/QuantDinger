@@ -558,6 +558,57 @@ class AgentGenerationCancelled(Exception):
     """The user stopped a provider request before its result was usable."""
 
 
+def _quick_quote_research_plan(message: str, attachments: list[dict], context: dict,
+                               language: str) -> dict | None:
+    """Skip the model router only for an unambiguous, read-only quote lookup."""
+    text = str(message or "").strip()
+    if attachments or not text or len(text) > 180:
+        return None
+    lowered = text.lower()
+    if not any(term in lowered for term in (
+        "价格", "报价", "股价", "现价", "最新价", "多少钱", "quote", "last price", "current price",
+    )):
+        return None
+    # A negative order instruction is not an order request, but all other
+    # executable or multi-source questions still use the full intent router.
+    guarded = re.sub(
+        r"(?:不要|请勿|禁止|不得|无需|不必|别|do not|don't)\s*"
+        r"(?:下单|交易|买入|卖出|执行|place orders?|trade|buy|sell)",
+        "", lowered,
+    )
+    if any(term in guarded for term in (
+        "策略", "回测", "优化", "诊断", "分析", "机会", "扫描", "盯盘", "监控", "定时", "订阅", "提醒",
+        "新闻", "消息", "事件", "财报", "估值", "收益", "对比", "比较", "支撑", "阻力", "走势", "趋势",
+        "均线", "指标", "成交量", "波动", "风险", "仓位", "订单", "持仓", "购买力", "交易计划", "预测",
+        "建议", "为什么", "下单", "买入", "卖出", "交易", "执行", "strategy", "backtest", "monitor",
+        "schedule", "alert", "news", "compare", "trend", "analy", "trade", "order", "buy", "sell",
+    )):
+        return None
+    requested = _requested_symbol_candidates(text, limit=2)
+    if len(requested) > 1:
+        return None
+    target = requested[0] if requested else {}
+    symbol = str(target.get("symbol") or context.get("resolved_symbol") or context.get("symbol")
+                 or context.get("selected_symbol") or "").strip()
+    market = str(target.get("market") or context.get("resolved_market") or context.get("market")
+                 or context.get("selected_market") or "").strip()
+    if not symbol:
+        return None
+    return _normalize_agent_intent({
+        "intent": "market_analysis", "confidence": 95, "source": "deterministic_quote",
+        "should_execute": False, "target_type": "research", "workflow": "research",
+        "entities": {
+            "symbol": symbol, "market": market, "market_task": "quote", "metrics": ["price"],
+            "needs_live_price": True, "research_domains": ["price"],
+        },
+        "research_request": {
+            "question": text, "requirements": [{"domain": "price", "question": text,
+                                               "fields": ["latest_price", "data_time"]}],
+            "years": 1, "answer_mode": "research",
+        },
+    }, text, False, context, language)
+
+
 def _classify_agent_intent(message: str, attachments: list[dict], context: dict, language: str,
                            *, user_id: int = 0, request_id: str | None = None) -> dict:
     """Use the configured LLM as the canonical Agent intent router."""
@@ -569,6 +620,9 @@ def _classify_agent_intent(message: str, attachments: list[dict], context: dict,
                         should_execute=bool(context.get("resolved_symbol") or context.get("symbol")),
                         source="explicit_artifact_request")
         return fallback
+    quick_quote = _quick_quote_research_plan(message, attachments, context, language)
+    if quick_quote is not None:
+        return quick_quote
     system_prompt = (
         "You are the QuantDinger Agent Intent Router. Classify the user's message into a "
         "workflow plan for a global quantitative trading terminal. Return JSON only. "
@@ -3255,6 +3309,8 @@ def _enrich_context(context: dict, has_image: bool = False) -> dict:
         research_domains=research_domains,
         visualization_requested=bool(semantic_hints.get("visualization_requested")) if isinstance(semantic_hints, dict) else False,
     )
+    if agent_intent.get("source") == "deterministic_quote":
+        flags["needs_news"] = False
     normalized_domains = set(flags.get("research_domains") or [])
     query_plan_is_market_task = not normalized_domains or bool(normalized_domains.intersection({"price", "technical"}))
     needs_market_snapshot = bool(
