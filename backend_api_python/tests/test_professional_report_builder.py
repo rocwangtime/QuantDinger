@@ -282,6 +282,19 @@ def test_compact_provider_timestamp_is_normalized_before_contract_validation():
     assert news_rows[0]["as_of"] == "2026-09-07T23:00:00Z"
 
 
+def test_undated_or_invalid_news_cannot_become_fresh_report_evidence():
+    payload = _collector_payload("USStock")
+    payload["news"] = [
+        {"title": "Undated headline", "source": "search", "datetime": ""},
+        {"title": "Malformed date", "source": "search", "datetime": "yesterday maybe"},
+        {"title": "Dated headline", "source": "wire", "published_at": payload["collected_at"]},
+    ]
+    snapshot = build_evidence_snapshot(payload)
+    news = [item for item in snapshot["observations"] if item["category"] == "news"]
+    assert [item["value"]["title"] for item in news] == ["Dated headline"]
+    assert "undated_news_excluded" in snapshot["quality_flags"]
+
+
 def test_future_dated_provider_evidence_is_excluded_without_failing_report():
     payload = _collector_payload("USStock")
     payload["collected_at"] = "2099-09-08T12:00:00Z"

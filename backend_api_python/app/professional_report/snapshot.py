@@ -415,6 +415,14 @@ def build_evidence_snapshot(payload: Mapping[str, Any]) -> dict[str, Any]:
         title = item.get("title") or item.get("headline")
         if not title:
             continue
+        published_at = item.get("datetime") or item.get("published_at") or item.get("time")
+        # The generic observation fallback uses retrieval time. That is valid
+        # for a snapshot, but would falsely date an undated article as new.
+        # Undated or malformed news may be shown as a search result; it must
+        # not become attributable, time-sensitive report evidence.
+        if not published_at or _iso_timestamp(published_at, "__invalid__") == "__invalid__":
+            collector.quality_flags.add("undated_news_excluded")
+            continue
         collector.add(
             f"news.{idx}",
             {
@@ -426,7 +434,7 @@ def build_evidence_snapshot(payload: Mapping[str, Any]) -> dict[str, Any]:
             category="news",
             source=item.get("source") or item.get("publisher") or "news_provider",
             source_url=item.get("url") or item.get("link"),
-            as_of=item.get("datetime") or item.get("published_at") or item.get("time"),
+            as_of=published_at,
         )
 
     meta = payload.get("_meta") or {}

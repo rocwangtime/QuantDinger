@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 import pytest
 
 from app.services.market_data_collector import MarketDataCollector
+from app.services.search_models import SearchResponse, SearchResult
 
 
 class _FakeFinnhubClient:
@@ -44,3 +45,31 @@ def test_finnhub_unix_timestamp_is_utc_when_server_uses_asia_shanghai(monkeypatc
         time.tzset()
 
     assert result["news"][0]["datetime"] == "2026-09-08T12:00:00Z"
+
+
+def test_undated_search_result_does_not_inherit_retrieval_date():
+    collector = MarketDataCollector.__new__(MarketDataCollector)
+    collector._finnhub_client = None
+    collector._get_news_from_search = lambda *_args, **_kwargs: [{
+        "datetime": "", "headline": "SPCX update", "source": "search",
+        "url": "https://example.test/story",
+    }]
+    result = collector._get_news("USStock", "SPCX")
+    assert result["news"][0]["datetime"] == ""
+
+
+def test_search_news_preserves_unknown_publication_time(monkeypatch):
+    from app.services import search
+
+    collector = MarketDataCollector.__new__(MarketDataCollector)
+    fake_service = type("Search", (), {
+        "is_available": True,
+        "search_stock_news": lambda self, **kwargs: SearchResponse(
+            query="SPCX", provider="DuckDuckGo", results=[SearchResult(
+                title="SPCX update", snippet="Report", url="https://example.test/story",
+                source="example.test", published_date=None,
+            )],
+        ),
+    })()
+    monkeypatch.setattr(search, "get_search_service", lambda: fake_service)
+    assert collector._get_news_from_search("USStock", "SPCX")[0]["datetime"] == ""
