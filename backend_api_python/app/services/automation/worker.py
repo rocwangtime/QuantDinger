@@ -35,6 +35,36 @@ def stop():
         _thread.join(timeout=3)
 
 
+def reconcile_orders():
+    """Reconcile accepted orders and request cancellation after plan validity.
+
+    Cancellation is not a fill guarantee: a fill can race the broker's cancel
+    acknowledgement. Always reconcile the final broker result afterwards.
+    """
+    from app.services.futu_agent_execution import _load_client, reconcile_simulate_intent
+    rows = store.query("""SELECT i.user_id,i.id,i.account_ref,r.expires_at
+        FROM qd_agent_trade_intents i JOIN qd_agent_automations t ON t.token_id=i.agent_token_id
+        JOIN qd_agent_automation_runs r ON i.order_spec->>'strategy_version'=
+            'automation:'||t.id::text||':'||r.id::text
+        WHERE i.status IN ('EXECUTING','UNCERTAIN','SUBMITTED','PARTIALLY_FILLED') LIMIT 30""")
+    for row in rows:
+        if STOP.is_set():
+            return
+        try:
+            receipt = reconcile_simulate_intent(row['user_id'],row['id'])
+            if row['expires_at'] >= datetime.now(timezone.utc) or receipt['status'] not in {'SUBMITTED','PARTIALLY_FILLED'} or not receipt.get('broker_order_id'):
+                continue
+            client = _load_client(row['user_id'],row['account_ref'])
+            try:
+                if client.connect(need_quote=False):
+                    client.cancel_order(receipt['broker_order_id'])
+            finally:
+                client.disconnect()
+            reconcile_simulate_intent(row['user_id'],row['id'])
+        except Exception:
+            logger.warning('Task order reconciliation/cancellation pending; will retry')
+
+
 def loop():
     pool = ThreadPoolExecutor(max_workers=2,thread_name_prefix='AgentDecision')
     preparation = ThreadPoolExecutor(max_workers=2,thread_name_prefix='AgentContext')
@@ -147,17 +177,8 @@ def loop():
                             store.update_run(run['id'],status='expired',phase='触发上下文未保留，等待下一次新事件')
                     else:
                         pending[run['id']] = pool.submit(analyze,row,run)
-                if time.monotonic()-last_reconcile>15 and ('reconcile',0) not in warm:
-                    def reconcile():
-                        from app.services.futu_agent_execution import reconcile_simulate_intent
-                        rows = store.query("""SELECT i.user_id,i.id FROM qd_agent_trade_intents i
-                            JOIN qd_agent_automations t ON t.token_id=i.agent_token_id
-                            WHERE i.status IN ('EXECUTING','UNCERTAIN','SUBMITTED','PARTIALLY_FILLED') LIMIT 30""")
-                        for receipt in rows:
-                            if STOP.is_set():
-                                return
-                            reconcile_simulate_intent(receipt['user_id'],receipt['id'])
-                    warm[('reconcile',0)] = preparation.submit(reconcile)
+                if time.monotonic()-last_reconcile>5 and ('reconcile',0) not in warm:
+                    warm[('reconcile',0)] = preparation.submit(reconcile_orders)
                     last_reconcile = time.monotonic()
             except Exception:
                 logger.warning('Agent automation tick failed; retrying without submitting new work',exc_info=False)

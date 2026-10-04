@@ -3,6 +3,7 @@ import json
 import time
 from contextlib import contextmanager, nullcontext
 from datetime import datetime
+from datetime import timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -126,3 +127,21 @@ def test_final_broker_boundary_rejects_expiry_and_pause(guarded):
     assert not result.success and not result.submission_attempted
     assert ('Task paused' in result.message) if guarded else (result.message=='AGENT_DECISION_EXPIRED')
     trade.place_order.assert_not_called()
+
+
+@pytest.mark.parametrize('status,expired,cancel_count',[
+    ('SUBMITTED',True,1),('PARTIALLY_FILLED',True,1),('SUBMITTED',False,0),
+    ('FILLED',True,0),('UNCERTAIN',True,0),
+])
+def test_expired_pending_orders_request_cancel_then_reconcile(monkeypatch,status,expired,cancel_count):
+    from app.services.automation import worker
+    worker.STOP.clear()
+    monkeypatch.setattr(store,'query',lambda *_:[{'id':1,'user_id':1,'account_ref':'credential:7',
+        'expires_at':datetime.now(timezone.utc)+timedelta(seconds=-5 if expired else 60)}])
+    reconcile=MagicMock(return_value={'status':status,'broker_order_id':'fixture-order'})
+    monkeypatch.setattr('app.services.futu_agent_execution.reconcile_simulate_intent',reconcile)
+    client=MagicMock()
+    monkeypatch.setattr('app.services.futu_agent_execution._load_client',lambda *_:client)
+    worker.reconcile_orders()
+    assert client.cancel_order.call_count==cancel_count
+    assert reconcile.call_count==1+cancel_count
