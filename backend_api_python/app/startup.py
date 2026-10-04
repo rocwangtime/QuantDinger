@@ -255,6 +255,8 @@ def stop_trading_support_services() -> None:
 def _start_scheduler_services(*, include_celery_managed: bool = False) -> None:
     """Start long-lived schedulers that are not Celery tasks."""
     start_portfolio_monitor()
+    from app.services.automation.worker import start as start_agent_automation
+    start_agent_automation()
     start_usdt_order_worker()
     try:
         from app.services.indicator_signal_alerts import start_indicator_signal_alert_worker

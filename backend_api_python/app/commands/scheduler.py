@@ -48,6 +48,8 @@ def main() -> None:
                 )
                 shutdown.event.wait(10)
         finally:
+            from app.services.automation.worker import stop as stop_agent_automation
+            stop_agent_automation()
             if leader:
                 repository.release_process_lease(lease_key=lease_key, owner_id=worker_id)
             repository.mark_worker_stopped(worker_id)

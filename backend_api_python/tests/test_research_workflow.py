@@ -75,6 +75,9 @@ def test_news_event_rejects_undated_and_non_https_links():
 
 def test_intent_cancel_closes_provider_stream(monkeypatch):
     from app.routes import ai_chat
+    # Test the model branch regardless of whether the local/CI symbol catalog
+    # resolves SPCX and would otherwise take the deterministic research path.
+    monkeypatch.setattr(ai_chat, '_fast_read_only_research_plan', lambda *_: None)
     closed = []
     def deltas():
         try:

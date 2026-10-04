@@ -56,7 +56,7 @@ jobs:
 
       - name: Check Futu SIMULATE contracts and recovery
         working-directory: ./backend_api_python
-        run: python -m pytest tests/test_futu_*.py tests/test_execution_stream_processor.py tests/test_execution_stream_supervisor.py tests/test_live_recovery_regressions.py -m 'not integration' -q
+        run: python -m pytest tests/test_agent_automations.py tests/test_futu_*.py tests/test_execution_stream_processor.py tests/test_execution_stream_supervisor.py tests/test_live_recovery_regressions.py -m 'not integration' -q
 
       - name: Validate pinned-image Compose override
         env:
