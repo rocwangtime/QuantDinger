@@ -4,7 +4,9 @@ from __future__ import annotations
 import math
 import os
 import re
+import hashlib
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 
 def research_data_options(market: str) -> dict:
@@ -77,10 +79,14 @@ def normalize_research_config(raw: dict) -> dict:
         raise ValueError("Session windows currently support US and HK stocks only")
     config["session_window"] = window
     trigger = config.get("trigger") or {"type": "scheduled"}
-    if not isinstance(trigger, dict) or trigger.get("type") not in {"scheduled", "price_above", "price_below"}:
+    if not isinstance(trigger, dict) or trigger.get("type") not in {"scheduled", "price_above", "price_below", "news_event"}:
         raise ValueError("Invalid research trigger")
     kind = trigger["type"]
-    if kind != "scheduled":
+    if kind == "news_event":
+        if config.get("market") not in {"USStock", "HKStock"} or not config.get("symbol"):
+            raise ValueError("News triggers require one US or HK stock")
+        config["trigger"] = {"type": kind}
+    elif kind != "scheduled":
         value = float(trigger.get("price") or 0)
         if not math.isfinite(value) or value <= 0:
             raise ValueError("Trigger price must be positive and finite")
@@ -107,6 +113,8 @@ def research_gate(config: dict, *, now: datetime | None = None, candles=None) ->
     trigger = config.get("trigger") or {"type": "scheduled"}
     if trigger["type"] == "scheduled":
         return {"allowed": True, "market_clock": clock}
+    if trigger["type"] == "news_event":
+        return {"allowed": False, "needs_news": True, "reason": "News search required", "market_clock": clock}
     # Never treat a stale/unfinished candle as a currently satisfied price event.
     valid = []
     for bar in candles or []:
@@ -123,3 +131,38 @@ def research_gate(config: dict, *, now: datetime | None = None, candles=None) ->
     satisfied = price >= trigger["price"] if trigger["type"] == "price_above" else price <= trigger["price"]
     return {"allowed": satisfied, "reason": "Price condition met" if satisfied else "Price condition not met",
             "observed_price": price, "candle_time": ts, "market_clock": clock}
+
+
+def select_news_event(results: list[dict], *, symbol: str, company_name: str = "",
+                      now: datetime | None = None, created_at: datetime | None = None,
+                      seen_ids: set[str] | None = None) -> dict | None:
+    """Accept only identifiable, dated, new links as research triggers; never an order signal."""
+    now = now or datetime.now(timezone.utc)
+    floor = now.timestamp() - 24 * 3600
+    if created_at:
+        floor = max(floor, created_at.replace(tzinfo=created_at.tzinfo or timezone.utc).timestamp())
+    accepted = []
+    for item in results or []:
+        title, snippet = str(item.get("title") or ""), str(item.get("snippet") or "")
+        body = f"{title} {snippet}".lower()
+        ticker_match = re.search(rf"(?<![a-z0-9]){re.escape(symbol.lower())}(?![a-z0-9])", body)
+        name_match = len(company_name.strip()) >= 6 and company_name.lower() in body
+        if not (ticker_match or name_match):
+            continue
+        url = str(item.get("link") or item.get("url") or "")
+        parsed = urlparse(url)
+        if parsed.scheme != "https" or not parsed.netloc or len(url) > 2048:
+            continue
+        try:
+            published = datetime.fromisoformat(str(item.get("published") or "").replace("Z", "+00:00"))
+            observed = published.replace(tzinfo=published.tzinfo or timezone.utc).timestamp()
+        except ValueError:
+            continue
+        if not floor <= observed <= now.timestamp() + 300:
+            continue
+        event_id = hashlib.sha256(url.encode("utf-8")).hexdigest()
+        if event_id in (seen_ids or set()):
+            continue
+        accepted.append((observed, {"id": event_id, "title": title[:300], "source": str(item.get("source") or parsed.netloc)[:100],
+                                    "url": url, "observed_at": published.isoformat()}))
+    return max(accepted, key=lambda pair: pair[0])[1] if accepted else None

@@ -553,7 +553,12 @@ def _normalize_agent_intent(raw: dict, message: str, has_image: bool, context: d
     }
 
 
-def _classify_agent_intent(message: str, attachments: list[dict], context: dict, language: str) -> dict:
+class AgentGenerationCancelled(Exception):
+    """The user stopped a provider request before its result was usable."""
+
+
+def _classify_agent_intent(message: str, attachments: list[dict], context: dict, language: str,
+                           *, user_id: int = 0, request_id: str | None = None) -> dict:
     """Use the configured LLM as the canonical Agent intent router."""
     has_image = bool(attachments)
     fallback = _fallback_agent_intent(message, has_image, context, language)
@@ -663,7 +668,37 @@ def _classify_agent_intent(message: str, attachments: list[dict], context: dict,
         "available_research_domains": sorted(RESEARCH_DATA_DOMAINS),
     })
     try:
-        raw = LLMService().safe_call_llm(system_prompt, user_prompt, schema.copy())
+        if request_id and generation_cancelled(user_id, request_id):
+            raise AgentGenerationCancelled()
+        if request_id:
+            stream = LLMService().stream_llm_api([
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ], temperature=0.2)
+            parts = []
+            response_chars = 0
+            try:
+                for delta in stream:
+                    if generation_cancelled(user_id, request_id):
+                        raise AgentGenerationCancelled()
+                    parts.append(delta)
+                    response_chars += len(delta)
+                    if response_chars > 60000:
+                        raise ValueError("Intent response exceeded the size limit")
+            finally:
+                stream.close()
+            if generation_cancelled(user_id, request_id):
+                raise AgentGenerationCancelled()
+            raw_text = "".join(parts).strip()
+            if raw_text.startswith("```"):
+                raw_text = raw_text.split("\n", 1)[-1].removesuffix("```").strip()
+            try:
+                raw = json.loads(raw_text)
+            except json.JSONDecodeError:
+                start, end = raw_text.find("{"), raw_text.rfind("}") + 1
+                raw = json.loads(raw_text[start:end]) if start >= 0 and end > start else {}
+        else:
+            raw = LLMService().safe_call_llm(system_prompt, user_prompt, schema.copy())
         plan = _normalize_agent_intent(raw, message, has_image, context, language)
         report = str(raw.get("report") or "")
         if report.startswith("Analysis failed:") or report.startswith("Failed to parse"):
@@ -671,6 +706,8 @@ def _classify_agent_intent(message: str, attachments: list[dict], context: dict,
             fallback["error"] = "model_router_unavailable"
             return fallback
         return plan
+    except AgentGenerationCancelled:
+        raise
     except Exception as exc:
         logger.warning("Copilot intent routing failed: %s", type(exc).__name__)
         fallback["error"] = "model_router_unavailable"
@@ -901,7 +938,13 @@ def _context_manifest(context: dict, usage: dict, meta: dict) -> dict:
         "snapshot_time": selected.get("generated_at_utc"),
         "timeframes": [name for name, bars in (selected.get("timeframes") or {}).items()
                        if isinstance(bars, dict) and bars.get("available")],
-        "news_count": len(news.get("web_results") or []),
+        "news_count": len([item for item in news.get("web_results") or [] if isinstance(item, dict) and not item.get("error")]),
+        "web_search_status": (
+            "not_requested" if not news.get("search_queries") else
+            "results" if any(isinstance(item, dict) and not item.get("error") for item in news.get("web_results") or []) else
+            "no_results"
+        ),
+        "web_search_method": "QuantDinger search providers" if news.get("search_queries") else None,
         "macro_count": len(macro.get("events") or []) if isinstance(macro.get("events"), list) else 0,
         "history_count": usage.get("history_message_count") or 0,
         "memory_count": meta.get("memory_count") or 0,
@@ -3733,7 +3776,10 @@ def agent_intent():
         return jsonify({"code": 0, "msg": "Missing message", "data": None}), 400
     started_at = perf_counter()
     try:
-        plan = _classify_agent_intent(message, attachments, context, language)
+        plan = _classify_agent_intent(message, attachments, context, language,
+                                      user_id=user_id, request_id=valid_request_id(data.get("request_id")))
+    except AgentGenerationCancelled:
+        return jsonify({"code": 0, "msg": "Generation cancelled", "data": None}), 409
     finally:
         logger.info("Copilot intent timing seconds=%.4f", perf_counter() - started_at)
     return jsonify({"code": 1, "msg": "success", "data": plan,

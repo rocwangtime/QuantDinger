@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.services.research_workflow import explicit_strategy_creation, market_clock, normalize_research_config, research_gate
+from app.services.research_workflow import explicit_strategy_creation, market_clock, normalize_research_config, research_gate, select_news_event
 
 
 def utc(value):
@@ -49,6 +49,45 @@ def test_price_event_rejects_stale_unfinished_missing_and_nonfinite_data():
     assert research_gate(config, now=now, candles=[{'time': now.timestamp() - 120, 'close': 161}])['allowed']
     config['trigger']['type'] = 'price_below'
     assert research_gate(config, now=now, candles=[{'time': now.timestamp() - 120, 'close': 159}])['allowed']
+
+
+def test_news_event_requires_relevant_fresh_dated_link_and_deduplicates():
+    now = utc('2026-10-02T15:00:00')
+    config = normalize_research_config({'market': 'USStock', 'symbol': 'SPCX', 'trigger': {'type': 'news_event'}})
+    assert research_gate(config, now=now)['needs_news']
+    rows = [
+        {'title': 'SPCX announces launch', 'link': 'https://news.example.com/a', 'published': '2026-10-02T14:00:00Z'},
+        {'title': 'SPCX old story', 'link': 'https://news.example.com/old', 'published': '2026-09-29T14:00:00Z'},
+        {'title': 'Unrelated stock', 'link': 'https://news.example.com/b', 'published': '2026-10-02T14:00:00Z'},
+    ]
+    event = select_news_event(rows, symbol='SPCX', now=now)
+    assert event['url'] == rows[0]['link']
+    assert select_news_event(rows, symbol='SPCX', now=now, seen_ids={event['id']}) is None
+    assert select_news_event(rows, symbol='SPCX', now=now, created_at=utc('2026-10-02T14:30:00')) is None
+
+
+def test_news_event_rejects_undated_and_non_https_links():
+    now = utc('2026-10-02T15:00:00')
+    rows = [{'title': 'SPCX story', 'link': 'https://news.example.com/a', 'published': ''},
+            {'title': 'SPCX story', 'link': 'http://news.example.com/b', 'published': '2026-10-02T14:00:00Z'}]
+    assert select_news_event(rows, symbol='SPCX', now=now) is None
+
+
+def test_intent_cancel_closes_provider_stream(monkeypatch):
+    from app.routes import ai_chat
+    closed = []
+    def deltas():
+        try:
+            yield '{"intent":'
+            yield '"market_analysis"}'
+        finally:
+            closed.append(True)
+    monkeypatch.setattr(ai_chat, 'LLMService', lambda: SimpleNamespace(stream_llm_api=lambda *a, **k: deltas()))
+    checks = iter([False, True])
+    monkeypatch.setattr(ai_chat, 'generation_cancelled', lambda *a: next(checks, True))
+    with pytest.raises(ai_chat.AgentGenerationCancelled):
+        ai_chat._classify_agent_intent('分析 SPCX 风险', [], {'market': 'USStock', 'symbol': 'SPCX'}, 'zh-CN', user_id=1, request_id='request')
+    assert closed
 
 
 @pytest.mark.parametrize('config', [{'run_interval_minutes': -1}, {'trigger': {'type': 'execute_trade'}}, {'session_window': 'invalid'}, {'market': 'USStock', 'symbol': 'SPCX', 'trigger': {'type': 'price_above', 'price': 'NaN'}}])
