@@ -26,5 +26,13 @@ services:
       DB_POOL_MAX: "4"
       ALLOW_LOCAL_DESKTOP_BROKERS: "true"
       FUTU_PAPER_AUTOTRADE_ALLOWED: ${FUTU_PAPER_AUTOTRADE_ALLOWED:-false}
+  scheduler-worker:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      ALLOW_LOCAL_DESKTOP_BROKERS: "true"
+      FUTU_PAPER_AUTOTRADE_ALLOWED: ${FUTU_PAPER_AUTOTRADE_ALLOWED:-false}
+      FUTU_OPEND_HOST: ${FUTU_OPEND_HOST:-host.docker.internal}
+      FUTU_OPEND_PORT: ${FUTU_OPEND_PORT:-11112}
   celery-worker:
     command: ["celery", "-A", "app.celery_app:celery_app", "worker", "--loglevel=INFO", "-Q", "jobs,ai,maintenance", "--concurrency=1"]

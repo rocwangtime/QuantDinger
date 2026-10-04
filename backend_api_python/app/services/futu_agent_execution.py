@@ -113,7 +113,7 @@ def _read_owned_intent(user_id: int, intent_id: int, token_id: int | None = None
     return row
 
 
-def execute_simulate_intent(user_id: int, token: dict, intent_id: int) -> dict:
+def execute_simulate_intent(user_id: int, token: dict, intent_id: int, *, before_submit=None, deadline_at=None, submit_guard=None) -> dict:
     if not token.get("paper_only", True):
         raise IntentError("SIMULATE execution requires a paper-only Agent token", 403)
     token_id = int(token["id"])
@@ -174,6 +174,11 @@ def execute_simulate_intent(user_id: int, token: dict, intent_id: int) -> dict:
                     raise IntentError("Agent token daily notional limit", 403)
                 from app.services.agent_trade_intents import _json
 
+                if deadline_at is not None and time.time() >= deadline_at:
+                    raise IntentError("Agent decision expired before submission", 409)
+                if before_submit is not None:
+                    before_submit(cur)
+
                 remark = f"qd_agent_{intent_id}"
                 cur.execute(
                     """UPDATE qd_agent_trade_intents SET status='EXECUTING',
@@ -189,10 +194,15 @@ def execute_simulate_intent(user_id: int, token: dict, intent_id: int) -> dict:
             finally:
                 cur.close()
         try:
-            result = client.place_limit_order(
-                order["symbol"], order["side"], order["qty"], order["limit_price"],
-                order["market"], remark=remark,
-            )
+            if deadline_at is not None and time.time() >= deadline_at:
+                result = OrderResult(success=False, message="AGENT_DECISION_EXPIRED", submission_attempted=False)
+            else:
+                result = client.place_limit_order(
+                    order["symbol"], order["side"], order["qty"], order["limit_price"],
+                    order["market"], remark=remark,
+                    **({'deadline_at': deadline_at} if deadline_at is not None else {}),
+                    **({'submit_guard': submit_guard} if submit_guard is not None else {}),
+                )
         except Exception:
             result = OrderResult(success=False, message="FUTU_SUBMISSION_OUTCOME_UNKNOWN",
                                  submission_attempted=True)

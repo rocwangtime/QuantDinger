@@ -11,6 +11,7 @@ import math
 import threading
 import time
 from dataclasses import dataclass, field
+from contextlib import nullcontext
 from typing import Any, Callable, Dict, List, Optional
 
 from app.services.futu_trading.config import FutuConfig, validate_opend_host
@@ -414,6 +415,8 @@ class FutuClient:
         order_type: str,
         market_type: str = "",
         remark: str = "",
+        deadline_at: float | None = None,
+        submit_guard=None,
     ) -> OrderResult:
         submission_attempted = False
         try:
@@ -515,8 +518,11 @@ class FutuClient:
                     qty=qty,
                     limit_price=px,
                 ):
-                    submission_attempted = True
-                    ret, data = self._trade_ctx.place_order(**kwargs)
+                    with submit_guard() if submit_guard else nullcontext():
+                        if deadline_at is not None and time.time() >= deadline_at:
+                            return OrderResult(success=False, message="AGENT_DECISION_EXPIRED", submission_attempted=False)
+                        submission_attempted = True
+                        ret, data = self._trade_ctx.place_order(**kwargs)
                 if ret != ft.RET_OK:
                     code_err, msg = classify_futu_error(data)
                     return OrderResult(success=False, message=f"{code_err}:{msg}",
@@ -574,6 +580,8 @@ class FutuClient:
         price: float,
         market_type: str = "USStock",
         remark: str = "",
+        deadline_at: float | None = None,
+        submit_guard=None,
         **_: Any,
     ) -> OrderResult:
         if float(price or 0.0) <= 0:
@@ -586,6 +594,8 @@ class FutuClient:
             order_type="limit",
             market_type=market_type,
             remark=remark,
+            deadline_at=deadline_at,
+            submit_guard=submit_guard,
         )
 
     def cancel_order(self, order_id: str) -> bool:
