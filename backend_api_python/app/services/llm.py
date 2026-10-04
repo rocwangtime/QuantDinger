@@ -5,6 +5,7 @@ AtlasCloud, Custom (OpenAI-compatible), MiniMax.
 Kept separate from AnalysisService to avoid circular imports.
 """
 import json
+import asyncio
 import os
 import requests
 from typing import Dict, Any, Optional, List
@@ -1411,6 +1412,126 @@ class LLMService:
             timeout,
             provider=p,
         )
+
+    @staticmethod
+    def _consume_cancellable_async(async_stream, cancelled, poll_seconds: float = 0.2):
+        """Drive an async HTTP stream while checking a cross-worker stop marker.
+
+        Cancelling the pending ``__anext__`` also cancels connection setup and a
+        blocked first read, unlike closing a requests iterator after its next chunk.
+        """
+        loop = asyncio.new_event_loop()
+        pending = None
+        try:
+            while not cancelled():
+                pending = loop.create_task(async_stream.__anext__())
+                while not cancelled():
+                    done, _ = loop.run_until_complete(asyncio.wait({pending}, timeout=poll_seconds))
+                    if done:
+                        break
+                if cancelled():
+                    break
+                try:
+                    yield pending.result()
+                except StopAsyncIteration:
+                    return
+                pending = None
+        finally:
+            if pending and not pending.done():
+                pending.cancel()
+                loop.run_until_complete(asyncio.gather(pending, return_exceptions=True))
+            loop.run_until_complete(async_stream.aclose())
+            loop.close()
+
+    async def _stream_openai_compatible_async(self, messages, model, temperature, api_key, base_url, timeout, provider):
+        """Async OpenAI-compatible transport, used when a user can cancel generation."""
+        import aiohttp
+        from app.services.llm_selection import apply_reasoning
+
+        provider_name = provider.value
+        payload = {"model": model, "messages": messages, "temperature": temperature,
+                   "max_tokens": self.get_max_tokens(), "stream": True}
+        apply_reasoning(payload, provider_name, model, self.selection.get('reasoning_effort', 'default'))
+        if provider in {LLMProvider.OPENAI, LLMProvider.DEEPSEEK, LLMProvider.VOLCENGINE} or any(
+            host in base_url.lower() for host in ("volcengine.com", "volces.com")
+        ):
+            payload["stream_options"] = {"include_usage": True}
+        headers = {"Content-Type": "application/json"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        if "openrouter" in base_url:
+            headers.update({"HTTP-Referer": "https://quantdinger.com", "X-Title": "QuantDinger Analysis"})
+        async with aiohttp.ClientSession(trust_env=self._llm_use_system_proxy() and not self._llm_proxy_url(),
+                                         timeout=aiohttp.ClientTimeout(total=timeout)) as session:
+            async with session.post(f"{base_url}/chat/completions", headers=headers, json=payload,
+                                    proxy=self._llm_proxy_url() or None) as response:
+                if response.status >= 400:
+                    detail = (await response.text())[:500]
+                    raise LLMAPIError(f"LLM API {response.status} (model={model}): {detail}",
+                                      status_code=response.status)
+                data_lines = []
+                saw_terminal = False
+                async for raw_line in response.content:
+                    line = raw_line.decode("utf-8", errors="replace").rstrip("\r\n")
+                    if line.startswith("data:"):
+                        data_lines.append(line[5:].lstrip())
+                        continue
+                    if line and not line.lstrip().startswith(("{", "[DONE]")):
+                        continue
+                    event_data = "\n".join(data_lines) if data_lines else line.strip()
+                    data_lines = []
+                    if not event_data:
+                        continue
+                    if event_data == "[DONE]":
+                        saw_terminal = True
+                        break
+                    try:
+                        event = json.loads(event_data)
+                    except json.JSONDecodeError as exc:
+                        raise LLMAPIError("Malformed LLM SSE data", status_code=502,
+                                          error_type="malformed_stream") from exc
+                    if not isinstance(event, dict):
+                        continue
+                    if event.get("error"):
+                        raise LLMAPIError("LLM provider stream error", status_code=502,
+                                          error_type="provider_unavailable")
+                    if isinstance(event.get("usage"), dict):
+                        self._record_usage(event["usage"], event.get("model") or model, provider_name, base_url)
+                    for choice in (event.get("choices") or [])[:1]:
+                        content = (choice.get("delta") or {}).get("content")
+                        if content:
+                            yield content
+                        finish = str(choice.get("finish_reason") or "").lower()
+                        if finish in {"stop", "tool_calls", "function_call"}:
+                            saw_terminal = True
+                        elif finish == "length":
+                            raise LLMAPIError("LLM output reached token limit", status_code=400,
+                                              error_type="max_tokens_exceeded", finish_reason="length")
+                        elif finish == "content_filter":
+                            raise LLMAPIError("LLM provider content filter stopped output", status_code=400,
+                                              error_type="content_policy_violation")
+                if not saw_terminal:
+                    raise LLMAPIError("LLM stream ended without a terminal event", status_code=502,
+                                      error_type="premature_eof", retryable=True)
+
+    def stream_llm_api_cancellable(self, messages: list, cancelled, model: str = None, temperature: float = 0.7):
+        """Use cancellable HTTP for OpenAI-compatible providers, including Ark."""
+        if self.selection:
+            model = self.selection['model']
+        provider = self.provider
+        if provider in {LLMProvider.GOOGLE, LLMProvider.LITELLM}:
+            yield from self.stream_llm_api(messages, model=model, temperature=temperature)
+            return
+        api_key = (self.get_api_key(provider) or "").strip()
+        base_url = (self.get_base_url(provider) or "").strip()
+        if not self.is_configured(provider):
+            raise ValueError(f"API key not configured for provider: {provider.value}")
+        model = self._normalize_model_for_provider(model, provider)
+        self._record_usage(None, model, provider.value, base_url)
+        timeout = int(load_addon_config().get(provider.value, {}).get('timeout', 120))
+        stream = self._stream_openai_compatible_async(messages, model, temperature, api_key,
+                                                      base_url, timeout, provider)
+        yield from self._consume_cancellable_async(stream, cancelled)
     
     def _try_alternative_providers(self, messages: list, model: str, temperature: float,
                                   use_json_mode: bool, excluded_provider: LLMProvider = None) -> str:
