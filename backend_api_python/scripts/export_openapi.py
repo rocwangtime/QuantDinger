@@ -31,6 +31,27 @@ os.environ.setdefault("OPENAPI_ENABLED", "false")
 os.environ.setdefault("CACHE_ENABLED", "false")
 
 
+def normalize_http_status_names(spec: dict) -> dict:
+    """Keep Python 3.12/3.13 HTTPStatus aliases from changing generated APIs."""
+    responses = spec.get('components', {}).get('responses', {})
+    response = responses.pop('UNPROCESSABLE_CONTENT', None)
+    if response is not None:
+        response['description'] = 'Unprocessable Entity'
+        responses['UNPROCESSABLE_ENTITY'] = response
+
+    def visit(value):
+        if isinstance(value, dict):
+            if value.get('$ref') == '#/components/responses/UNPROCESSABLE_CONTENT':
+                value['$ref'] = '#/components/responses/UNPROCESSABLE_ENTITY'
+            for child in value.values():
+                visit(child)
+        elif isinstance(value, list):
+            for child in value:
+                visit(child)
+    visit(spec)
+    return spec
+
+
 def export_spec(output: Path, fmt: str) -> None:
     import yaml
     from app import create_app
@@ -46,6 +67,7 @@ def export_spec(output: Path, fmt: str) -> None:
 
     from app.openapi.register import enrich_spec
     spec_dict = enrich_spec(spec_dict)
+    spec_dict = normalize_http_status_names(spec_dict)
     # Runtime build/version metadata is intentionally excluded from the
     # committed spec. CI exports from branch refs while release images export
     # from tags, so keeping this field would make openapi.yaml drift even when

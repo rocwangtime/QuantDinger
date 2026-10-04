@@ -670,8 +670,8 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/Error'
-    UNPROCESSABLE_CONTENT:
-      description: Unprocessable Content
+    UNPROCESSABLE_ENTITY:
+      description: Unprocessable Entity
       content:
         application/json:
           schema:
@@ -900,7 +900,7 @@ paths:
     post:
       responses:
         '422':
-          $ref: '#/components/responses/UNPROCESSABLE_CONTENT'
+          $ref: '#/components/responses/UNPROCESSABLE_ENTITY'
         '200':
           description: OK
           content:
@@ -1010,7 +1010,7 @@ paths:
     post:
       responses:
         '422':
-          $ref: '#/components/responses/UNPROCESSABLE_CONTENT'
+          $ref: '#/components/responses/UNPROCESSABLE_ENTITY'
         '200':
           description: OK
           content:
@@ -1049,7 +1049,7 @@ paths:
     post:
       responses:
         '422':
-          $ref: '#/components/responses/UNPROCESSABLE_CONTENT'
+          $ref: '#/components/responses/UNPROCESSABLE_ENTITY'
         '400':
           description: Bad Request
           content:
@@ -1084,7 +1084,7 @@ paths:
     post:
       responses:
         '422':
-          $ref: '#/components/responses/UNPROCESSABLE_CONTENT'
+          $ref: '#/components/responses/UNPROCESSABLE_ENTITY'
         '400':
           description: Bad Request
           content:
@@ -5564,7 +5564,7 @@ paths:
     post:
       responses:
         '422':
-          $ref: '#/components/responses/UNPROCESSABLE_CONTENT'
+          $ref: '#/components/responses/UNPROCESSABLE_ENTITY'
         '400':
           description: Bad Request
           content:
@@ -5592,7 +5592,7 @@ paths:
     post:
       responses:
         '422':
-          $ref: '#/components/responses/UNPROCESSABLE_CONTENT'
+          $ref: '#/components/responses/UNPROCESSABLE_ENTITY'
         '200':
           description: OK
           content:
@@ -5670,7 +5670,7 @@ paths:
         required: true
       responses:
         '422':
-          $ref: '#/components/responses/UNPROCESSABLE_CONTENT'
+          $ref: '#/components/responses/UNPROCESSABLE_ENTITY'
         '400':
           description: Bad Request
           content:
@@ -8504,7 +8504,7 @@ paths:
     post:
       responses:
         '422':
-          $ref: '#/components/responses/UNPROCESSABLE_CONTENT'
+          $ref: '#/components/responses/UNPROCESSABLE_ENTITY'
         '400':
           description: Bad Request
           content:
@@ -8590,7 +8590,7 @@ paths:
     post:
       responses:
         '422':
-          $ref: '#/components/responses/UNPROCESSABLE_CONTENT'
+          $ref: '#/components/responses/UNPROCESSABLE_ENTITY'
         '400':
           description: Bad Request
           content:
@@ -8734,7 +8734,7 @@ paths:
     post:
       responses:
         '422':
-          $ref: '#/components/responses/UNPROCESSABLE_CONTENT'
+          $ref: '#/components/responses/UNPROCESSABLE_ENTITY'
         '400':
           description: Bad Request
           content:
@@ -8822,7 +8822,7 @@ paths:
     post:
       responses:
         '422':
-          $ref: '#/components/responses/UNPROCESSABLE_CONTENT'
+          $ref: '#/components/responses/UNPROCESSABLE_ENTITY'
         '400':
           description: Bad Request
           content:
@@ -8868,7 +8868,7 @@ paths:
     post:
       responses:
         '422':
-          $ref: '#/components/responses/UNPROCESSABLE_CONTENT'
+          $ref: '#/components/responses/UNPROCESSABLE_ENTITY'
         '400':
           description: Bad Request
           content:
