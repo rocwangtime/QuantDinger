@@ -33,6 +33,7 @@ _PREFIX_TAGS: list[tuple[str, str]] = [
     ("/api/dashboard", "Dashboard"),
     ("/api/settings", "Settings"),
     ("/api/portfolio", "Portfolio"),
+    ("/api/agent-automations", "Portfolio"),
     ("/api/ibkr", "IBKR"),
     ("/api/alpaca", "Alpaca"),
     ("/api/futu", "Futu"),

@@ -162,6 +162,7 @@ def run_detail(run_id):
 
 
 @blp.route('/runs/<int:run_id>/stream',methods=['GET'])
+@blp.response(200, description='Stream persisted run progress until completion', content_type='text/event-stream')
 @login_required
 def run_stream(run_id):
     user_id = g.user_id

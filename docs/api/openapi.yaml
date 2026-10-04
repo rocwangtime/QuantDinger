@@ -670,8 +670,8 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/Error'
-    UNPROCESSABLE_ENTITY:
-      description: Unprocessable Entity
+    UNPROCESSABLE_CONTENT:
+      description: Unprocessable Content
       content:
         application/json:
           schema:
@@ -900,7 +900,7 @@ paths:
     post:
       responses:
         '422':
-          $ref: '#/components/responses/UNPROCESSABLE_ENTITY'
+          $ref: '#/components/responses/UNPROCESSABLE_CONTENT'
         '200':
           description: OK
           content:
@@ -1010,7 +1010,7 @@ paths:
     post:
       responses:
         '422':
-          $ref: '#/components/responses/UNPROCESSABLE_ENTITY'
+          $ref: '#/components/responses/UNPROCESSABLE_CONTENT'
         '200':
           description: OK
           content:
@@ -1049,7 +1049,7 @@ paths:
     post:
       responses:
         '422':
-          $ref: '#/components/responses/UNPROCESSABLE_ENTITY'
+          $ref: '#/components/responses/UNPROCESSABLE_CONTENT'
         '400':
           description: Bad Request
           content:
@@ -1084,7 +1084,7 @@ paths:
     post:
       responses:
         '422':
-          $ref: '#/components/responses/UNPROCESSABLE_ENTITY'
+          $ref: '#/components/responses/UNPROCESSABLE_CONTENT'
         '400':
           description: Bad Request
           content:
@@ -3247,6 +3247,26 @@ paths:
       - AIChat
       operationId: getApiAiAgentPreflight
       x-visibility: internal
+  /api/ai/agent/models:
+    get:
+      responses:
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      tags:
+      - AIChat
+      operationId: getApiAiAgentModels
+      summary: Get Api Ai Agent Models
+      x-visibility: internal
   /api/ai/agent/intent:
     post:
       responses:
@@ -3266,6 +3286,26 @@ paths:
       tags:
       - AIChat
       operationId: postApiAiAgentIntent
+      x-visibility: internal
+  /api/ai/chat/message/cancel:
+    post:
+      responses:
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      tags:
+      - AIChat
+      operationId: postApiAiChatMessageCancel
+      summary: Post Api Ai Chat Message Cancel
       x-visibility: internal
   /api/ai/memory:
     get:
@@ -4648,6 +4688,50 @@ paths:
       - Strategy
       operationId: getApiStrategyAssets
       x-visibility: internal
+  /api/strategies/generate/stream:
+    post:
+      responses:
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      tags:
+      - Strategy
+      operationId: postApiStrategiesGenerateStream
+      summary: Post Api Strategies Generate Stream
+      x-visibility: internal
+  /api/strategies/ai-workspace/turn/stream:
+    post:
+      responses:
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      summary: Stream the IDE conversation; publish a candidate only after validation.
+      description: 'The older JSON endpoint remains available to existing clients.
+        Streaming
+
+        clients receive untrusted draft deltas and must never apply those deltas.'
+      tags:
+      - Strategy
+      operationId: postApiStrategiesAiWorkspaceTurnStream
+      x-visibility: internal
   /api/strategies/dry-run-deviation:
     get:
       responses:
@@ -5480,7 +5564,7 @@ paths:
     post:
       responses:
         '422':
-          $ref: '#/components/responses/UNPROCESSABLE_ENTITY'
+          $ref: '#/components/responses/UNPROCESSABLE_CONTENT'
         '400':
           description: Bad Request
           content:
@@ -5508,7 +5592,7 @@ paths:
     post:
       responses:
         '422':
-          $ref: '#/components/responses/UNPROCESSABLE_ENTITY'
+          $ref: '#/components/responses/UNPROCESSABLE_CONTENT'
         '200':
           description: OK
           content:
@@ -5586,7 +5670,7 @@ paths:
         required: true
       responses:
         '422':
-          $ref: '#/components/responses/UNPROCESSABLE_ENTITY'
+          $ref: '#/components/responses/UNPROCESSABLE_CONTENT'
         '400':
           description: Bad Request
           content:
@@ -6027,6 +6111,93 @@ paths:
       - Portfolio
       operationId: postApiPortfolioMonitors
       x-visibility: internal
+  /api/portfolio/monitors/{monitor_id}/runs:
+    get:
+      responses:
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      summary: Read an owned monitor's durable research runs; never exposes other
+        users' runs.
+      tags:
+      - Portfolio
+      operationId: getApiPortfolioMonitorsMonitorIdRuns
+      parameters:
+      - name: monitor_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      x-visibility: internal
+    parameters:
+    - in: path
+      name: monitor_id
+      required: true
+      schema:
+        type: integer
+        minimum: 0
+  /api/portfolio/opportunities:
+    get:
+      responses:
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      summary: List research leads owned by the caller; these are never order intents.
+      tags:
+      - Portfolio
+      operationId: getApiPortfolioOpportunities
+      x-visibility: internal
+  /api/portfolio/opportunities/{opportunity_id}:
+    patch:
+      responses:
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      summary: Mark an owned research lead reviewed, dismissed, or new again.
+      tags:
+      - Portfolio
+      operationId: patchApiPortfolioOpportunitiesOpportunityId
+      parameters:
+      - name: opportunity_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      x-visibility: internal
+    parameters:
+    - in: path
+      name: opportunity_id
+      required: true
+      schema:
+        type: integer
+        minimum: 0
   /api/portfolio/monitors/{monitor_id}:
     put:
       responses:
@@ -6262,6 +6433,305 @@ paths:
       - Portfolio
       operationId: postApiPortfolioGroupsRename
       x-visibility: internal
+  /api/agent-automations:
+    get:
+      responses:
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      tags:
+      - Portfolio
+      operationId: getApiAgentAutomations
+      summary: Get Api Agent Automations
+      x-visibility: internal
+    post:
+      responses:
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      tags:
+      - Portfolio
+      operationId: postApiAgentAutomations
+      summary: Post Api Agent Automations
+      x-visibility: internal
+  /api/agent-automations/{task_id}:
+    put:
+      responses:
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      tags:
+      - Portfolio
+      operationId: putApiAgentAutomationsTaskId
+      summary: Put Api Agent Automations Task Id
+      parameters:
+      - name: task_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      x-visibility: internal
+    parameters:
+    - in: path
+      name: task_id
+      required: true
+      schema:
+        type: integer
+        minimum: 0
+  /api/agent-automations/{task_id}/state:
+    post:
+      responses:
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      tags:
+      - Portfolio
+      operationId: postApiAgentAutomationsTaskIdState
+      summary: Post Api Agent Automations Task Id State
+      parameters:
+      - name: task_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      x-visibility: internal
+    parameters:
+    - in: path
+      name: task_id
+      required: true
+      schema:
+        type: integer
+        minimum: 0
+  /api/agent-automations/{task_id}/preview:
+    post:
+      responses:
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      tags:
+      - Portfolio
+      operationId: postApiAgentAutomationsTaskIdPreview
+      summary: Post Api Agent Automations Task Id Preview
+      parameters:
+      - name: task_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      x-visibility: internal
+    parameters:
+    - in: path
+      name: task_id
+      required: true
+      schema:
+        type: integer
+        minimum: 0
+  /api/agent-automations/{task_id}/runs:
+    get:
+      responses:
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      tags:
+      - Portfolio
+      operationId: getApiAgentAutomationsTaskIdRuns
+      summary: Get Api Agent Automations Task Id Runs
+      parameters:
+      - name: task_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      x-visibility: internal
+    parameters:
+    - in: path
+      name: task_id
+      required: true
+      schema:
+        type: integer
+        minimum: 0
+  /api/agent-automations/{task_id}/snapshot:
+    get:
+      responses:
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      tags:
+      - Portfolio
+      operationId: getApiAgentAutomationsTaskIdSnapshot
+      summary: Get Api Agent Automations Task Id Snapshot
+      parameters:
+      - name: task_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      x-visibility: internal
+    parameters:
+    - in: path
+      name: task_id
+      required: true
+      schema:
+        type: integer
+        minimum: 0
+  /api/agent-automations/runs/{run_id}/cancel:
+    post:
+      responses:
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      tags:
+      - Portfolio
+      operationId: postApiAgentAutomationsRunsRunIdCancel
+      summary: Post Api Agent Automations Runs Run Id Cancel
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      x-visibility: internal
+    parameters:
+    - in: path
+      name: run_id
+      required: true
+      schema:
+        type: integer
+        minimum: 0
+  /api/agent-automations/runs/{run_id}:
+    get:
+      responses:
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      tags:
+      - Portfolio
+      operationId: getApiAgentAutomationsRunsRunId
+      summary: Get Api Agent Automations Runs Run Id
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      x-visibility: internal
+    parameters:
+    - in: path
+      name: run_id
+      required: true
+      schema:
+        type: integer
+        minimum: 0
+  /api/agent-automations/runs/{run_id}/stream:
+    get:
+      responses:
+        '200':
+          description: Stream persisted run progress until completion
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+      tags:
+      - Portfolio
+      operationId: getApiAgentAutomationsRunsRunIdStream
+      summary: Get Api Agent Automations Runs Run Id Stream
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      x-visibility: internal
+    parameters:
+    - in: path
+      name: run_id
+      required: true
+      schema:
+        type: integer
+        minimum: 0
   /api/ibkr/status:
     get:
       responses:
@@ -8034,7 +8504,7 @@ paths:
     post:
       responses:
         '422':
-          $ref: '#/components/responses/UNPROCESSABLE_ENTITY'
+          $ref: '#/components/responses/UNPROCESSABLE_CONTENT'
         '400':
           description: Bad Request
           content:
@@ -8120,7 +8590,7 @@ paths:
     post:
       responses:
         '422':
-          $ref: '#/components/responses/UNPROCESSABLE_ENTITY'
+          $ref: '#/components/responses/UNPROCESSABLE_CONTENT'
         '400':
           description: Bad Request
           content:
@@ -8264,7 +8734,7 @@ paths:
     post:
       responses:
         '422':
-          $ref: '#/components/responses/UNPROCESSABLE_ENTITY'
+          $ref: '#/components/responses/UNPROCESSABLE_CONTENT'
         '400':
           description: Bad Request
           content:
@@ -8352,7 +8822,7 @@ paths:
     post:
       responses:
         '422':
-          $ref: '#/components/responses/UNPROCESSABLE_ENTITY'
+          $ref: '#/components/responses/UNPROCESSABLE_CONTENT'
         '400':
           description: Bad Request
           content:
@@ -8398,7 +8868,7 @@ paths:
     post:
       responses:
         '422':
-          $ref: '#/components/responses/UNPROCESSABLE_ENTITY'
+          $ref: '#/components/responses/UNPROCESSABLE_CONTENT'
         '400':
           description: Bad Request
           content:
