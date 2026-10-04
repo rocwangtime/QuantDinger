@@ -100,10 +100,12 @@ def set_task_state(task_id):
     if data['active']:
         snapshot = account_snapshot(g.user_id,config)
         if config['execution_mode']=='paper_auto':
-            from app.services.futu_trading.operator_gate import hard_switch_enabled
+            from app.services.futu_trading.operator_gate import hard_switch_enabled, state_for_user
             policy = get_policy(g.user_id,'futu',f"credential:{config['credential_id']}")
             if not hard_switch_enabled() or policy['mode']!='PAPER_AUTO':
                 raise ValueError('请先在账户页面完成此模拟账户的自动交易授权；任务不会替你修改账户授权')
+            if not any(s['enabled'] and int(s['credential_id'])==config['credential_id'] for s in state_for_user(g.user_id)):
+                raise ValueError('请在账户页面亲自启用此模拟账户的自动交易，再启用交易任务')
             if snapshot['open_orders']:
                 raise ValueError('账户存在挂单，请先处理后再启用交易任务')
             if config['manage_existing']:
