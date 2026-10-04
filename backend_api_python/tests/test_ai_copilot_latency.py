@@ -167,6 +167,20 @@ def test_research_tool_progress_exposes_only_safe_result_summaries():
     assert "untrusted text" not in str(events)
 
 
+def test_market_tool_progress_formats_quote_time_for_readers():
+    events = ai_chat._research_tool_result_events({
+        "market_snapshot": {
+            "symbol": "SPCX", "price": {"last": 158.96, "data_time": 1790985747},
+        },
+        "research_context": {"tool_executions": [
+            {"tool": "market_data.lookup", "status": "success", "output": {}},
+        ]},
+    })
+    assert "SPCX 最新价 158.96" in events[0]["detail"]
+    assert "2026-" in events[0]["detail"]
+    assert "1790985747" not in events[0]["detail"]
+
+
 def test_tool_progress_precedes_context_work(stream_harness):
     _, stream = stream_harness
     with stream({"market": "USStock", "symbol": "SPCX"}) as events:

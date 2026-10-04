@@ -1024,7 +1024,9 @@ def _research_tool_result_events(context: dict) -> list[dict]:
                 symbol = str(snapshot.get("symbol") or "")[:24]
                 detail = f"{symbol} 最新价 {last:g}".strip()
                 if price.get("data_time"):
-                    detail += f" · 数据时间 {str(price['data_time'])[:32]}"
+                    observed_at = _format_kline_time_utc(price["data_time"])
+                    if observed_at:
+                        detail += f" · 数据时间 {observed_at[:32]}"
         elif name == "technical_analysis.compute":
             detail = "所需指标已计算" if status == "success" else "部分指标缺少可用数据"
         elif name == "market_query.plan":
