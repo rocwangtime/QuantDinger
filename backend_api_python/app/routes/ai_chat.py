@@ -954,6 +954,88 @@ def _context_manifest(context: dict, usage: dict, meta: dict) -> dict:
     }
 
 
+_VISIBLE_RESEARCH_TOOLS = {
+    "market_query.plan": "行情查询计划",
+    "market_data.lookup": "市场行情",
+    "technical_analysis.compute": "技术指标",
+    "web_research.search": "网页与新闻检索",
+    "company_research.lookup": "公司资料",
+    "company_ownership.lookup": "股权资料",
+}
+
+
+def _planned_research_tool_events(message: str, intent: str, context: dict, has_image: bool) -> list[dict]:
+    """Preview the app-owned read tools, never model-internal reasoning."""
+    entities = (context.get("agent_intent") or {}).get("entities") or {}
+    flags = _research_task_flags(
+        message, intent, has_image=has_image,
+        research_domains=entities.get("research_domains") if isinstance(entities, dict) else None,
+        visualization_requested=bool(entities.get("visualization_requested")) if isinstance(entities, dict) else False,
+    )
+    names = ["market_query.plan"] if _needs_intelligence_context(message, intent) else []
+    if flags.get("needs_market_data"):
+        names.append("market_data.lookup")
+        names.append("technical_analysis.compute")
+    if flags.get("needs_news") or flags.get("needs_web_research"):
+        names.append("web_research.search")
+    if flags.get("needs_company_research") or flags.get("needs_fundamentals"):
+        names.append("company_research.lookup")
+    if flags.get("needs_ownership"):
+        names.append("company_ownership.lookup")
+    return [{"tool": name, "label": _VISIBLE_RESEARCH_TOOLS[name], "status": "planned"}
+            for name in dict.fromkeys(names)]
+
+
+def _research_tool_result_events(context: dict) -> list[dict]:
+    """Publish allowlisted tool outcomes, not prompts or unfiltered provider output."""
+    research = context.get("research_context") if isinstance(context.get("research_context"), dict) else {}
+    executions = research.get("tool_executions") or []
+    market_data = research.get("market_data") if isinstance(research.get("market_data"), dict) else {}
+    snapshot = market_data.get("primary_snapshot") or context.get("market_snapshot") or {}
+    snapshot = snapshot if isinstance(snapshot, dict) else {}
+    price = snapshot.get("price") if isinstance(snapshot.get("price"), dict) else {}
+    news = research.get("news") if isinstance(research.get("news"), dict) else {}
+    events = []
+    seen = set()
+    for item in executions:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("tool") or "")
+        if name not in _VISIBLE_RESEARCH_TOOLS or name in seen:
+            continue
+        seen.add(name)
+        status = str(item.get("status") or "unknown")
+        output = item.get("output") if isinstance(item.get("output"), dict) else {}
+        if name == "web_research.search":
+            try:
+                result_count = max(0, int(output.get("result_count") or 0))
+            except (TypeError, ValueError):
+                result_count = 0
+            detail = f"{result_count} 条可用结果"
+            titles = [str(result.get("title") or "").strip()[:100]
+                      for result in news.get("web_results") or []
+                      if isinstance(result, dict) and not result.get("error") and result.get("title")]
+            if titles:
+                detail += f" · 首条：{titles[0]}"
+        elif name == "market_data.lookup":
+            detail = "行情快照已获取" if status == "success" else "行情数据不完整或不可用"
+            last = _to_float(price.get("last"))
+            if last is not None and math.isfinite(last):
+                symbol = str(snapshot.get("symbol") or "")[:24]
+                detail = f"{symbol} 最新价 {last:g}".strip()
+                if price.get("data_time"):
+                    detail += f" · 数据时间 {str(price['data_time'])[:32]}"
+        elif name == "technical_analysis.compute":
+            detail = "所需指标已计算" if status == "success" else "部分指标缺少可用数据"
+        elif name == "market_query.plan":
+            detail = "已确定所需数据范围"
+        else:
+            detail = "资料已获取" if status in {"success", "available"} else "资料暂不可用"
+        events.append({"tool": name, "label": _VISIBLE_RESEARCH_TOOLS[name],
+                       "status": status, "detail": detail})
+    return events
+
+
 def _persisted_context_manifest(actions: list[dict]) -> dict | None:
     """Read the safe context inventory from an assistant's stored actions."""
     for action in actions:
@@ -4325,7 +4407,11 @@ def chat_message_stream():
             context["agent_intent"] = agent_plan
             context["language"] = language
             yield _sse("progress", {"phase": "context"})
+            for tool_event in _planned_research_tool_events(message, intent, context, bool(attachments)):
+                yield _sse("tool_progress", tool_event)
             context = _enrich_context(context, has_image=bool(attachments))
+            for tool_event in _research_tool_result_events(context):
+                yield _sse("tool_progress", tool_event)
 
             timings["context_ready_seconds"] = perf_counter() - started_at
             if was_cancelled():
