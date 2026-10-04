@@ -15,6 +15,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timezone
 from time import perf_counter
 from typing import Any
+from urllib.parse import urlsplit
 
 from flask import Response, current_app, g, jsonify, request, stream_with_context
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
@@ -1601,8 +1602,11 @@ def _search_intelligence(
     if candidates:
         entity = candidates[0].get("name") or candidates[0].get("symbol") or candidates[0].get("match") or ""
     domains = {str(item).strip() for item in (research_domains or [])}
+    news_requested = "news" in domains or any(
+        term in query_base.lower() for term in ("新闻", "消息", "news", "headline")
+    )
     suffix = ""
-    if "news" in domains:
+    if news_requested:
         suffix = "latest news"
     elif "filings" in domains:
         suffix = "official filings investor relations SEC"
@@ -1620,7 +1624,48 @@ def _search_intelligence(
 
     web_results: list[dict] = []
     provider_status: list[dict] = []
-    search_days = 14 if "news" in domains else (730 if "filings" in domains else 3650)
+    search_days = 14 if news_requested else (730 if "filings" in domains else 3650)
+    # An instrument-specific, dated feed is a better first source for explicit
+    # US-stock news questions than a broad web query. The feed is still
+    # single-source reference material, not independent verification.
+    primary = candidates[0] if candidates else {}
+    if news_requested and primary.get("market") == "USStock" and primary.get("symbol"):
+        try:
+            from app.data_providers.event_sources import fetch_yahoo_finance_events
+
+            now = datetime.now(timezone.utc).timestamp()
+            for item in fetch_yahoo_finance_events(str(primary["symbol"]), days=14, limit=12):
+                title = str(item.get("title") or "").strip()
+                link = str(item.get("url") or "").strip()
+                published = str(item.get("published_at") or "").strip()
+                if not title or urlsplit(link).scheme != "https" or not urlsplit(link).netloc:
+                    continue
+                try:
+                    published_at = datetime.fromisoformat(published.replace("Z", "+00:00"))
+                except ValueError:
+                    continue
+                if published_at.tzinfo is None or not now - 14 * 86400 <= published_at.timestamp() <= now + 300:
+                    continue
+                web_results.append({
+                    "title": title[:300],
+                    "snippet": str(item.get("summary") or "")[:600],
+                    "link": link,
+                    "source": "Yahoo Finance RSS",
+                    "published": published_at.isoformat(),
+                    "query": query,
+                })
+                if len(web_results) >= 8:
+                    break
+        except Exception as exc:
+            logger.info("Stock news RSS unavailable: %s", type(exc).__name__)
+        if web_results:
+            return {
+                "web_results": web_results,
+                "news_results": web_results[:5],
+                "search_queries": queries,
+                "provider_status": [{"provider": "Yahoo Finance RSS", "available": True}],
+                "language": language,
+            }
     try:
         service = get_search_service()
         provider_status = service.provider_status() if hasattr(service, "provider_status") else []

@@ -1,5 +1,7 @@
 """Regression tests for bounded Copilot memory and research orchestration."""
 
+from datetime import datetime, timedelta, timezone
+
 from app.routes import ai_chat
 from app.routes.ai_chat import (
     _build_comparison_snapshots,
@@ -558,6 +560,52 @@ def test_generic_web_research_uses_the_question_instead_of_market_news_suffix(mo
     assert calls == [("Tesla TSLA 的 CEO 是谁？ official company profile", 5, 3650)]
     assert "latest market news" not in calls[0][0]
     assert result["web_results"][0]["title"] == "Result"
+
+
+def test_explicit_us_stock_news_prefers_dated_ticker_feed(monkeypatch):
+    from app.data_providers import event_sources
+
+    now = datetime.now(timezone.utc)
+    monkeypatch.setattr(event_sources, "fetch_yahoo_finance_events", lambda *args, **kwargs: [
+        {"title": "SPCX update", "summary": "Company event", "url": "https://example.test/a",
+         "published_at": (now - timedelta(hours=2)).isoformat()},
+        {"title": "Undated SPCX rumor", "url": "https://example.test/b", "published_at": ""},
+    ])
+    monkeypatch.setattr(ai_chat, "get_search_service", lambda: (_ for _ in ()).throw(
+        AssertionError("A dated ticker feed should avoid broad web search")
+    ))
+
+    for domains in (["news"], ["technical"]):
+        result = ai_chat._search_intelligence(
+            "SPCX 最近有什么新闻？",
+            [{"market": "USStock", "symbol": "SPCX", "name": "SPCX"}],
+            "zh-CN", domains,
+        )
+        assert len(result["web_results"]) == 1
+        assert result["web_results"][0]["source"] == "Yahoo Finance RSS"
+        assert result["web_results"][0]["published"]
+
+
+def test_ticker_feed_failure_falls_back_to_web_search(monkeypatch):
+    from app.data_providers import event_sources
+
+    monkeypatch.setattr(event_sources, "fetch_yahoo_finance_events", lambda *args, **kwargs: (
+        _ for _ in ()
+    ).throw(TimeoutError("feed unavailable")))
+
+    class FakeSearch:
+        def provider_status(self):
+            return []
+
+        def search(self, *_args, **_kwargs):
+            return [{"title": "SPCX news", "link": "https://example.test/news",
+                     "published": datetime.now(timezone.utc).isoformat()}]
+
+    monkeypatch.setattr(ai_chat, "get_search_service", lambda: FakeSearch())
+    result = ai_chat._search_intelligence(
+        "SPCX 新闻", [{"market": "USStock", "symbol": "SPCX"}], "zh-CN", ["news"],
+    )
+    assert result["web_results"][0]["title"] == "SPCX news"
 
 
 def test_incomplete_comparison_is_explicit_and_blocks_ranking(monkeypatch):
