@@ -144,6 +144,7 @@ def execute(row, run):
             raise ValueError('OpenD unavailable')
         decisions = (run.get('result') or {}).get('items',[])
         checks = []
+        remaining_buy_cash = None
         for item in sorted(decisions,key=lambda d:0 if d['action'] in {'EXIT','REDUCE'} else 1):
             if store.cancelled(run) or utcnow()>=run['expires_at']:
                 raise TimeoutError('Plan expired or task was paused')
@@ -153,12 +154,19 @@ def execute(row, run):
             broker_qty = sum(float(p['quantity']) for p in account['positions'] if p['symbol']==item['symbol'] and p['side']=='long')
             open_symbols = {o['symbol'] for o in account['open_orders']}
             # Include unreconciled accepted orders even if the broker's list lags.
-            open_symbols |= {r['order_spec']['symbol'] for r in store.receipts(row) if r['status'] in {'SUBMITTED','PARTIALLY_FILLED','EXECUTING','UNCERTAIN'}}
+            outstanding = [r for r in store.receipts(row) if r['status'] in {'SUBMITTED','PARTIALLY_FILLED','EXECUTING','UNCERTAIN'}]
+            open_symbols |= {r['order_spec']['symbol'] for r in outstanding}
             exposure = sum(max(0,float(p.get('marketValue') or 0)) for p in account['positions'])
             reserved = sum(max(0,float(o.get('qty') or 0)-float(o.get('filled') or 0))*float(o.get('price') or 0) for o in account['open_orders'] if o['side']=='buy')
+            broker_ids = {str(o['order_id']) for o in account['open_orders']}
+            reserved += sum(max(0,float(r['order_spec']['qty'])-float(r.get('filled_qty') or 0))*float(r['order_spec']['limit_price'])
+                            for r in outstanding if r['order_spec']['side']=='buy' and str(r.get('broker_order_id')) not in broker_ids)
             funds = account['funds']
             cash = min(float(funds.get('cash') or 0),float(funds.get('power') or 0),
                        max(0,config['budget']*(1-config['reserve_ratio'])-exposure-reserved))
+            if item['action']=='BUY':
+                remaining_buy_cash = cash if remaining_buy_cash is None else min(cash,remaining_buy_cash)
+                cash = remaining_buy_cash
             quote = client.get_simulate_execution_quote(item['symbol'])
             if not quote.get('simulate_execution_eligible'):
                 raise ValueError('Fresh regular-session SIMULATE quote is unavailable')
@@ -190,6 +198,10 @@ def execute(row, run):
                                     deadline_at=run['expires_at'].timestamp(),
                                     submit_guard=lambda: store.submission_guard(row,run))
             checks.append({'symbol':item['symbol'],'status':outcome['status'],'intent_id':intent['id']})
+            if order['side']=='buy':
+                # Broker positions/cash may lag even an immediate fill. Do not
+                # reuse the same cash across multiple symbols in this run.
+                remaining_buy_cash = max(0,remaining_buy_cash-order['qty']*order['limit_price'])
             if outcome['status'] in {'UNCERTAIN','EXECUTING','FAILED','REJECTED'}:
                 raise ValueError('订单未确认成功，已停止本次后续提交，请查看成交记录')
         store.update_run(run['id'],status='completed',phase='计划已检查，成交状态持续对账',
