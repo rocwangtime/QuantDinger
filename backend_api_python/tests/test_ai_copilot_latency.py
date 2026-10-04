@@ -212,6 +212,38 @@ def test_complex_or_executable_requests_do_not_use_quote_shortcut(question):
     ) is None
 
 
+def test_single_symbol_read_only_research_skips_model_router(monkeypatch):
+    class UnexpectedRouter:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("Read-only research must not wait for the model router")
+
+    monkeypatch.setattr(ai_chat, "LLMService", UnexpectedRouter)
+    plan = ai_chat._classify_agent_intent(
+        "用最新可获得行情研究 TSLA 下一交易日的买入、减仓和观望机会。先确认交易日历与数据截止时间，"
+        "再给触发、失效条件和需要继续跟踪的证据；不要下单。",
+        [], {"symbol": "TSLA", "market": "USStock"}, "zh-CN",
+    )
+    assert plan["source"] == "deterministic_research"
+    assert plan["workflow"] == "research"
+    assert plan["should_execute"] is False
+    assert plan["entities"]["symbol"] == "TSLA"
+    assert {"price", "technical"}.issubset(plan["entities"]["research_domains"])
+
+
+@pytest.mark.parametrize("question", [
+    "帮我为 TSLA 生成可回测策略",
+    "给 TSLA 创建一个定时分析任务",
+    "请直接买入 TSLA 一股",
+    "分析 TSLA 行情并帮我直接买入一股",
+    "分析 TSLA 和 NVDA 的走势",
+    "苹果公司的最新财报如何？",
+])
+def test_fast_research_keeps_actions_and_ambiguous_targets_on_validated_router(question):
+    assert ai_chat._fast_read_only_research_plan(
+        question, [], {"symbol": "TSLA", "market": "USStock"}, "zh-CN",
+    ) is None
+
+
 def test_tool_progress_precedes_context_work(stream_harness):
     _, stream = stream_harness
     with stream({"market": "USStock", "symbol": "SPCX"}) as events:

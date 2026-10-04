@@ -609,6 +609,73 @@ def _quick_quote_research_plan(message: str, attachments: list[dict], context: d
     }, text, False, context, language)
 
 
+def _fast_read_only_research_plan(message: str, attachments: list[dict], context: dict,
+                                  language: str) -> dict | None:
+    """Route an explicit single-symbol research question without a second LLM turn.
+
+    Ambiguous, multi-symbol and executable requests retain the validated model
+    router. This plan can only answer; it cannot authorize a workflow action.
+    """
+    text = str(message or "").strip()
+    if attachments or not text or len(text) > 700:
+        return None
+    lowered = text.lower()
+    if not any(term in lowered for term in (
+        "分析", "研究", "行情", "价格", "风险", "机会", "新闻", "走势", "交易日",
+        "减仓", "观望", "数据", "analy", "research", "price", "quote", "trend",
+        "risk", "news", "opportunity", "next trading day",
+    )):
+        return None
+    # A denial is a safety constraint, not an instruction to place an order.
+    guarded = re.sub(
+        r"(?:不要|请勿|禁止|不得|无需|不必|别|不|do not|don't|never)\s*"
+        r"(?:自动)?(?:下单|交易|买入|卖出|执行|place orders?|trade|buy|sell)",
+        "", lowered,
+    )
+    if any(term in guarded for term in (
+        "策略", "指标", "回测", "定时", "监控", "盯盘", "任务", "提醒", "代码", "脚本",
+        "下单", "自动交易", "执行交易", "提交订单", "取消订单", "strategy", "indicator",
+        "backtest", "schedule", "monitor", "alert", "trading bot", "place order",
+        "execute trade", "submit order", "cancel order", "script",
+    )):
+        return None
+    if re.search(r"(?:帮我|替我|直接|立即|现在|自动|执行|提交).{0,12}(?:买入|卖出|减仓|平仓|开仓|buy|sell)", guarded):
+        return None
+    if guarded.startswith(("买入", "卖出", "执行", "交易", "buy ", "sell ", "trade ")):
+        return None
+    requested = _requested_symbol_candidates(text, limit=2)
+    if len(requested) > 1:
+        return None
+    if requested:
+        target = requested[0]
+    elif any(term in lowered for term in (
+        "当前标的", "这只股票", "这只股", "该股", "这个标的", "当前股票",
+        "selected symbol", "this stock", "this symbol",
+    )):
+        target = {"symbol": context.get("resolved_symbol") or context.get("symbol"),
+                  "market": context.get("resolved_market") or context.get("market")}
+    else:
+        return None
+    symbol = str(target.get("symbol") or "").strip()
+    market = str(target.get("market") or context.get("market") or "").strip()
+    if not symbol or not market:
+        return None
+    domains = _heuristic_research_domains(text, "market_analysis")
+    if any(term in lowered for term in ("行情", "最新", "交易日", "买入", "减仓", "观望", "机会", "market", "next trading day")):
+        domains = list(dict.fromkeys(["price", "technical", *domains]))
+    if not domains:
+        domains = ["price", "technical"]
+    requirements = [{"domain": domain, "question": text, "fields": []} for domain in domains]
+    return _normalize_agent_intent({
+        "intent": "market_analysis", "confidence": 90, "source": "deterministic_research",
+        "should_execute": False, "target_type": "research", "workflow": "research",
+        "entities": {"symbol": symbol, "market": market, "research_domains": domains,
+                     "needs_live_price": "price" in domains},
+        "research_request": {"question": text, "requirements": requirements,
+                             "years": 1, "answer_mode": "research"},
+    }, text, False, context, language)
+
+
 def _classify_agent_intent(message: str, attachments: list[dict], context: dict, language: str,
                            *, user_id: int = 0, request_id: str | None = None) -> dict:
     """Use the configured LLM as the canonical Agent intent router."""
@@ -623,6 +690,9 @@ def _classify_agent_intent(message: str, attachments: list[dict], context: dict,
     quick_quote = _quick_quote_research_plan(message, attachments, context, language)
     if quick_quote is not None:
         return quick_quote
+    fast_research = _fast_read_only_research_plan(message, attachments, context, language)
+    if fast_research is not None:
+        return fast_research
     system_prompt = (
         "You are the QuantDinger Agent Intent Router. Classify the user's message into a "
         "workflow plan for a global quantitative trading terminal. Return JSON only. "
