@@ -145,3 +145,34 @@ def test_expired_pending_orders_request_cancel_then_reconcile(monkeypatch,status
     worker.reconcile_orders()
     assert client.cancel_order.call_count==cancel_count
     assert reconcile.call_count==1+cancel_count
+
+
+def test_multi_symbol_run_cannot_reuse_cash_when_broker_snapshot_lags(monkeypatch):
+    from app.services.automation import runner
+    cfg=config(symbols=['AAPL','TSLA'],execution_mode='paper_auto',max_weight=.5)
+    row={'id':1,'token_id':4,'user_id':1,'config':cfg,'revision':1,'state':{}}
+    run={'id':3,'preview':False,'revision':1,'expires_at':datetime.now(timezone.utc)+timedelta(seconds=60),
+         'result':{'items':[decision(target_weight=.4),decision(symbol='TSLA',target_weight=.4)]}}
+    monkeypatch.setattr(store,'query',lambda *_a,**_k:{'id':4,'paper_only':True})
+    monkeypatch.setattr(store,'cancelled',lambda _:False)
+    monkeypatch.setattr(store,'receipts',lambda _:[])
+    monkeypatch.setattr(store,'task',lambda *_:row)
+    monkeypatch.setattr(store,'owned_quantities',lambda _:{})
+    updates=[]
+    monkeypatch.setattr(store,'update_run',lambda _id,**fields:updates.append(fields))
+    # Simulate a lagging broker snapshot: it never includes either new fill.
+    monkeypatch.setattr(runner,'account_snapshot',lambda *_:{'funds':{'cash':1000,'power':1000},
+        'positions':[{'symbol':'QQQ','side':'long','quantity':4,'marketValue':400}], 'open_orders':[]})
+    client=MagicMock()
+    client.get_simulate_execution_quote.return_value={'simulate_execution_eligible':True,'price':100}
+    monkeypatch.setattr('app.services.futu_agent_execution._load_client',lambda *_:client)
+    orders=[]
+    def submit(_user,_token,order,_key):
+        orders.append(order)
+        return {'id':len(orders)}
+    monkeypatch.setattr('app.services.agent_trade_intents.submit_intent',submit)
+    monkeypatch.setattr('app.services.futu_agent_execution.execute_simulate_intent',lambda *_a,**_k:{'status':'FILLED'})
+    runner.execute(row,run)
+    assert [o['qty'] for o in orders]==[4,1]
+    assert sum(o['qty']*o['limit_price'] for o in orders)+400 <= 900
+    assert updates[-1]['status']=='completed'
