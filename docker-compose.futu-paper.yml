@@ -30,6 +30,8 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
+      # Two decision threads can each hold both account and task submit locks.
+      DB_POOL_MAX: "8"
       ALLOW_LOCAL_DESKTOP_BROKERS: "true"
       FUTU_PAPER_AUTOTRADE_ALLOWED: ${FUTU_PAPER_AUTOTRADE_ALLOWED:-false}
       FUTU_OPEND_HOST: ${FUTU_OPEND_HOST:-host.docker.internal}
