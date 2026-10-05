@@ -35,6 +35,9 @@ def refresh_members(service, candidates, manifest, user_id, strategy_id, now, ex
             if item.get('market') == 'Crypto':
                 spec = parse_instrument(f"Crypto:{item['symbol']}@{exchange_id}:{item.get('market_type') or 'spot'}")
                 item.update(exchange_id=exchange_id, key=spec.key)
+            elif exchange_id == 'futu' and item.get('market') in {'HKStock', 'USStock'}:
+                # Keep the DSL key stable after a dynamic universe refresh.
+                item['exchange_id'] = exchange_id
 
 
 def positions_by_symbol(executor, strategy_id, candidates, strategy):

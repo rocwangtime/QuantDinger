@@ -527,13 +527,7 @@ class TradingExecutor:
                     raise RuntimeError("strategyV2.futuCredentialMarketMismatch")
             if execution_mode == "live" and account_exchange:
                 for member in candidates:
-                    member_market = str(member.get("market") or "")
-                    if member_market == "Crypto" or (
-                        account_exchange == "futu"
-                        and member_market in {"HKStock", "USStock"}
-                    ):
-                        member["exchange_id"] = account_exchange
-                        member["key"] = _member_key(member)
+                    _bind_live_candidate_exchange(member, account_exchange)
                 from app.services.pending_orders.live_order_support import (
                     attach_instrument_product_contracts,
                 )
@@ -2736,6 +2730,18 @@ def _member_key(member: dict[str, Any]) -> str:
     elif market_type:
         suffix = f"@{market_type}"
     return f"{market}:{symbol}{suffix}"
+
+
+def _bind_live_candidate_exchange(member: dict[str, Any], exchange_id: str) -> None:
+    """Bind execution venue without renaming a stock strategy's instrument."""
+    market = str(member.get("market") or "")
+    if market == "Crypto":
+        member["exchange_id"] = exchange_id
+        member["key"] = _member_key(member)
+    elif exchange_id == "futu" and market in {"HKStock", "USStock"}:
+        # The strategy DSL addresses stocks by their declared key (e.g.
+        # USStock:SPY). Intents, bars and quote prices must keep that key.
+        member["exchange_id"] = exchange_id
 
 
 def _latest_frame_timestamp(
