@@ -120,7 +120,9 @@ def account_scope(user_id: int, order: dict[str, Any]) -> tuple[str, str]:
     if config.acc_id <= 0 or config.trade_env != "demo" or config.trade_market not in {"US", "HK"}:
         raise IntentError("An explicitly selected stock SIMULATE account is required", 403)
     expected = "USStock" if config.trade_market == "US" else "HKStock"
-    if order["market"] != expected:
+    # Policy and account-data reads identify the saved account without an order.
+    # Actual order proposals always carry a market and must still match it.
+    if order.get("market") is not None and order["market"] != expected:
         raise IntentError("Futu proposal market does not match the saved account", 403)
     return "futu", f"credential:{credential_id}"
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 
@@ -36,6 +37,21 @@ def test_futu_is_only_a_stock_paper_limit_proposal(monkeypatch):
         symbol="00700.HK", qty=100,
     ))
     assert hk["market"] == "HKStock"
+
+
+def test_futu_account_scope_supports_policy_reads_but_rejects_wrong_order_market(monkeypatch):
+    from app.services import exchange_execution
+    from app.services.futu_trading import config as futu_config
+
+    monkeypatch.setattr(exchange_execution, "resolve_exchange_config", lambda *_a, **_kw: {"exchange_id": "futu"})
+    monkeypatch.setattr(futu_config, "config_from_exchange_config", lambda _cfg: SimpleNamespace(
+        acc_id=42, trade_env="demo", trade_market="US",
+    ))
+
+    assert intents.account_scope(1, {"broker": "futu", "credential_id": 2}) == ("futu", "credential:2")
+    assert intents.account_scope(1, {"broker": "futu", "credential_id": 2, "market": "USStock"}) == ("futu", "credential:2")
+    with pytest.raises(intents.IntentError, match="does not match"):
+        intents.account_scope(1, {"broker": "futu", "credential_id": 2, "market": "HKStock"})
 
 
 def test_real_modes_cannot_be_configured_even_with_confirmation():
