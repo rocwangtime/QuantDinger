@@ -4,7 +4,7 @@ from copy import deepcopy
 
 import pytest
 
-from app.commands.futu_paper_acceptance import AcceptanceError, verify_roundtrip
+from app.commands.futu_paper_acceptance import AcceptanceError, _database_rows, verify_roundtrip
 
 
 @pytest.fixture
@@ -99,3 +99,44 @@ def test_nonflat_platform_position_is_not_accepted(evidence):
     evidence["platform_positions"].append({"symbol": "SPY", "size": 1})
     with pytest.raises(AcceptanceError, match="PLATFORM_POSITION_NOT_FLAT"):
         verify_roundtrip(**evidence)
+
+
+def test_database_acceptance_scopes_orders_and_fills_to_latest_run(monkeypatch):
+    from app.utils import db as db_module
+
+    class Cursor:
+        def __init__(self):
+            self.calls = []
+
+        def execute(self, sql, params):
+            self.calls.append((sql, params))
+
+        def fetchone(self):
+            return {"id": 7} if len(self.calls) == 2 else {"id": 3}
+
+        def fetchall(self):
+            return []
+
+        def close(self):
+            pass
+
+    class Connection:
+        def __init__(self):
+            self.cur = Cursor()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def cursor(self):
+            return self.cur
+
+    connection = Connection()
+    monkeypatch.setattr(db_module, "get_db_connection", lambda: connection)
+
+    _database_rows(3)
+
+    assert connection.cur.calls[2][1] == (3, 7)
+    assert connection.cur.calls[3][1] == (3, 3, 7)
