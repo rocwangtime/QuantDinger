@@ -3355,6 +3355,11 @@ class PendingOrderWorker(
             self._mark_failed(order_id=order_id, error="futu_credential_market_mismatch")
             _notify_live_best_effort(status="failed", error="futu_credential_market_mismatch")
             return
+        credential_id = int(exchange_config.get("_operator_credential_id") or 0)
+        if credential_id <= 0:
+            self._mark_failed(order_id=order_id, error="futu_saved_credential_required")
+            _notify_live_best_effort(status="failed", error="futu_saved_credential_required")
+            return
         client_remark = make_client_order_id(exchange_id="futu", strategy_id=strategy_id, order_id=order_id)
         submission_prepared = False
 
@@ -3369,6 +3374,7 @@ class PendingOrderWorker(
                 exchange_id="futu",
                 market_type=mc,
                 client_order_id=client_remark,
+                credential_id=credential_id,
             )
             submission_prepared = True
             # Idempotency: if a prior attempt already placed this remark, reuse it.

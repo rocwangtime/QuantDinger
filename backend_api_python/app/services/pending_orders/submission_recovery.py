@@ -74,6 +74,7 @@ class SubmissionRecoveryMixin:
         exchange_id: str,
         market_type: str,
         client_order_id: str,
+        credential_id: int | None = None,
     ) -> None:
         """Persist the broker identity before the external submit call."""
         with get_db_connection() as db:
@@ -82,6 +83,7 @@ class SubmissionRecoveryMixin:
                 """
                 UPDATE pending_orders
                 SET exchange_id = %s,
+                    credential_id = COALESCE(%s, credential_id),
                     client_order_id = %s,
                     dispatch_note = 'submission_prepared',
                     updated_at = NOW()
@@ -89,6 +91,7 @@ class SubmissionRecoveryMixin:
                 """,
                 (
                     str(exchange_id or ""),
+                    credential_id,
                     str(client_order_id or ""),
                     int(order_id),
                 ),
