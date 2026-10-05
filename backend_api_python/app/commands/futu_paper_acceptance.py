@@ -132,20 +132,26 @@ def _database_rows(strategy_id: int) -> tuple[dict, list[dict], list[dict], list
             )
             strategy = dict(cur.fetchone() or {})
             cur.execute(
+                "SELECT id FROM strategy_runs WHERE strategy_id = %s ORDER BY id DESC LIMIT 1",
+                (strategy_id,),
+            )
+            run_id = int((cur.fetchone() or {}).get("id") or 0)
+            cur.execute(
                 """SELECT p.id, p.symbol, p.signal_type, p.amount, p.filled,
                           p.avg_price, p.status, p.exchange_id, p.exchange_order_id, p.credential_id
                    FROM pending_orders p
-                   WHERE p.strategy_id = %s
+                   WHERE p.strategy_id = %s AND p.strategy_run_id = %s
                    ORDER BY p.id""",
-                (strategy_id,),
+                (strategy_id, run_id),
             )
             orders = [dict(row) for row in (cur.fetchall() or [])]
             cur.execute(
                 """SELECT id, pending_order_id, exchange_order_id, type, amount, price
                    FROM qd_strategy_trades
-                   WHERE strategy_id = %s
+                   WHERE strategy_id = %s AND pending_order_id IN
+                       (SELECT id FROM pending_orders WHERE strategy_id = %s AND strategy_run_id = %s)
                    ORDER BY id""",
-                (strategy_id,),
+                (strategy_id, strategy_id, run_id),
             )
             trades = [dict(row) for row in (cur.fetchall() or [])]
             cur.execute(
