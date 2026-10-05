@@ -29,7 +29,7 @@ def test_futu_worker_rejects_wrong_market_or_non_explicit_limit_orders(
         payload={"order_type": order_type, "limit_price": limit_price, "ref_price": 100},
         client=client,
         strategy_id=1,
-        exchange_config={"exchange_id": "futu"},
+        exchange_config={"exchange_id": "futu", "_operator_credential_id": 7},
         market_category=market_category,
         _notify_live_best_effort=notify,
         _console_print=MagicMock(),
@@ -40,6 +40,29 @@ def test_futu_worker_rejects_wrong_market_or_non_explicit_limit_orders(
     client.find_order_by_remark.assert_not_called()
     client.place_limit_order.assert_not_called()
     client.place_market_order.assert_not_called()
+
+
+def test_futu_worker_requires_saved_operator_credential_before_preparing_order():
+    worker = PendingOrderWorker.__new__(PendingOrderWorker)
+    worker._mark_failed = MagicMock()
+    worker._prepare_submission = MagicMock()
+    client = MagicMock()
+
+    worker._execute_futu_order(
+        order_id=11,
+        order_row={"symbol": "US.SPY", "signal_type": "open_long", "amount": 1},
+        payload={"order_type": "limit", "limit_price": 100},
+        client=client,
+        strategy_id=1,
+        exchange_config={"exchange_id": "futu", "trade_market": "US"},
+        market_category="USStock",
+        _notify_live_best_effort=MagicMock(),
+        _console_print=MagicMock(),
+    )
+
+    worker._mark_failed.assert_called_once_with(order_id=11, error="futu_saved_credential_required")
+    worker._prepare_submission.assert_not_called()
+    client.place_limit_order.assert_not_called()
 
 
 class _FakeFutuClient:
@@ -263,7 +286,7 @@ def test_immediate_futu_fill_waits_for_durable_reconciliation(monkeypatch):
         },
         client=client,
         strategy_id=1,
-        exchange_config={"exchange_id": "futu"},
+        exchange_config={"exchange_id": "futu", "_operator_credential_id": 7},
         market_category="USStock",
         _notify_live_best_effort=MagicMock(),
         _console_print=MagicMock(),
@@ -303,7 +326,7 @@ def test_immediate_futu_fill_records_broker_price_without_advancing_pending_snap
         payload={"signal_type": "open_long", "symbol": "US.SPY", "amount": 1, "order_type": "limit", "limit_price": 100},
         client=client,
         strategy_id=1,
-        exchange_config={"exchange_id": "futu"},
+        exchange_config={"exchange_id": "futu", "_operator_credential_id": 7},
         market_category="USStock",
         _notify_live_best_effort=MagicMock(),
         _console_print=MagicMock(),
@@ -337,7 +360,7 @@ def test_ambiguous_futu_submit_keeps_durable_remark_for_reconciliation(monkeypat
                  "order_type": "limit", "limit_price": 100},
         client=client,
         strategy_id=1,
-        exchange_config={"exchange_id": "futu"},
+        exchange_config={"exchange_id": "futu", "_operator_credential_id": 7},
         market_category="USStock",
         _notify_live_best_effort=MagicMock(),
         _console_print=MagicMock(),
@@ -345,7 +368,7 @@ def test_ambiguous_futu_submit_keeps_durable_remark_for_reconciliation(monkeypat
 
     worker._prepare_submission.assert_called_once_with(
         order_id=27, exchange_id="futu", market_type="USStock",
-        client_order_id="qd_1_27",
+        client_order_id="qd_1_27", credential_id=7,
     )
     worker._mark_submit_unknown.assert_called_once()
     worker._mark_failed.assert_not_called()

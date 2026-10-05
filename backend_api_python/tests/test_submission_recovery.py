@@ -63,8 +63,24 @@ def test_submission_identity_is_committed_before_binding(monkeypatch):
     )
 
     assert "status = 'processing'" in calls[0][0]
-    assert calls[0][1] == ("alpaca", "qd_2_17", 17)
+    assert calls[0][1] == ("alpaca", None, "qd_2_17", 17)
     assert recovery.bindings[0]["client_order_id"] == "qd_2_17"
+
+
+def test_futu_submission_credential_is_committed_before_broker_submit(monkeypatch):
+    calls = []
+    monkeypatch.setattr(recovery_module, "get_db_connection", lambda: FakeConnection(calls))
+
+    RecoveryHarness()._prepare_submission(
+        order_id=19,
+        exchange_id="futu",
+        market_type="USStock",
+        client_order_id="qd_2_19",
+        credential_id=7,
+    )
+
+    assert "credential_id = COALESCE" in calls[0][0]
+    assert calls[0][1] == ("futu", 7, "qd_2_19", 19)
 
 
 def test_submission_is_not_sent_when_processing_lease_was_lost(monkeypatch):
