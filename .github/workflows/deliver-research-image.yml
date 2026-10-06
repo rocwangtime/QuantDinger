@@ -1,0 +1,65 @@
+name: Deliver verified research backend image
+
+# A network fallback for this deployment. The temporary SSH key is restricted
+# server-side to writing one staging archive and is removed after delivery.
+on:
+  push:
+    branches: [codex/research-execution-p0-p1]
+    paths: [.github/workflows/deliver-research-image.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: deliver-research-image
+  cancel-in-progress: false
+
+jobs:
+  deliver:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      IMAGE_REF: ghcr.io/rocwangtime/quantdinger-backend@sha256:71006d6a58d366606602852548b18dfb9d802536d1aa56ca40608733f9710de9
+      IMAGE_TAG: ghcr.io/rocwangtime/quantdinger-backend:sha-2a047d0
+      EXPECTED_REVISION: 2a047d0db09ce1eb1eafe7e1c5f92b1083c3e229
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@v4.5.2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download and verify published amd64 image
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker pull --platform linux/amd64 "$IMAGE_REF"
+          test "$(docker image inspect --format '{{.Architecture}}' "$IMAGE_REF")" = amd64
+          test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$IMAGE_REF")" = "$EXPECTED_REVISION"
+          docker tag "$IMAGE_REF" "$IMAGE_TAG"
+          docker save "$IMAGE_TAG" | gzip -1 > "$RUNNER_TEMP/backend-image.tar.gz"
+          sha256sum "$RUNNER_TEMP/backend-image.tar.gz"
+
+      - name: Deliver staging archive over restricted SSH
+        shell: bash
+        env:
+          UPLOAD_KEY: ${{ secrets.RESEARCH_IMAGE_UPLOAD_KEY }}
+          KNOWN_HOSTS: ${{ secrets.RESEARCH_IMAGE_UPLOAD_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          umask 077
+          test -n "$UPLOAD_KEY"
+          test -n "$KNOWN_HOSTS"
+          key_path="$RUNNER_TEMP/image-upload-key"
+          hosts_path="$RUNNER_TEMP/image-upload-known-hosts"
+          trap 'rm -f "$key_path" "$hosts_path"' EXIT
+          printf '%s\n' "$UPLOAD_KEY" > "$key_path"
+          printf '%s\n' "$KNOWN_HOSTS" > "$hosts_path"
+          ssh -T -i "$key_path" -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$hosts_path" -o ConnectTimeout=15 \
+            -o ServerAliveInterval=30 -o ServerAliveCountMax=3 \
+            ubuntu@106.55.138.232 upload-backend-2a047d0 < "$RUNNER_TEMP/backend-image.tar.gz"
+          echo 'Verified image archive delivered to the fixed server staging path.'
