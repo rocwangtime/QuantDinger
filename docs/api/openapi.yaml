@@ -659,6 +659,114 @@ components:
         data:
           $ref: '#/components/schemas/AutomationDashboardData'
       additionalProperties: false
+    AutomationReadinessData:
+      type: object
+      properties:
+        checked_at:
+          type: number
+        task_revision:
+          type: integer
+        configuration_ready:
+          type: boolean
+          description: Configured prerequisites only; never permission to submit an
+            order
+        model:
+          type: object
+          additionalProperties: {}
+        checks:
+          type: array
+          items:
+            type: object
+            description: key, status (pass/blocked/wait/unknown), code and optional
+              details
+            additionalProperties: {}
+        decision_budget:
+          type: object
+          additionalProperties: {}
+        account_limits:
+          type: object
+          additionalProperties: {}
+          nullable: true
+        scheduler:
+          type: object
+          additionalProperties: {}
+        connection_check:
+          type: object
+          description: Manual read-only probe, same revision, at most 90 seconds old
+          additionalProperties: {}
+          nullable: true
+      additionalProperties: false
+    AutomationReadinessEnvelope:
+      type: object
+      properties:
+        code:
+          type: integer
+        msg:
+          type: string
+        data:
+          $ref: '#/components/schemas/AutomationReadinessData'
+      additionalProperties: false
+    AutomationReviewData:
+      type: object
+      properties:
+        schema_version:
+          type: string
+        generated_at:
+          type: number
+        task:
+          type: object
+          additionalProperties: {}
+        configuration:
+          type: object
+          additionalProperties: {}
+        window:
+          type: object
+          additionalProperties: {}
+        coverage:
+          type: object
+          description: Truncation flags; at most 1000 recent runs, 10000 samples and
+            1000 updated task orders
+          additionalProperties: {}
+        decisions:
+          type: object
+          additionalProperties: {}
+        model_usage:
+          type: object
+          additionalProperties: {}
+        observed_sessions:
+          type: array
+          items:
+            type: object
+            description: First/last observed equity and mark-to-mark change, not full
+              trading-session returns
+            additionalProperties: {}
+        latest_valid_task_performance:
+          type: object
+          additionalProperties: {}
+          nullable: true
+        current_risk:
+          type: object
+          additionalProperties: {}
+        orders:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+        limitations:
+          type: array
+          items:
+            type: string
+      additionalProperties: false
+    AutomationReviewEnvelope:
+      type: object
+      properties:
+        code:
+          type: integer
+        msg:
+          type: string
+        data:
+          $ref: '#/components/schemas/AutomationReviewData'
+      additionalProperties: false
     BillingOrderRequest:
       type: object
       properties:
@@ -6821,6 +6929,117 @@ paths:
         required: true
         schema:
           type: integer
+      x-visibility: internal
+    parameters:
+    - in: path
+      name: task_id
+      required: true
+      schema:
+        type: integer
+        minimum: 0
+  /api/agent-automations/{task_id}/readiness:
+    get:
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutomationReadinessEnvelope'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+      tags:
+      - Portfolio
+      summary: Read cached task prerequisites and scheduler diagnostics without remote
+        calls
+      operationId: getApiAgentAutomationsTaskIdReadiness
+      parameters:
+      - name: task_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      x-visibility: internal
+    parameters:
+    - in: path
+      name: task_id
+      required: true
+      schema:
+        type: integer
+        minimum: 0
+  /api/agent-automations/{task_id}/check-connection:
+    post:
+      responses:
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      tags:
+      - Portfolio
+      summary: Post Api Agent Automations Task Id Check Connection
+      operationId: postApiAgentAutomationsTaskIdCheckConnection
+      description: Explicitly probe SIMULATE account and session quotes without submitting
+        orders or calling a model
+      parameters:
+      - name: task_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      x-visibility: internal
+    parameters:
+    - in: path
+      name: task_id
+      required: true
+      schema:
+        type: integer
+        minimum: 0
+  /api/agent-automations/{task_id}/review:
+    get:
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutomationReviewEnvelope'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+      tags:
+      - Portfolio
+      parameters:
+      - name: days
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 90
+          default: 14
+        description: Rolling UTC time window; observations grouped by exchange-local
+          date
+      - name: task_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      summary: Export a bounded forward paper review from cached database records
+      operationId: getApiAgentAutomationsTaskIdReview
       x-visibility: internal
     parameters:
     - in: path

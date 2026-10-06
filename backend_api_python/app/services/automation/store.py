@@ -244,9 +244,17 @@ def update_run(run_id, **fields):
 
 
 def cancelled(run):
+    if runtime_changed(run):
+        return True
     row = query('''SELECT r.cancel_requested,r.status,t.active,t.revision FROM qd_agent_automation_runs r
         JOIN qd_agent_automations t ON t.id=r.task_id WHERE r.id=%s''', (run['id'],), one=True)
     return not row or row['status'] not in {'queued','researching','planned','executing'} or row['cancel_requested'] or row['revision'] != run['revision'] or (not run['preview'] and not row['active'])
+
+
+def runtime_changed(run):
+    from app.services.automation.health import generation
+    expected = run.get('_worker_generation')
+    return expected is not None and expected != generation()
 
 
 @contextmanager
@@ -262,7 +270,7 @@ def submission_guard(row, run, order=None):
                 FROM qd_agent_automations t JOIN qd_agent_automation_runs r ON r.task_id=t.id
                 WHERE t.id=%s AND r.id=%s FOR UPDATE OF t,r''', (row['id'],run['id']))
             live = cur.fetchone()
-            if STOP.is_set() or not live or not live['active'] or live['revision'] != run['revision'] or live['cancel_requested'] or live['status'] != 'executing' or live['expires_at'] <= datetime.now(timezone.utc):
+            if STOP.is_set() or runtime_changed(run) or not live or not live['active'] or live['revision'] != run['revision'] or live['cancel_requested'] or live['status'] != 'executing' or live['expires_at'] <= datetime.now(timezone.utc):
                 raise ValueError('Task paused, cancelled or expired before broker submission')
             from app.services.automation.performance import purchase_allowed
             if order and order['side'] == 'buy' and not purchase_allowed(live, order['symbol']):

@@ -9,7 +9,7 @@ import uuid
 
 from flask import Response, g, jsonify, request, stream_with_context
 from app.openapi.blueprint import HumanBlueprint
-from app.openapi.schemas.automations import AutomationDashboardEnvelopeSchema
+from app.openapi.schemas.automations import AutomationDashboardEnvelopeSchema, AutomationReadinessEnvelopeSchema, AutomationReviewEnvelopeSchema
 from app.utils.auth import login_required
 from app.services.automation import store
 from app.services.automation.domain import normalize_config, session_schedule
@@ -108,6 +108,8 @@ def set_task_state(task_id):
     baseline_prices = None
     external_quantities = None
     if data['active']:
+        from app.services.automation.readiness import require_configuration
+        require_configuration(row)
         snapshot = account_snapshot(g.user_id,config)
         if config['execution_mode']=='paper_auto':
             from app.services.futu_trading.operator_gate import hard_switch_enabled, state_for_user
@@ -174,6 +176,36 @@ def task_dashboard(task_id):
     result['task'] = public_task(row)
     result['runs'] = [public_run(run) for run in result['runs']]
     return result
+
+
+@blp.route('/<int:task_id>/readiness', methods=['GET'])
+@blp.doc(summary='Read cached task prerequisites and scheduler diagnostics without remote calls')
+@blp.response(200, AutomationReadinessEnvelopeSchema)
+@login_required
+@envelope
+def task_readiness(task_id):
+    from app.services.automation.readiness import read
+    return read(store.task(g.user_id, task_id))
+
+
+@blp.route('/<int:task_id>/check-connection', methods=['POST'])
+@blp.doc(summary='Explicitly probe SIMULATE account and session quotes without submitting orders or calling a model')
+@login_required
+@envelope
+def task_connection_check(task_id):
+    from app.services.automation.readiness import probe
+    return probe(store.task(g.user_id, task_id))
+
+
+@blp.route('/<int:task_id>/review', methods=['GET'])
+@blp.doc(summary='Export a bounded forward paper review from cached database records')
+@blp.response(200, AutomationReviewEnvelopeSchema)
+@blp.doc(parameters=[{'name': 'days', 'in': 'query', 'schema': {'type': 'integer', 'minimum': 1, 'maximum': 90, 'default': 14}, 'description': 'Rolling UTC time window; observations grouped by exchange-local date'}])
+@login_required
+@envelope
+def task_review(task_id):
+    from app.services.automation.review import report
+    return report(g.user_id, task_id, int(request.args.get('days', '14')))
 
 
 @blp.route('/<int:task_id>/risk/reset', methods=['POST'])

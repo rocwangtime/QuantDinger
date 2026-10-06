@@ -62,3 +62,43 @@ class AutomationDashboardEnvelopeSchema(Schema):
     code = fields.Integer()
     msg = fields.String()
     data = fields.Nested(AutomationDashboardDataSchema)
+
+
+class AutomationReadinessDataSchema(Schema):
+    checked_at = fields.Float()
+    task_revision = fields.Integer()
+    configuration_ready = fields.Boolean(metadata={'description': 'Configured prerequisites only; never permission to submit an order'})
+    model = fields.Dict()
+    checks = fields.List(fields.Dict(metadata={'description': 'key, status (pass/blocked/wait/unknown), code and optional details'}))
+    decision_budget = fields.Dict()
+    account_limits = fields.Dict(allow_none=True)
+    scheduler = fields.Dict()
+    connection_check = fields.Dict(allow_none=True, metadata={'description': 'Manual read-only probe, same revision, at most 90 seconds old'})
+
+
+class AutomationReadinessEnvelopeSchema(Schema):
+    code = fields.Integer()
+    msg = fields.String()
+    data = fields.Nested(AutomationReadinessDataSchema)
+
+
+class AutomationReviewDataSchema(Schema):
+    schema_version = fields.String()
+    generated_at = fields.Float()
+    task = fields.Dict()
+    configuration = fields.Dict()
+    window = fields.Dict()
+    coverage = fields.Dict(metadata={'description': 'Truncation flags; at most 1000 recent runs, 10000 samples and 1000 updated task orders'})
+    decisions = fields.Dict()
+    model_usage = fields.Dict()
+    observed_sessions = fields.List(fields.Dict(metadata={'description': 'First/last observed equity and mark-to-mark change, not full trading-session returns'}))
+    latest_valid_task_performance = fields.Dict(allow_none=True)
+    current_risk = fields.Dict()
+    orders = fields.List(fields.Dict())
+    limitations = fields.List(fields.String())
+
+
+class AutomationReviewEnvelopeSchema(Schema):
+    code = fields.Integer()
+    msg = fields.String()
+    data = fields.Nested(AutomationReviewDataSchema)

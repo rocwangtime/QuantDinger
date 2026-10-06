@@ -5,7 +5,7 @@ import copy
 import time
 from datetime import datetime, timezone
 
-from app.services.automation import store
+from app.services.automation import store, health
 from app.services.automation.domain import parse_decision, size_order
 from app.services.automation.market import build_evidence, account_snapshot
 
@@ -15,6 +15,9 @@ def utcnow():
 
 
 def analyze(row, run, evidence=None, trigger_quote=None):
+    run = {**run, '_worker_generation': run.get('_worker_generation', health.generation())}
+    if store.runtime_changed(run):
+        return
     started = time.monotonic()
     config = row['config']
     deadline = min(run['expires_at'].timestamp(), time.time()+(180 if run['preview'] else config['decision_timeout_seconds']))
@@ -26,7 +29,8 @@ def analyze(row, run, evidence=None, trigger_quote=None):
         nonlocal last_check, stopped
         now = time.monotonic()
         from app.services.automation.worker import STOP
-        if STOP.is_set():
+        if STOP.is_set() or run['_worker_generation'] != health.generation():
+            stopped = True
             return True
         if time.time()>=deadline:
             return True
@@ -136,6 +140,9 @@ def analyze(row, run, evidence=None, trigger_quote=None):
 def execute(row, run):
     from app.services.agent_trade_intents import submit_intent
     from app.services.futu_agent_execution import _load_client, execute_simulate_intent, reconcile_simulate_intent
+    run = {**run, '_worker_generation': run.get('_worker_generation', health.generation())}
+    if store.runtime_changed(run):
+        return
     config = row['config']
     if run['preview'] or config['execution_mode']!='paper_auto':
         return

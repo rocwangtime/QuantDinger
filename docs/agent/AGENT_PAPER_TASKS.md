@@ -86,3 +86,50 @@ read-tool history in decision details. **Decision review** covers the latest
 30 runs and counts proposed actions separately from protective runs and previews.
 It is descriptive; paper outcomes remain actual order receipts and the gross
 forward equity curve. No win rate or trading accuracy is inferred.
+
+
+## Run checks and forward paper acceptance
+
+**Run readiness** reads configuration and cached state when the workspace opens.
+It does not invoke a model or broker. Checks cover the model, internal task actor,
+account policy, instruments, operator arming, decision slots, account trading
+limits, Agent heartbeat and protection. Model readiness validates supported
+provider/configuration only, not remote availability. Tasks currently support
+OpenAI, DeepSeek and Volcengine. Missing prerequisites block start; pause remains
+available.
+
+**Check Futu connection (read only)** explicitly reads the selected SIMULATE
+account and verifies its market, then probes eligible universe quotes during the
+session. Closed markets show waiting; failures are sanitized. Results expire
+within 90 seconds and belong only to the current task revision. Editing invalidates
+the cached check. Diagnostics do not grant order permission: actual paper orders
+still refresh account/quote data and repeat every authorization guard.
+
+The independent `scheduler` publishes Agent component status in its existing
+heartbeat. Upgrade and restart it to publish the new metadata. Legacy processes
+without component information show unverified, not healthy. Failed ticks and
+stalls have distinct states. Same-process stop/start invalidates old in-memory
+model/execution callbacks by generation; newly claimed durable plans still require
+current authorization and prices.
+
+**Paper run report** offers rolling 7/14/30/90-day windows and JSON download.
+Observation dates and displayed report times use the stated exchange timezone.
+It includes run statuses, proposed actions, preview/protection counts, model usage,
+current risk and cumulative task fills. Reading/exporting does not reconcile the
+broker or request another decision.
+
+- Observed change is first-to-last valid mark within the date, not a full-session return; a single mark has no interval change.
+- Limits are 1000 recent runs, 10000 marks and 1000 updated orders. Truncation explicitly marks the report partial.
+- Orders are selected by update time and expose current cumulative fills, not inferred fill-event timestamps.
+- Latest valid task performance and current risk are whole-task latest state, independent of the selected window.
+- Usage coverage and unknown pricing remain explicit; equity remains gross before fees, dividends and interest.
+
+For multiple sessions, check model/Futu configuration before trading, verify
+instrument limits and protection thresholds, preview, then let the operator arm
+the account and start the task. Automatic trading policies expire within 24 hours
+and require manual renewal; tasks never renew them. Export the forward report and
+compare receipts, gross performance, benchmark, protection and model cost.
+Actual provider/OpenD smoke checks and observations over multiple sessions are
+required for runtime acceptance; synthetic local tests do not establish profit.
+
+See [run acceptance design](../architecture/AGENT_RUN_ACCEPTANCE.md).

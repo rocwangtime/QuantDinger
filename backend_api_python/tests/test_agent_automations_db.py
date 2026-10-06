@@ -489,3 +489,205 @@ def test_quota_reservations_are_serialized_across_connections(db):
         results = list(pool.map(reserve, range(2)))
     assert sum(result is not None for result in results) == 1
     assert store.decision_budget(row)['used'] == 1
+
+
+def ready_services(monkeypatch):
+    from app.services.automation import readiness
+    monkeypatch.setattr(readiness, 'model_state', lambda _: {'configured': True, 'provider': 'openai', 'model': 'fixture', 'code': 'model_configured'})
+    monkeypatch.setattr(readiness, 'get_policy', lambda *_: {'mode': 'PAPER_AUTO', 'enabled_until': datetime.now(timezone.utc)+timedelta(hours=1),
+        'allowed_symbols': ['AAPL'], 'allowed_markets': ['USSTOCK'], 'max_order_notional': 500, 'max_daily_notional': 2000, 'max_orders_per_day': 10})
+    monkeypatch.setattr(readiness, 'hard_switch_enabled', lambda: True)
+    monkeypatch.setattr(readiness, 'state_for_user', lambda _: [{'credential_id': 7, 'enabled': True, 'state': 'armed'}])
+    return readiness
+
+
+def test_readiness_requires_model_exact_policy_actor_and_operator_without_remote_io(db, monkeypatch):
+    readiness = ready_services(monkeypatch)
+    row = create(execution_mode='paper_auto')
+    monkeypatch.setattr(readiness, '_load_client', lambda *_: pytest.fail('Cached readiness cannot use broker'))
+    result = readiness.read(row)
+    assert result['configuration_ready'] and result['connection_check'] is None
+    assert result['account_limits']['remaining_orders'] == 10
+    monkeypatch.setattr(readiness, 'state_for_user', lambda _: [{'credential_id': 7, 'enabled': True, 'state': 'stopping'}])
+    assert not readiness.read(row)['configuration_ready']
+    with pytest.raises(ValueError, match='operator_required'):
+        readiness.require_configuration(row)
+    monkeypatch.setattr(readiness, 'state_for_user', lambda _: [{'credential_id': 7, 'enabled': True, 'state': 'armed'}])
+    store.query("UPDATE qd_agent_tokens SET instruments='TSLA' WHERE id=%s RETURNING id", (row['token_id'],), one=True)
+    assert not readiness.read(row)['configuration_ready']
+
+
+def test_readiness_expired_policy_and_retained_holding_scope(db, monkeypatch):
+    readiness = ready_services(monkeypatch)
+    row, _ = monitored_task(monkeypatch)
+    policy = readiness.get_policy(None)
+    policy['allowed_symbols'] = ['TSLA']
+    monkeypatch.setattr(readiness, 'get_policy', lambda *_: policy)
+    result = readiness.read(row)
+    assert not result['configuration_ready']
+    assert next(c for c in result['checks'] if c['key'] == 'allowlist')['missing_symbols'] == ['AAPL']
+    policy['allowed_symbols'] = ['AAPL']
+    policy['enabled_until'] = datetime.now(timezone.utc)-timedelta(seconds=1)
+    assert not readiness.read(row)['configuration_ready']
+
+
+def test_readiness_published_component_requires_fresh_successful_loop(db, monkeypatch):
+    readiness = ready_services(monkeypatch)
+    row = create()
+    state = {'leader': True, 'agent_automation': {'status': 'running', 'last_tick_at': time.time(), 'last_success_at': time.time()}}
+    store.query("INSERT INTO qd_worker_heartbeats(worker_id,role,status,metadata_json) VALUES('fixture','scheduler','running',%s::jsonb) RETURNING worker_id", (store.dumps(state),), one=True)
+    assert readiness.read(row)['scheduler']['status'] == 'running'
+    state['agent_automation']['last_tick_at'] -= 16
+    store.query('UPDATE qd_worker_heartbeats SET metadata_json=%s::jsonb RETURNING worker_id', (store.dumps(state),), one=True)
+    assert readiness.read(row)['scheduler']['status'] == 'stalled'
+
+
+def test_manual_connection_probe_is_revision_scoped_and_never_submits(db, monkeypatch):
+    from unittest.mock import MagicMock
+    readiness = ready_services(monkeypatch)
+    row = create()
+    account = {'as_of': time.time(), 'open_orders': []}
+    monkeypatch.setattr(readiness, 'account_snapshot', lambda *_: account)
+    monkeypatch.setattr(readiness, 'market_clock', lambda _: {'is_open': True})
+    client = MagicMock()
+    client.get_simulate_execution_quote.return_value = {'simulate_execution_eligible': True, 'price': 100, 'as_of': time.time(), 'market_status': 'AFTERNOON'}
+    monkeypatch.setattr(readiness, '_load_client', lambda *_: client)
+    result = readiness.probe(row)
+    assert result['account_ok'] and result['quote_status'] == 'pass'
+    client.place_limit_order.assert_not_called()
+    client.cancel_order.assert_not_called()
+    client.disconnect.assert_called_once()
+    current = store.task(row['user_id'], row['id'])
+    assert readiness.read(current)['connection_check']['revision'] == row['revision']
+    row = store.edit(row['user_id'], row['id'], 'changed', row['config'])
+    assert readiness.read(row)['connection_check'] is None
+    with pytest.raises(ValueError, match='changed'):
+        readiness.probe(current)
+
+
+def test_probe_sanitizes_failure_and_closed_session_is_waiting(db, monkeypatch):
+    readiness = ready_services(monkeypatch)
+    row = create()
+    monkeypatch.setattr(readiness, 'account_snapshot', lambda *_: (_ for _ in ()).throw(RuntimeError('secret-fixture-token')))
+    result = readiness.probe(row)
+    assert not result['account_ok'] and 'secret-fixture' not in store.dumps(result)
+    monkeypatch.setattr(readiness, 'account_snapshot', lambda *_: {'as_of': time.time(), 'open_orders': []})
+    monkeypatch.setattr(readiness, 'market_clock', lambda _: {'is_open': False})
+    monkeypatch.setattr(readiness, '_load_client', lambda *_: pytest.fail('Closed session should defer quote probe'))
+    result = readiness.probe(row)
+    assert result['account_ok'] and result['quote_code'] == 'market_closed' and result['quote_status'] == 'wait'
+
+
+def test_review_http_is_owner_scoped_read_only_and_explicitly_partial(db, monkeypatch):
+    from flask import Flask
+    from app.routes.agent_automations import blp
+    from app.services.automation import review
+    row, _ = monitored_task(monkeypatch)
+    first = run_for(row)
+    store.update_run(first['id'], status='completed', result={'items': [], 'summary': 'fixture'})
+    second = store.create_run(row, 'preview:review', first['expires_at'], preview=True)
+    store.update_run(second['id'], status='failed')
+    monkeypatch.setattr(review, 'RUN_LIMIT', 1)
+    app = Flask(__name__)
+    app.register_blueprint(blp, url_prefix='/api/agent-automations')
+    client = app.test_client()
+    assert client.get(f"/api/agent-automations/{row['id']}/review").status_code == 401
+    monkeypatch.setattr('app.utils.auth.verify_token', lambda _: {'user_id': 900001, '_verified_user_role': 'user'})
+    headers = {'Authorization': 'Bearer fixture-only'}
+    response = client.get(f"/api/agent-automations/{row['id']}/review?days=14", headers=headers)
+    assert response.status_code == 200, response.get_json()
+    report = response.get_json()['data']
+    assert report['schema_version'] == 'agent-paper-review-v1' and report['coverage']['partial'] is True
+    assert len(report['orders']) == 1 and 'broker_order_id' not in report['orders'][0]
+    assert 'token_id' not in report['task'] and 'brief' not in report['configuration']
+    assert client.get(f"/api/agent-automations/{row['id']}/review?days=0", headers=headers).status_code == 400
+    monkeypatch.setattr('app.utils.auth.verify_token', lambda _: {'user_id': 900002, '_verified_user_role': 'user'})
+    for path, method in [('readiness', 'get'), ('check-connection', 'post'), ('review', 'get')]:
+        assert getattr(client, method)(f"/api/agent-automations/{row['id']}/{path}", headers=headers).status_code == 400
+
+
+def test_restart_cannot_revive_an_old_in_memory_submission(db):
+    from app.services.automation import health
+    row = store.set_active(900001, create(execution_mode='paper_auto')['id'], True)
+    run = run_for(row, preview=False)
+    store.update_run(run['id'], status='executing')
+    run['_worker_generation'] = health.generation()
+    with store.submission_guard(row, run):
+        pass
+    health.stopped()
+    worker.STOP.clear()
+    health.started()
+    assert store.cancelled(run)
+    with pytest.raises(ValueError, match='cancelled'):
+        with store.submission_guard(row, run):
+            pytest.fail('An old callback cannot submit after restart')
+    # Durable work can be claimed afresh, with the current process generation.
+    run['_worker_generation'] = health.generation()
+    with store.submission_guard(row, run):
+        pass
+    health.stopped()
+
+
+def test_restart_cancels_model_result_before_validation(db, monkeypatch):
+    from app.services.automation import health
+    from tests.test_agent_research import evidence
+    row = create()
+    run = run_for(row)
+    class Model:
+        provider = SimpleNamespace(value='openai')
+        last_provider, last_model, last_usage = 'openai', 'fixture', None
+        def __init__(self, **_): pass
+        def stream_llm_api_cancellable(self, messages, cancelled, **_):
+            yield '{"summary":"wait",'
+            health.stopped()
+            worker.STOP.clear()
+            health.started()
+            assert cancelled()
+            yield '"items":[]}'
+    monkeypatch.setattr(runner, 'build_evidence', lambda *_a, **_k: evidence())
+    monkeypatch.setattr('app.services.llm.LLMService', Model)
+    runner.analyze(row, run)
+    saved = store.query('SELECT * FROM qd_agent_automation_runs WHERE id=%s', (run['id'],), one=True)
+    assert saved['status'] == 'cancelled' and 'items' not in saved['result']
+    health.stopped()
+
+
+def test_missing_model_blocks_http_start_before_broker_io_but_pause_is_available(db, monkeypatch):
+    from flask import Flask
+    from app.routes import agent_automations as routes
+    readiness = ready_services(monkeypatch)
+    row = store.set_active(900001, create(execution_mode='paper_auto')['id'], True)
+    monkeypatch.setattr(readiness, 'model_state', lambda _: {'configured': False, 'code': 'model_unconfigured'})
+    monkeypatch.setattr(routes, 'account_snapshot', lambda *_: pytest.fail('Missing configuration must fail before broker I/O'))
+    monkeypatch.setattr('app.utils.auth.verify_token', lambda _: {'user_id': 900001, '_verified_user_role': 'user'})
+    app = Flask(__name__)
+    app.register_blueprint(routes.blp, url_prefix='/api/agent-automations')
+    client = app.test_client()
+    headers = {'Authorization': 'Bearer fixture-only'}
+    url = f"/api/agent-automations/{row['id']}/state"
+    response = client.post(url, headers=headers, json={'active': True})
+    assert response.status_code == 400 and 'model_unconfigured' in response.get_json()['msg']
+    assert store.task(row['user_id'], row['id'])['active']
+    response = client.post(url, headers=headers, json={'active': False})
+    assert response.status_code == 200 and response.get_json()['data']['active'] is False
+
+
+def test_old_queued_callbacks_cannot_claim_durable_work_after_restart(db, monkeypatch):
+    from app.services.automation import health
+    analysis_row = create()
+    analysis = run_for(analysis_row)
+    execution_row = store.set_active(900001, create(execution_mode='paper_auto')['id'], True)
+    execution = run_for(execution_row, preview=False)
+    store.update_run(execution['id'], status='planned')
+    health.started()
+    for run in (analysis, execution):
+        run['_worker_generation'] = health.generation()
+    health.stopped()
+    worker.STOP.clear()
+    health.started()
+    monkeypatch.setattr(runner, 'build_evidence', lambda *_: pytest.fail('Obsolete callbacks must not start research'))
+    runner.analyze(analysis_row, analysis)
+    runner.execute(execution_row, execution)
+    states = store.query('SELECT id,status FROM qd_agent_automation_runs ORDER BY id')
+    assert [r['status'] for r in states] == ['queued', 'planned']
+    health.stopped()

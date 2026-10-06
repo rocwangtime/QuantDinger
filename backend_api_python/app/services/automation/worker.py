@@ -7,7 +7,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
-from app.services.automation import store
+from app.services.automation import store, health
 from app.services.automation.domain import session_schedule, trigger_state
 from app.services.automation.market import PushFeed, build_evidence, account_snapshot
 from app.services.automation.runner import analyze, execute
@@ -31,6 +31,7 @@ def start():
 
 def stop():
     STOP.set()
+    health.stopped()
     if _thread:
         _thread.join(timeout=3)
 
@@ -72,6 +73,7 @@ def reconcile_orders():
 
 
 def loop():
+    health.started()
     pool = ThreadPoolExecutor(max_workers=2,thread_name_prefix='AgentDecision')
     preparation = ThreadPoolExecutor(max_workers=2,thread_name_prefix='AgentContext')
     monitoring = ThreadPoolExecutor(max_workers=2,thread_name_prefix='AgentProtection')
@@ -194,6 +196,7 @@ def loop():
                     if run['id'] in pending:
                         continue
                     row = store.task(run['user_id'],run['task_id'])
+                    run = {**run, '_worker_generation': health.generation()}
                     if run['status']=='planned':
                         pending[run['id']] = pool.submit(execute,row,run)
                     elif row['config']['kind']=='price_trigger' and not run['preview']:
@@ -207,10 +210,13 @@ def loop():
                 if time.monotonic()-last_reconcile>5 and ('reconcile',0) not in warm:
                     warm[('reconcile',0)] = preparation.submit(reconcile_orders)
                     last_reconcile = time.monotonic()
+                health.tick(True)
             except Exception:
+                health.tick(False)
                 logger.warning('Agent automation tick failed; retrying without submitting new work',exc_info=False)
             STOP.wait(1)
     finally:
+        health.stopped()
         for feed in feeds.values():
             feed.stop()
         pool.shutdown(wait=False,cancel_futures=True)
