@@ -246,6 +246,13 @@ class StrategyCommandRepository:
         with get_db_connection() as db:
             cur = db.cursor()
             try:
+                # Serialize executor admission against virtual-group creation.
+                cur.execute("SELECT id FROM qd_strategies_trading WHERE id=%s FOR UPDATE", (int(strategy_id),))
+                cur.execute("SELECT group_id FROM qd_order_groups WHERE config->>'strategyId'=%s "
+                            "AND state->>'status' NOT IN ('cancelled','unwound','resolved') LIMIT 1", (str(strategy_id),))
+                if cur.fetchone():
+                    db.commit()
+                    return None
                 cur.execute(
                     """
                     INSERT INTO qd_strategy_runtime_leases

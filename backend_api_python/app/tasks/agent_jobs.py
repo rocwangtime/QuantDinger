@@ -14,6 +14,7 @@ SUPPORTED_KINDS = frozenset(
     {
         "backtest",
         "strategy_evolution",
+        "ai_evaluation",
     }
 )
 
@@ -32,6 +33,9 @@ def _execute(kind: str, payload: dict, on_progress):
         from app.routes.strategy_evolution import _run_evolution_job
 
         return _run_evolution_job(request_payload, on_progress)
+    if kind == "ai_evaluation":
+        from app.services.ai_evaluation import run_shadow_job
+        return run_shadow_job(request_payload, on_progress)
 
     raise ValueError(f"Unsupported durable agent job kind: {kind}")
 

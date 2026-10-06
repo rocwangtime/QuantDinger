@@ -1505,6 +1505,8 @@ class TradingExecutor:
             protection=dict(values.get("protection") or {}),
             client_order_id=str(values.get("client_order_id") or ""),
             ai_decision_filter=ai_decision_filter,
+            ai_decision_mode=str(trading_config.get("ai_decision_mode") or "advisory"),
+            portfolio_risk=dict(trading_config.get("portfolio_risk") or {}),
             strategy_type=str(trading_config.get("bot_type") or ""),
             decision_context=(
                 build_strategy_decision_context(
@@ -1514,7 +1516,10 @@ class TradingExecutor:
                     strategy_equity=strategy_equity,
                     initial_capital=initial_capital,
                     entry_percent=entry_pct,
-                )
+                ) | {"instrument": {"market": strategy.get("market_category"),
+                                    "exchange_id": trading_config.get("exchange_id", "")},
+                     "evaluation_costs": {"commission": float(trading_config.get("commission", 0.0005)),
+                                          "slippage": float(trading_config.get("slippage", 0.0005))}}
                 if ai_decision_filter else None
             ),
             sizing={

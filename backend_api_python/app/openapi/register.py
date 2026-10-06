@@ -78,6 +78,7 @@ def register_human_blueprints(api: Api) -> None:
     from app.routes.dashboard import dashboard_blp
     from app.routes.settings import settings_blp
     from app.routes.portfolio import portfolio_blp
+    import app.routes.portfolio_research  # noqa: F401
     from app.routes.agent_automations import blp as agent_automations_blp
     from app.routes.ibkr import ibkr_blp
     from app.routes.alpaca import alpaca_blp
