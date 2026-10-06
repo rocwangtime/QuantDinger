@@ -37,6 +37,7 @@ def db(monkeypatch):
         cur.execute(f'SET search_path TO {schema}')
         cur.execute((Path(__file__).parents[1]/'migrations/init.sql').read_text())
         cur.execute((Path(__file__).parents[1]/'migrations/20261004_agent_automation.sql').read_text())
+        cur.execute((Path(__file__).parents[1]/'migrations/20261006_agent_performance.sql').read_text())
         cur.execute("INSERT INTO qd_users(id,username,password_hash) VALUES(900001,'automation-fixture','not-a-login')")
 
     @contextmanager
@@ -230,3 +231,117 @@ def test_buy_sell_replay_uses_owned_fills_and_does_not_repeat(db,monkeypatch):
         assert result['status']=='completed',result
     assert submitted==[('buy',2),('sell',2)]
     assert store.owned_quantities(row)=={'AAPL':0} and holdings==[]
+
+
+def monitored_task(monkeypatch):
+    from unittest.mock import MagicMock
+    from app.services.automation import monitor
+    row = store.set_active(900001, create(execution_mode='paper_auto', risk={'enabled': True})['id'], True)
+    store.query('''INSERT INTO qd_agent_trade_intents
+        (user_id,agent_token_id,broker,account_ref,idempotency_key,intent_hash,order_spec,status,filled_qty,avg_fill_price)
+        VALUES(%s,%s,'futu','credential:7','fill-fixture','fixture',%s::jsonb,'FILLED',5,100) RETURNING id''',
+        (row['user_id'], row['token_id'], store.dumps({'symbol': 'AAPL', 'side': 'buy'})), one=True)
+    account = {'as_of': time.time(), 'positions': [{'symbol': 'AAPL', 'quantity': 5, 'side': 'long'}],
+               'open_orders': [], 'funds': {'cash': 500, 'power': 500}}
+    monkeypatch.setattr(monitor, 'account_snapshot', lambda *_: account)
+    client = MagicMock()
+    client.get_simulate_execution_quote.return_value = {'simulate_execution_eligible': True, 'price': 100}
+    monkeypatch.setattr(monitor, '_load_client', lambda *_: client)
+    return row, client
+
+
+def test_independent_monitor_persists_curve_and_protection_without_model(db, monkeypatch):
+    from app.services.automation import monitor
+    row, client = monitored_task(monkeypatch)
+    monkeypatch.setattr('app.services.llm.LLMService', lambda **_: pytest.fail('Protection must not invoke a model'))
+    monitor.observe(row)
+    current = store.task(row['user_id'], row['id'])
+    assert current['state']['risk']['healthy']
+    assert current['state']['performance']['latest']['equity'] == 1000
+    assert len(monitor.dashboard(current)['series']) == 1
+    # A cumulative fill replay creates neither duplicate profit nor minute samples.
+    monitor.observe(current)
+    assert len(monitor.dashboard(store.task(row['user_id'], row['id']))['series']) == 1
+    client.get_simulate_execution_quote.return_value['price'] = 90
+    monitor.observe(current)
+    current = store.task(row['user_id'], row['id'])
+    assert current['state']['risk']['halted']
+    assert current['state']['risk']['stopped_symbols'] == ['AAPL']
+    run = store.query('SELECT * FROM qd_agent_automation_runs WHERE task_id=%s', (row['id'],), one=True)
+    assert run['event_key'].startswith('protection:') and run['status'] == 'planned'
+    assert run['result']['items'][0]['action'] == 'EXIT'
+    monitor.observe(current)
+    assert len(store.query('SELECT id FROM qd_agent_automation_runs WHERE task_id=%s', (row['id'],))) == 1
+
+
+def test_paused_task_is_observed_but_never_protectively_submits_and_reset_preserves_history(db, monkeypatch):
+    from app.services.automation import monitor
+    row, client = monitored_task(monkeypatch)
+    monitor.observe(row)
+    row = store.set_active(row['user_id'], row['id'], False)
+    client.get_simulate_execution_quote.return_value['price'] = 90
+    monitor.observe(row)
+    row = store.task(row['user_id'], row['id'])
+    assert row['state']['risk']['halted']
+    assert not store.query('SELECT id FROM qd_agent_automation_runs WHERE task_id=%s', (row['id'],))
+    samples = monitor.dashboard(row)['series']
+    # Closing/stale quotes do not erase the last valid mark needed for reset.
+    client.get_simulate_execution_quote.return_value['simulate_execution_eligible'] = False
+    monitor.observe(row)
+    row = store.reset_risk(row['user_id'], row['id'])
+    assert not row['state']['risk']['halted'] and not row['state']['risk']['healthy']
+    assert row['state']['performance']['high_water'] == 950
+    assert monitor.dashboard(row)['series'] == samples
+    assert len(store.receipts(row)) == 1
+
+
+def test_final_buy_guard_reads_current_protection_state(db, monkeypatch):
+    row, _ = monitored_task(monkeypatch)
+    run = run_for(row, preview=False)
+    store.update_run(run['id'], status='executing')
+    order = {'side': 'buy', 'symbol': 'AAPL'}
+    # The model's old snapshot cannot authorize a purchase before monitoring.
+    with pytest.raises(ValueError, match='独立保护'):
+        with store.submission_guard(row, run, order):
+            pytest.fail('Unmonitored buy must be blocked')
+    store.query("UPDATE qd_agent_automations SET state=jsonb_set(state,'{risk}',%s::jsonb) WHERE id=%s RETURNING id",
+                (store.dumps({'healthy': True, 'checked_at': time.time(), 'halted': False}), row['id']), one=True)
+    with store.submission_guard(row, run, order):
+        pass
+    store.query("UPDATE qd_agent_automations SET state=jsonb_set(state,'{risk,halted}','true') WHERE id=%s RETURNING id", (row['id'],), one=True)
+    with pytest.raises(ValueError, match='独立保护'):
+        with store.submission_guard(row, run, order):
+            pytest.fail('Protection tripped after planning must block the buy')
+    with store.submission_guard(row, run, {'side': 'sell', 'symbol': 'AAPL'}):
+        pass
+
+
+def test_dashboard_http_is_user_scoped_and_cached_without_broker_io(db, monkeypatch):
+    from flask import Flask
+    from app.routes.agent_automations import blp
+    row = create()
+    app = Flask(__name__)
+    app.register_blueprint(blp, url_prefix='/api/agent-automations')
+    client = app.test_client()
+    assert client.get(f"/api/agent-automations/{row['id']}/dashboard").status_code == 401
+    monkeypatch.setattr('app.utils.auth.verify_token', lambda _: {'user_id': 900001, '_verified_user_role': 'user'})
+    monkeypatch.setattr('app.routes.agent_automations.account_snapshot', lambda *_: pytest.fail('Dashboard must be cached'))
+    headers = {'Authorization': 'Bearer fixture-only'}
+    result = client.get(f"/api/agent-automations/{row['id']}/dashboard", headers=headers).get_json()
+    assert result['code'] == 1 and result['data']['series'] == []
+    assert 'token_id' not in result['data']['task']
+    monkeypatch.setattr('app.utils.auth.verify_token', lambda _: {'user_id': 900002, '_verified_user_role': 'user'})
+    assert client.get(f"/api/agent-automations/{row['id']}/dashboard", headers=headers).status_code == 400
+
+
+def test_universe_edit_retains_owned_instruments_and_cannot_rewrite_capital(db, monkeypatch):
+    row, _ = monitored_task(monkeypatch)
+    with pytest.raises(ValueError, match='先暂停'):
+        store.reset_risk(row['user_id'], row['id'])
+    row = store.set_active(row['user_id'], row['id'], False)
+    changed = {**row['config'], 'symbols': ['TSLA']}
+    row = store.edit(row['user_id'], row['id'], 'new universe', changed)
+    token = store.query('SELECT instruments FROM qd_agent_tokens WHERE id=%s', (row['token_id'],), one=True)
+    assert set(token['instruments'].split(',')) == {'AAPL', 'TSLA'}
+    with pytest.raises(ValueError, match='本金'):
+        store.edit(row['user_id'], row['id'], 'changed capital', {**changed, 'budget': 2000})

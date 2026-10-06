@@ -51,6 +51,8 @@ def analyze(row, run, evidence=None, trigger_quote=None):
             evidence['trigger'] = trigger_quote
         evidence['managed_quantities'] = store.owned_quantities(row)
         evidence['previous_plan'] = (row.get('state') or {}).get('last_plan')
+        evidence['task_config'] = config
+        evidence['prompt_version'] = 'portfolio-json-v2'
         store.update_run(run['id'],evidence=evidence,phase='Agent 正在评估持仓与候选机会')
         if cancelled():
             raise TimeoutError('Decision cancelled or expired')
@@ -94,6 +96,8 @@ def analyze(row, run, evidence=None, trigger_quote=None):
             raise TimeoutError('Decision cancelled or expired')
         decision = parse_decision(draft,evidence,config)
         decision['latency_ms'] = round((time.monotonic()-started)*1000)
+        decision['prompt_version'] = 'portfolio-json-v2'
+        decision['task_revision'] = run['revision']
         decision['usage'] = build_usage_display(provider=service.last_provider,model=service.last_model,
                                                usage=service.last_usage,
                                                estimated_input_tokens=len(store.dumps(messages))//3,
@@ -151,6 +155,11 @@ def execute(row, run):
             if item['action'] in {'HOLD','WAIT'}:
                 continue
             account = account_snapshot(row['user_id'],config)
+            from app.services.automation.performance import purchase_allowed
+            if item['action'] == 'BUY' and not purchase_allowed(store.task(row['user_id'], row['id']), item['symbol']):
+                checks.append({'symbol': item['symbol'], 'status': 'skipped',
+                               'reason': '独立保护已暂停买入，或账户行情监测已过期'})
+                continue
             broker_qty = sum(float(p['quantity']) for p in account['positions'] if p['symbol']==item['symbol'] and p['side']=='long')
             open_symbols = {o['symbol'] for o in account['open_orders']}
             # Include unreconciled accepted orders even if the broker's list lags.
@@ -171,7 +180,7 @@ def execute(row, run):
             if not quote.get('simulate_execution_eligible'):
                 raise ValueError('Fresh regular-session SIMULATE quote is unavailable')
             price = float(quote['price'])
-            if config['kind']=='price_trigger':
+            if config['kind']=='price_trigger' and not run.get('event_key', '').startswith('protection:'):
                 trigger = config['trigger']
                 still_met = price>=trigger['price'] if trigger['type']=='price_above' else price<=trigger['price']
                 if not still_met:
@@ -187,6 +196,7 @@ def execute(row, run):
             intent = submit_intent(row['user_id'],token,order,f"auto:{run['id']}:{item['symbol']}")
 
             def guard(cur):
+                cur.execute('SELECT pg_advisory_xact_lock(824112,%s)', (row['user_id'],))
                 cur.execute('''SELECT t.active,t.revision,r.cancel_requested,r.expires_at
                     FROM qd_agent_automations t JOIN qd_agent_automation_runs r ON r.task_id=t.id
                     WHERE t.id=%s AND r.id=%s FOR UPDATE OF t,r''',(row['id'],run['id']))
@@ -196,7 +206,7 @@ def execute(row, run):
 
             outcome = execute_simulate_intent(row['user_id'],token,intent['id'],before_submit=guard,
                                     deadline_at=run['expires_at'].timestamp(),
-                                    submit_guard=lambda: store.submission_guard(row,run))
+                                    submit_guard=lambda: store.submission_guard(row,run,order))
             checks.append({'symbol':item['symbol'],'status':outcome['status'],'intent_id':intent['id']})
             if order['side']=='buy':
                 # Broker positions/cash may lag even an immediate fill. Do not

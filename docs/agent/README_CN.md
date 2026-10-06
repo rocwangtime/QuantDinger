@@ -9,6 +9,7 @@
 3. [Agent OpenAPI](agent-openapi.json)：查看 `/api/agent/v1` 的机器可读契约。
 4. [API 约定](../architecture/API_CONVENTIONS.md)（英文）：理解响应、认证和接口分层。
 5. [内置模型 Agent](MODEL_AGENT_CN.md)：DeepSeek/OpenAI 配置、工具层级及模拟盘执行边界。
+6. [Agent 模拟组合任务](AGENT_PAPER_TASKS_CN.md)：持续任务、独立持仓保护与实际成交表现。
 
 ## 权限模型
 

@@ -9,5 +9,6 @@ This folder holds **agent-facing** material for coding assistants (Cursor, Claud
 | [agent-openapi.json](agent-openapi.json) | Machine-readable contract for `/api/agent/v1` (OpenAPI 3.0) |
 | [../architecture/API_CONVENTIONS.md](../architecture/API_CONVENTIONS.md) | Shared HTTP conventions (envelopes, auth, Public/Internal tiers) |
 | [../api/openapi.yaml](../api/openapi.yaml) | Human Web API spec (flask-smorest; migration in progress) |
+| [AGENT_PAPER_TASKS.md](AGENT_PAPER_TASKS.md) | Persistent paper portfolios, independent protection and forward performance |
 
 **Language policy:** Machine-readable schemas, route names, scopes, environment variables, and tool identifiers remain in English as the canonical contract. Human setup guides are maintained in paired editions: [中文入口](README_CN.md) and this English entry. The automation-oriented [`.cursor/skills/`](../../.cursor/skills/) content remains English-only so it behaves consistently across tools and locales.

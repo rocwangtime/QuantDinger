@@ -501,6 +501,156 @@ components:
       - code
       - msg
       additionalProperties: false
+    AutomationReport:
+      type: object
+      properties:
+        as_of:
+          type: number
+          description: UTC observation Unix seconds; never a synthetic backtest date
+        equity:
+          type: number
+          nullable: true
+        capital:
+          type: number
+        virtual_cash:
+          type: number
+          nullable: true
+        return_pct:
+          type: number
+          description: Percentage points, e.g. 3.0 means 3%
+          nullable: true
+        realized_pnl:
+          type: number
+          nullable: true
+        unrealized_pnl:
+          type: number
+          nullable: true
+        benchmark_return_pct:
+          type: number
+          nullable: true
+        benchmark_started_at:
+          type: number
+          nullable: true
+        daily_loss_pct:
+          type: number
+        drawdown_pct:
+          type: number
+        max_drawdown_pct:
+          type: number
+        positions:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+        filled_order_count:
+          type: integer
+        turnover:
+          type: number
+        fees:
+          type: number
+          description: Null means unavailable, not zero
+          nullable: true
+        pnl_basis:
+          type: string
+        errors:
+          type: array
+          items:
+            type: string
+        account_as_of:
+          type: number
+      additionalProperties: false
+    AutomationPerformance:
+      type: object
+      properties:
+        capital:
+          type: number
+        symbols:
+          type: array
+          items:
+            type: string
+        reserve_ratio:
+          type: number
+        started_at:
+          type: number
+        benchmark_started_at:
+          type: number
+        benchmark_prices:
+          type: object
+          additionalProperties: {}
+        baseline_prices:
+          type: object
+          additionalProperties: {}
+        external_quantities:
+          type: object
+          additionalProperties: {}
+        high_water:
+          type: number
+        day:
+          type: string
+        day_equity:
+          type: number
+        max_drawdown_pct:
+          type: number
+        last_sample_at:
+          type: number
+        latest:
+          $ref: '#/components/schemas/AutomationReport'
+        latest_valid:
+          $ref: '#/components/schemas/AutomationReport'
+      additionalProperties: false
+    AutomationSample:
+      type: object
+      properties:
+        sampled_at:
+          type: string
+          format: date-time
+        report:
+          $ref: '#/components/schemas/AutomationReport'
+      additionalProperties: false
+    AutomationDashboardData:
+      type: object
+      properties:
+        task:
+          type: object
+          additionalProperties: {}
+        performance:
+          $ref: '#/components/schemas/AutomationPerformance'
+        risk:
+          type: object
+          description: healthy, checked_at (Unix seconds), halted, reasons, stopped_symbols;
+            latched until explicit reset
+          additionalProperties: {}
+        series:
+          type: array
+          description: Most recent 1440 valid minute observations, oldest first
+          items:
+            $ref: '#/components/schemas/AutomationSample'
+        orders:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+        runs:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+        model_usage:
+          type: object
+          description: Completed decisions including previews only. Currency totals
+            are estimates; unpriced calls are counted separately.
+          additionalProperties: {}
+      additionalProperties: false
+    AutomationDashboardEnvelope:
+      type: object
+      properties:
+        code:
+          type: integer
+        msg:
+          type: string
+        data:
+          $ref: '#/components/schemas/AutomationDashboardData'
+      additionalProperties: false
     BillingOrderRequest:
       type: object
       properties:
@@ -6623,6 +6773,73 @@ paths:
       - Portfolio
       operationId: getApiAgentAutomationsTaskIdSnapshot
       summary: Get Api Agent Automations Task Id Snapshot
+      parameters:
+      - name: task_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      x-visibility: internal
+    parameters:
+    - in: path
+      name: task_id
+      required: true
+      schema:
+        type: integer
+        minimum: 0
+  /api/agent-automations/{task_id}/dashboard:
+    get:
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutomationDashboardEnvelope'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+      tags:
+      - Portfolio
+      summary: Read cached forward performance, independent protection and decision
+        ledger
+      operationId: getApiAgentAutomationsTaskIdDashboard
+      parameters:
+      - name: task_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      x-visibility: internal
+    parameters:
+    - in: path
+      name: task_id
+      required: true
+      schema:
+        type: integer
+        minimum: 0
+  /api/agent-automations/{task_id}/risk/reset:
+    post:
+      responses:
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      tags:
+      - Portfolio
+      summary: Explicitly reset a paused task protection latch without erasing performance
+      operationId: postApiAgentAutomationsTaskIdRiskReset
       parameters:
       - name: task_id
         in: path

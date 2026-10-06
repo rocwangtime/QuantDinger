@@ -62,6 +62,15 @@ def normalize_config(raw):
     }
     if config['max_daily_notional'] < config['max_order_notional']:
         raise ValueError('Daily limit must be at least the per-order limit')
+    risk = raw.get('risk', {})
+    if not isinstance(risk, dict) or not isinstance(risk.get('enabled', False), bool):
+        raise ValueError('Risk settings must be an object with a boolean enabled field')
+    config['risk'] = {
+        'enabled': risk.get('enabled', False),
+        'stop_loss_pct': number(risk.get('stop_loss_pct', .08), .001, .5),
+        'max_daily_loss_pct': number(risk.get('max_daily_loss_pct', .03), .001, .5),
+        'max_drawdown_pct': number(risk.get('max_drawdown_pct', .1), .001, .9),
+    }
     if kind == 'price_trigger':
         trigger = raw.get('trigger') or {}
         if trigger.get('type') not in {'price_above', 'price_below'}:

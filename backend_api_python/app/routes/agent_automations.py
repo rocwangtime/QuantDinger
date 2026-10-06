@@ -2,12 +2,14 @@
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 import json
+import math
 import re
 import time
 import uuid
 
 from flask import Response, g, jsonify, request, stream_with_context
 from app.openapi.blueprint import HumanBlueprint
+from app.openapi.schemas.automations import AutomationDashboardEnvelopeSchema
 from app.utils.auth import login_required
 from app.services.automation import store
 from app.services.automation.domain import normalize_config, session_schedule
@@ -34,6 +36,7 @@ def public_task(row):
     result['managed_quantities'] = store.owned_quantities(row)
     result['monitor_status'] = (row['state'] or {}).get('monitor_status','等待调度器启动') if row['active'] else '已暂停'
     result['latest_run'] = store.query('SELECT id,status,phase,created_at FROM qd_agent_automation_runs WHERE task_id=%s ORDER BY id DESC LIMIT 1',(row['id'],),one=True)
+    result['risk'] = (row['state'] or {}).get('risk') or {}
     if row['config']['kind']=='daily_portfolio':
         result['schedule'] = session_schedule(row['config'])
     return result
@@ -97,6 +100,8 @@ def set_task_state(task_id):
     row = store.task(g.user_id,task_id)
     config = row['config']
     baseline = None
+    baseline_prices = None
+    external_quantities = None
     if data['active']:
         snapshot = account_snapshot(g.user_id,config)
         if config['execution_mode']=='paper_auto':
@@ -110,7 +115,16 @@ def set_task_state(task_id):
                 raise ValueError('账户存在挂单，请先处理后再启用交易任务')
             if config['manage_existing']:
                 baseline = {p['symbol']:p['quantity'] for p in snapshot['positions'] if p['side']=='long' and p['symbol'] in config['symbols']}
-    return public_task(store.set_active(g.user_id,task_id,data['active'],baseline))
+                baseline_prices = {p['symbol']:float(p['marketValue']) / float(p['quantity'])
+                                   for p in snapshot['positions'] if p['symbol'] in baseline and float(p['quantity']) > 0}
+                if any(not math.isfinite(p) or p <= 0 for p in baseline_prices.values()) or sum(baseline[s] * baseline_prices[s] for s in baseline) > config['budget']:
+                    raise ValueError('接管持仓缺少有效市值，或市值超过任务预算')
+            totals = {}
+            for p in snapshot['positions']:
+                if p['side'] == 'long':
+                    totals[p['symbol']] = totals.get(p['symbol'], 0) + float(p['quantity'])
+            external_quantities = {s: max(0, qty - (baseline or {}).get(s, 0)) for s, qty in totals.items()}
+    return public_task(store.set_active(g.user_id,task_id,data['active'],baseline,baseline_prices,external_quantities))
 
 
 @blp.route('/<int:task_id>/preview',methods=['POST'])
@@ -141,6 +155,28 @@ def task_runs(task_id):
 def snapshot(task_id):
     row = store.task(g.user_id,task_id)
     return account_snapshot(g.user_id,row['config'])
+
+
+@blp.route('/<int:task_id>/dashboard', methods=['GET'])
+@blp.doc(summary='Read cached forward performance, independent protection and decision ledger')
+@blp.response(200, AutomationDashboardEnvelopeSchema)
+@login_required
+@envelope
+def task_dashboard(task_id):
+    from app.services.automation.monitor import dashboard
+    row = store.task(g.user_id, task_id)
+    result = dashboard(row)
+    result['task'] = public_task(row)
+    result['runs'] = [public_run(run) for run in result['runs']]
+    return result
+
+
+@blp.route('/<int:task_id>/risk/reset', methods=['POST'])
+@blp.doc(summary='Explicitly reset a paused task protection latch without erasing performance')
+@login_required
+@envelope
+def reset_task_risk(task_id):
+    return public_task(store.reset_risk(g.user_id, task_id))
 
 
 @blp.route('/runs/<int:run_id>/cancel',methods=['POST'])
