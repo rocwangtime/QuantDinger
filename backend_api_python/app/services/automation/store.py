@@ -173,6 +173,46 @@ def edit(user_id, task_id, name, config):
             cur.close()
 
 
+def decision_budget(row, now=None, cur=None):
+    """Created runs reserve daily slots, including failed/cancelled previews."""
+    from datetime import datetime, timedelta, timezone
+    from zoneinfo import ZoneInfo
+    zone = ZoneInfo('America/New_York' if row['config']['market'] == 'USStock' else 'Asia/Hong_Kong')
+    now = now or datetime.now(timezone.utc)
+    local = now.astimezone(zone)
+    start = local.replace(hour=0, minute=0, second=0, microsecond=0)
+    end = start + timedelta(days=1)
+    sql = """SELECT COUNT(*) AS used FROM qd_agent_automation_runs WHERE task_id=%s
+        AND event_key NOT LIKE 'protection:%%' AND created_at >= %s AND created_at < %s"""
+    args = (row['id'], start, end)
+    if cur is None:
+        used = query(sql, args, one=True)['used']
+    else:
+        cur.execute(sql, args)
+        used = cur.fetchone()['used']
+    limit = (row['config'].get('research') or {}).get('max_decisions_per_day', 8)
+    return {'day': local.date().isoformat(), 'timezone': str(zone), 'used': used,
+            'limit': limit, 'remaining': max(0, limit-used), 'resets_at': end.timestamp()}
+
+
+def admit_run(cur, row, event_key, expires_at, execute_at=None, preview=False, evidence=None):
+    """Caller holds the task row lock. Protection uses its separate model-free path."""
+    if not preview and not row['active']:
+        return None
+    if not decision_budget(row, cur=cur)['remaining']:
+        return None
+    cur.execute("""SELECT id FROM qd_agent_automation_runs WHERE task_id=%s
+        AND status IN ('queued','researching','planned','executing') LIMIT 1""", (row['id'],))
+    if cur.fetchone():
+        return None
+    cur.execute('''INSERT INTO qd_agent_automation_runs
+        (task_id,user_id,revision,event_key,expires_at,execute_at,preview,evidence)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s::jsonb) ON CONFLICT DO NOTHING RETURNING *''',
+        (row['id'],row['user_id'],row['revision'],event_key,expires_at,execute_at,preview,dumps(evidence or {})))
+    created = cur.fetchone()
+    return dict(created) if created else None
+
+
 def create_run(row, event_key, expires_at, execute_at=None, preview=False, state=None):
     ensure_schema()
     with get_db_connection() as db:
@@ -180,18 +220,14 @@ def create_run(row, event_key, expires_at, execute_at=None, preview=False, state
         try:
             cur.execute('SELECT * FROM qd_agent_automations WHERE id=%s FOR UPDATE', (row['id'],))
             current = cur.fetchone()
-            if not current or current['revision'] != row['revision'] or (not preview and not current['active']):
+            if not current or current['revision'] != row['revision']:
                 return None
-            cur.execute('''INSERT INTO qd_agent_automation_runs
-                (task_id,user_id,revision,event_key,expires_at,execute_at,preview)
-                VALUES (%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING RETURNING *''',
-                (row['id'],row['user_id'],row['revision'],event_key,expires_at,execute_at,preview))
-            created = cur.fetchone()
+            created = admit_run(cur, current, event_key, expires_at, execute_at, preview)
             if created and state is not None:
                 merged = {**(current['state'] or {}), 'trigger': state['trigger']}
                 cur.execute('UPDATE qd_agent_automations SET state=%s::jsonb WHERE id=%s', (dumps(merged),row['id']))
             db.commit()
-            return dict(created) if created else None
+            return created
         finally:
             cur.close()
 

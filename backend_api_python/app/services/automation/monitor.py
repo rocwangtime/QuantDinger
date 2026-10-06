@@ -65,7 +65,7 @@ def observe(row):
                 exits = []
             previous_risk = state.get('risk') or {}
             state.update(performance=tracking, risk=risk)
-            if report['equity'] is not None and now - float(tracking.get('last_sample_at', 0)) >= 60:
+            if current['config']['execution_mode'] == 'paper_auto' and report['equity'] is not None and now - float(tracking.get('last_sample_at', 0)) >= 60:
                 cur.execute('INSERT INTO qd_agent_automation_samples(task_id,sampled_at,report) VALUES(%s,%s,%s::jsonb)',
                             (current['id'], datetime.fromtimestamp(now, timezone.utc), store.dumps(report)))
                 tracking['last_sample_at'] = now
@@ -97,6 +97,25 @@ def observe(row):
                          f"protection:{current['revision']}:{int(now // 60)}", store.dumps(result),
                          store.dumps({'as_of': now, 'account': account, 'prices': prices, 'risk': risk,
                                       'task_config': current['config']}), expiry))
+            if current['active'] and current['config']['kind'] == 'event_portfolio':
+                # Protection has priority; reviews cannot consume a latched halt.
+                if exits or risk.get('halted') or risk.get('stopped_symbols') or not risk.get('healthy'):
+                    state['monitor_status'] = '盘中复核等待新鲜证据或解除保护锁定'
+                else:
+                    from app.services.automation.events import review_event
+                    cause, next_state = review_event(current['config'], current['revision'],
+                        state.get('event_review'), prices, receipts, now)
+                    cur.execute("SELECT id FROM qd_agent_trade_intents WHERE agent_token_id=%s AND status IN ('EXECUTING','UNCERTAIN','SUBMITTED','PARTIALLY_FILLED') LIMIT 1", (current['token_id'],))
+                    outstanding = cur.fetchone()
+                    if cause and not outstanding and not account.get('open_orders') and not STOP.is_set():
+                        created = store.admit_run(cur, current,
+                            f"event:{current['revision']}:{int(now * 1000)}",
+                            datetime.fromtimestamp(now, timezone.utc) + timedelta(seconds=180),
+                            evidence={'event': cause})
+                        if created:
+                            state['event_review'] = next_state
+                    quota = store.decision_budget(current, cur=cur)
+                    state['monitor_status'] = '每日决策额度已用完' if not quota['remaining'] else '盘中监测价格变化与成交；受冷却时间约束'
             cur.execute('UPDATE qd_agent_automations SET state=%s::jsonb WHERE id=%s', (store.dumps(state), current['id']))
             db.commit()
         finally:
@@ -114,9 +133,14 @@ def unavailable(row):
 def dashboard(row):
     """Cached dashboard never invokes a model or submits broker orders."""
     runs = store.query('SELECT * FROM qd_agent_automation_runs WHERE task_id=%s ORDER BY id DESC LIMIT 30', (row['id'],))
-    usage_rows = store.query("SELECT result->'usage' AS usage FROM qd_agent_automation_runs WHERE task_id=%s AND result ? 'usage'",
+    usage_rows = store.query("SELECT result->'usage' AS usage,result->'research_calls' AS calls FROM qd_agent_automation_runs WHERE task_id=%s AND result ? 'usage'",
                              (row['id'],))
-    usage = [r['usage'] for r in usage_rows]
+    usage = []
+    for entry in usage_rows:
+        if entry.get('calls'):
+            usage.extend(c['usage'] for c in entry['calls'])
+        elif entry.get('usage'):
+            usage.append(entry['usage'])
     costs = {}
     unknown = 0
     for item in usage:
@@ -127,9 +151,10 @@ def dashboard(row):
             costs[currency] = costs.get(currency, 0.) + item['estimated_cost']
     samples = store.query('''SELECT sampled_at,report FROM (SELECT sampled_at,report
         FROM qd_agent_automation_samples WHERE task_id=%s ORDER BY sampled_at DESC LIMIT 1440) s ORDER BY sampled_at''', (row['id'],))
-    return {'performance': (row['state'] or {}).get('performance') or {},
+    from app.services.automation.evaluation import summarize
+    return {'decision_stats': summarize(runs), 'performance': (row['state'] or {}).get('performance') or {},
             'risk': (row['state'] or {}).get('risk') or {}, 'series': samples,
             'orders': store.receipts(row), 'runs': runs,
-            'model_usage': {'recorded_calls': len(usage), 'total_tokens': sum(u.get('total_tokens', 0) for u in usage),
+            'model_usage': {'recorded_calls': len(usage), 'recorded_runs': len(usage_rows), 'total_tokens': sum(u.get('total_tokens', 0) for u in usage),
                             'estimated_cost_by_currency': costs, 'unpriced_calls': unknown,
-                            'coverage': 'completed_decisions_only'}}
+                            'coverage': 'completed_snapshot_decisions_and_recorded_tool_loop_attempts'}}

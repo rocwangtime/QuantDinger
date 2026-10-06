@@ -233,10 +233,10 @@ def test_buy_sell_replay_uses_owned_fills_and_does_not_repeat(db,monkeypatch):
     assert store.owned_quantities(row)=={'AAPL':0} and holdings==[]
 
 
-def monitored_task(monkeypatch):
+def monitored_task(monkeypatch, **changes):
     from unittest.mock import MagicMock
     from app.services.automation import monitor
-    row = store.set_active(900001, create(execution_mode='paper_auto', risk={'enabled': True})['id'], True)
+    row = store.set_active(900001, create(execution_mode='paper_auto', risk={'enabled': True}, **changes)['id'], True)
     store.query('''INSERT INTO qd_agent_trade_intents
         (user_id,agent_token_id,broker,account_ref,idempotency_key,intent_hash,order_spec,status,filled_qty,avg_fill_price)
         VALUES(%s,%s,'futu','credential:7','fill-fixture','fixture',%s::jsonb,'FILLED',5,100) RETURNING id''',
@@ -345,3 +345,147 @@ def test_universe_edit_retains_owned_instruments_and_cannot_rewrite_capital(db, 
     assert set(token['instruments'].split(',')) == {'AAPL', 'TSLA'}
     with pytest.raises(ValueError, match='本金'):
         store.edit(row['user_id'], row['id'], 'changed capital', {**changed, 'budget': 2000})
+
+
+def test_daily_budget_survives_failure_cancel_revision_and_exempts_protection(db):
+    row = create(research={'max_decisions_per_day': 2})
+    first = run_for(row)
+    store.update_run(first['id'], status='failed')
+    second = store.create_run(row, 'preview:second', first['expires_at'], preview=True)
+    store.cancel_run(row['user_id'], second['id'])
+    row = store.edit(row['user_id'], row['id'], 'edited', row['config'])
+    assert store.create_run(row, 'preview:third', first['expires_at'], preview=True) is None
+    quota = store.decision_budget(row)
+    assert quota['used'] == 2 and quota['remaining'] == 0 and quota['timezone'] == 'America/New_York'
+    store.query("INSERT INTO qd_agent_automation_runs(task_id,user_id,revision,event_key,status,expires_at) VALUES(%s,%s,%s,'protection:fixture','completed',%s) RETURNING id",
+        (row['id'], row['user_id'], row['revision'], first['expires_at']), one=True)
+    assert store.decision_budget(row)['used'] == 2
+
+
+def test_tool_loop_preview_persists_each_call_and_cannot_submit(db, monkeypatch):
+    from tests.test_agent_research import Model, evidence
+    row = create(research={'mode': 'tool_loop'})
+    run = run_for(row)
+    model = Model([{'tool_requests': [{'tool': 'quote', 'arguments': {'symbol': 'AAPL'}}]},
+                   {'summary': 'wait', 'items': [{'symbol': 'AAPL', 'action': 'WAIT', 'target_weight': 0}]}])
+    monkeypatch.setattr(runner, 'build_evidence', lambda *_a, **_k: evidence())
+    monkeypatch.setattr('app.services.llm.LLMService', lambda **_: model)
+    monkeypatch.setattr(runner, 'execute', lambda *_: pytest.fail('Preview cannot execute'))
+    runner.analyze(row, run)
+    saved = store.query('SELECT * FROM qd_agent_automation_runs WHERE id=%s', (run['id'],), one=True)
+    assert saved['status'] == 'completed', saved['phase']
+    assert saved['result']['prompt_version'] == 'portfolio-tools-v1'
+    assert len(saved['result']['tool_trace']) == 1 and saved['result']['usage']['request_count'] == 2
+    from app.routes.agent_automations import public_run
+    brief = public_run(saved)
+    assert 'tool_trace' not in brief['result'] and brief['result']['tool_request_count'] == 1
+    assert public_run(saved, evidence=True)['result']['tool_trace'] == saved['result']['tool_trace']
+    from app.services.automation.monitor import dashboard
+    assert dashboard(row)['model_usage']['recorded_calls'] == 2
+    assert store.receipts(row) == []
+
+
+def test_tool_loop_failure_keeps_usage_without_executable_items(db, monkeypatch):
+    from tests.test_agent_research import Model, evidence
+    row = create(research={'mode': 'tool_loop', 'max_model_calls': 1})
+    run = run_for(row)
+    model = Model([{'tool_requests': [{'tool': 'account', 'arguments': {}}]}])
+    monkeypatch.setattr(runner, 'build_evidence', lambda *_a, **_k: evidence())
+    monkeypatch.setattr('app.services.llm.LLMService', lambda **_: model)
+    runner.analyze(row, run)
+    saved = store.query('SELECT * FROM qd_agent_automation_runs WHERE id=%s', (run['id'],), one=True)
+    assert saved['status'] == 'failed' and 'items' not in saved['result']
+    assert saved['result']['usage']['request_count'] == 1 and store.receipts(row) == []
+
+
+def test_event_review_dedup_busy_cooldown_and_pause(db, monkeypatch):
+    from app.services.automation import monitor
+    row, client = monitored_task(monkeypatch, kind='event_portfolio', cooldown_seconds=30)
+    monitor.observe(row)
+    current = store.task(row['user_id'], row['id'])
+    first = store.query('SELECT * FROM qd_agent_automation_runs WHERE task_id=%s', (row['id'],), one=True)
+    assert first['evidence']['event']['type'] == 'initial_observation' and first['status'] == 'queued'
+    monitor.observe(current)
+    assert store.decision_budget(current)['used'] == 1
+    store.update_run(first['id'], status='completed')
+    # Expire the cooldown without changing remote timestamps.
+    state = current['state']['event_review']
+    state['reviewed_at'] -= 31
+    store.query("UPDATE qd_agent_automations SET state=jsonb_set(state,'{event_review}',%s::jsonb) WHERE id=%s RETURNING id", (store.dumps(state), row['id']), one=True)
+    client.get_simulate_execution_quote.return_value['price'] = 103
+    monitor.observe(store.task(row['user_id'], row['id']))
+    latest = store.query('SELECT * FROM qd_agent_automation_runs WHERE task_id=%s ORDER BY id DESC LIMIT 1', (row['id'],), one=True)
+    assert latest['evidence']['event']['type'] == 'price_movement' and latest['id'] != first['id']
+    row = store.set_active(row['user_id'], row['id'], False)
+    client.get_simulate_execution_quote.return_value['price'] = 106
+    monitor.observe(row)
+    assert store.decision_budget(row)['used'] == 2
+
+
+def test_event_review_defers_for_orders_and_protection_has_priority(db, monkeypatch):
+    from app.services.automation import monitor
+    row, client = monitored_task(monkeypatch, kind='event_portfolio')
+    store.query("UPDATE qd_agent_trade_intents SET status='PARTIALLY_FILLED' WHERE agent_token_id=%s RETURNING id", (row['token_id'],), one=True)
+    monitor.observe(row)
+    assert store.decision_budget(row)['used'] == 0
+    assert not store.task(row['user_id'], row['id'])['state'].get('event_review')
+    store.query("UPDATE qd_agent_trade_intents SET status='FILLED' WHERE agent_token_id=%s RETURNING id", (row['token_id'],), one=True)
+    client.get_simulate_execution_quote.return_value['price'] = 90
+    monitor.observe(store.task(row['user_id'], row['id']))
+    saved = store.query('SELECT * FROM qd_agent_automation_runs WHERE task_id=%s', (row['id'],), one=True)
+    assert saved['event_key'].startswith('protection:') and store.decision_budget(row)['used'] == 0
+
+
+def test_fill_event_uses_durable_cumulative_changes(db, monkeypatch):
+    from app.services.automation import monitor
+    row, _ = monitored_task(monkeypatch, kind='event_portfolio')
+    monitor.observe(row)
+    first = store.query('SELECT * FROM qd_agent_automation_runs WHERE task_id=%s', (row['id'],), one=True)
+    store.update_run(first['id'], status='completed')
+    state = store.task(row['user_id'], row['id'])['state']['event_review']
+    state['reviewed_at'] -= 301
+    store.query("UPDATE qd_agent_automations SET state=jsonb_set(state,'{event_review}',%s::jsonb) WHERE id=%s RETURNING id", (store.dumps(state), row['id']), one=True)
+    store.query('UPDATE qd_agent_trade_intents SET filled_qty=6 WHERE agent_token_id=%s RETURNING id', (row['token_id'],), one=True)
+    monkeypatch.setattr(monitor, 'account_snapshot', lambda *_: {'as_of': time.time(),
+        'positions': [{'symbol': 'AAPL', 'quantity': 6, 'side': 'long'}], 'open_orders': [], 'funds': {'cash': 400}})
+    monitor.observe(store.task(row['user_id'], row['id']))
+    latest = store.query('SELECT * FROM qd_agent_automation_runs WHERE task_id=%s ORDER BY id DESC LIMIT 1', (row['id'],), one=True)
+    assert latest['evidence']['event']['type'] == 'fills_changed'
+    assert latest['evidence']['event']['fills'][0][1:] == [6.0, 100.0]
+
+
+def test_event_research_preserves_trigger_and_invokes_existing_executor(db, monkeypatch):
+    from tests.test_agent_research import Model, evidence
+    row = store.set_active(900001, create(kind='event_portfolio', execution_mode='paper_auto', research={'mode': 'tool_loop'})['id'], True)
+    run = run_for(row, preview=False)
+    run['evidence'] = {'event': {'type': 'price_movement', 'observed_at': time.time()}}
+    model = Model([{'summary': 'wait', 'items': [{'symbol': 'AAPL', 'action': 'WAIT', 'target_weight': 0}]}])
+    monkeypatch.setattr(runner, 'build_evidence', lambda *_a, **_k: evidence())
+    monkeypatch.setattr('app.services.llm.LLMService', lambda **_: model)
+    invoked = []
+    monkeypatch.setattr(runner, 'execute', lambda row, run: invoked.append(run['result']))
+    runner.analyze(row, run)
+    assert len(invoked) == 1 and invoked[0]['event']['type'] == 'price_movement'
+    saved = store.query('SELECT * FROM qd_agent_automation_runs WHERE id=%s', (run['id'],), one=True)
+    assert saved['status'] == 'planned' and saved['evidence']['event']['type'] == 'price_movement'
+
+
+def test_quota_reservations_are_serialized_across_connections(db):
+    from concurrent.futures import ThreadPoolExecutor
+    row = create(research={'max_decisions_per_day': 1})
+    def reserve(index):
+        with store.get_db_connection() as connection:
+            cur = connection.cursor()
+            cur.execute('SELECT * FROM qd_agent_automations WHERE id=%s FOR UPDATE', (row['id'],))
+            current = dict(cur.fetchone())
+            result = store.admit_run(cur, current, f'parallel:{index}', datetime.now(timezone.utc)+timedelta(seconds=180), preview=True)
+            if result:
+                # Complete before releasing the lock: the next contender is
+                # rejected by quota, not merely by the busy-run check.
+                cur.execute("UPDATE qd_agent_automation_runs SET status='completed' WHERE id=%s", (result['id'],))
+            connection.commit()
+            return result
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(reserve, range(2)))
+    assert sum(result is not None for result in results) == 1
+    assert store.decision_budget(row)['used'] == 1

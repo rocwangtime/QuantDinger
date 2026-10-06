@@ -612,6 +612,13 @@ components:
       properties:
         task:
           type: object
+          description: Owner-scoped task, normalized research/event settings, daily
+            decision_budget and event_review baseline
+          additionalProperties: {}
+        decision_stats:
+          type: object
+          description: Descriptive counts for latest 30 runs; proposed actions are
+            not fills or trading accuracy
           additionalProperties: {}
         performance:
           $ref: '#/components/schemas/AutomationPerformance'
@@ -637,8 +644,9 @@ components:
             additionalProperties: {}
         model_usage:
           type: object
-          description: Completed decisions including previews only. Currency totals
-            are estimates; unpriced calls are counted separately.
+          description: Completed snapshot decisions plus recorded tool-loop attempts,
+            including previews and failed/cancelled rounds. Currency totals are estimates;
+            unpriced calls are counted separately.
           additionalProperties: {}
       additionalProperties: false
     AutomationDashboardEnvelope:

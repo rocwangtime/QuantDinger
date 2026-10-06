@@ -94,7 +94,7 @@ def loop():
                 # Paused portfolios remain visible; observation never overrides
                 # pause. A separate pool keeps LLM latency out of protection.
                 monitored = store.query("""SELECT * FROM qd_agent_automations WHERE
-                    config->>'execution_mode'='paper_auto' AND (active=TRUE OR state ? 'performance') ORDER BY id""")
+                    (config->>'execution_mode'='paper_auto' AND (active=TRUE OR state ? 'performance')) OR (active=TRUE AND config->>'kind'='event_portfolio') ORDER BY id""")
                 for observed_row in sorted(monitored, key=lambda r: (not r['active'], next_observation.get(r['id'], 0))):
                     key = observed_row['id']
                     if key not in observations and time.monotonic() >= next_observation.get(key, 0) and len(observations) < 2:
@@ -137,6 +137,8 @@ def loop():
                         if (row['state'] or {}).get('monitor_status') != message:
                             store.query("UPDATE qd_agent_automations SET state=jsonb_set(state,'{monitor_status}',%s::jsonb) WHERE id=%s AND revision=%s RETURNING id",
                                         (store.dumps(message),task_id,row['revision']),one=True)
+                    if config['kind']=='event_portfolio':
+                        continue  # The independent observation pool admits durable review events.
                     if config['kind']=='daily_portfolio':
                         schedule = session_schedule(config,now)
                         if schedule['due']:

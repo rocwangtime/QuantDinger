@@ -48,13 +48,14 @@ class AutomationPerformanceSchema(Schema):
 
 
 class AutomationDashboardDataSchema(Schema):
-    task = fields.Dict()
+    task = fields.Dict(metadata={'description': 'Owner-scoped task, normalized research/event settings, daily decision_budget and event_review baseline'})
+    decision_stats = fields.Dict(metadata={'description': 'Descriptive counts for latest 30 runs; proposed actions are not fills or trading accuracy'})
     performance = fields.Nested(AutomationPerformanceSchema)
     risk = fields.Dict(metadata={'description': 'healthy, checked_at (Unix seconds), halted, reasons, stopped_symbols; latched until explicit reset'})
     series = fields.List(fields.Nested(AutomationSampleSchema), metadata={'description': 'Most recent 1440 valid minute observations, oldest first'})
     orders = fields.List(fields.Dict())
     runs = fields.List(fields.Dict())
-    model_usage = fields.Dict(metadata={'description': 'Completed decisions including previews only. Currency totals are estimates; unpriced calls are counted separately.'})
+    model_usage = fields.Dict(metadata={'description': 'Completed snapshot decisions plus recorded tool-loop attempts, including previews and failed/cancelled rounds. Currency totals are estimates; unpriced calls are counted separately.'})
 
 
 class AutomationDashboardEnvelopeSchema(Schema):

@@ -5,7 +5,7 @@
 The first forward-evaluation milestone extends existing Futu US/HK SIMULATE
 tasks with a human task workspace, fill-based reports and model-independent
 holding protection. The user approved implementation after the US paper order
-flow was demonstrated. Tool-loop research and live execution are later milestones.
+flow was demonstrated. Bounded research and event reviews extend this milestone in [AGENT_RESEARCH_EVENTS.md](AGENT_RESEARCH_EVENTS.md).
 
 Vue lives in the private QuantDinger-Vue repository at
 `src/views/agent-tasks/index.vue`, served at `/#/agent-tasks`. Human JWT APIs
@@ -38,8 +38,7 @@ cash interest, historical agent backtest, annualized return or win rate is infer
 
 Missing fill costs/marks or ownership discrepancies suppress total equity/returns.
 Partial positions and the last valid report retain timestamps. Fees/dividends are
-unavailable, not zero. Model usage covers completed decisions including previews,
-excluding failed/cancelled provider calls. Estimated costs are separated by currency;
+unavailable, not zero. Model usage covers completed snapshot decisions and recorded tool-loop attempts, including previews and available failed/cancelled tool-round usage. Failed snapshot calls remain excluded. Estimated costs are separated by currency;
 unknown prices are counted, not assumed free.
 
 ## Independent protection

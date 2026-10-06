@@ -40,7 +40,7 @@ def analyze(row, run, evidence=None, trigger_quote=None):
         if not claimed:
             return
         if evidence is None:
-            evidence = build_evidence(row,cancelled=cancelled)
+            evidence = build_evidence(row,news=(config.get('research') or {}).get('mode') != 'tool_loop',cancelled=cancelled)
         else:
             evidence = copy.deepcopy(evidence)
         if trigger_quote:
@@ -49,10 +49,14 @@ def analyze(row, run, evidence=None, trigger_quote=None):
             instrument = evidence['instruments'][config['symbols'][0]]
             instrument.update(price=trigger_quote['price'],quote_as_of=trigger_quote['as_of'])
             evidence['trigger'] = trigger_quote
+        if (run.get('evidence') or {}).get('event'):
+            evidence['event'] = run['evidence']['event']
         evidence['managed_quantities'] = store.owned_quantities(row)
-        evidence['previous_plan'] = (row.get('state') or {}).get('last_plan')
+        previous = (row.get('state') or {}).get('last_plan') or {}
+        evidence['previous_plan'] = {key: previous[key] for key in ('summary', 'items', 'task_revision', 'prompt_version') if key in previous}
         evidence['task_config'] = config
-        evidence['prompt_version'] = 'portfolio-json-v2'
+        prompt_version = 'portfolio-tools-v1' if (config.get('research') or {}).get('mode') == 'tool_loop' else 'portfolio-json-v2'
+        evidence['prompt_version'] = prompt_version
         store.update_run(run['id'],evidence=evidence,phase='Agent 正在评估持仓与候选机会')
         if cancelled():
             raise TimeoutError('Decision cancelled or expired')
@@ -61,7 +65,7 @@ def analyze(row, run, evidence=None, trigger_quote=None):
         service = LLMService(selection=config.get('llm_selection') or {})
         if service.provider.value not in {'openai','deepseek','volcengine'}:
             raise ValueError('Trading tasks currently require OpenAI, DeepSeek or Volcengine streaming')
-        service.get_max_tokens = lambda: 700 if config['kind']=='price_trigger' else 3500
+        service.get_max_tokens = lambda: min(700 if config['kind']=='price_trigger' else 3500, (config.get('research') or {}).get('max_output_tokens', 7000))
         messages = [
             {'role':'system','content':(
                 'You manage a long-only simulated stock portfolio. Use only supplied timestamped evidence. '
@@ -80,34 +84,44 @@ def analyze(row, run, evidence=None, trigger_quote=None):
             )},
             {'role':'user','content':store.dumps({'task':config,'evidence':evidence})},
         ]
-        draft, flushed = '', 0.
-        stream = service.stream_llm_api_cancellable(messages,cancelled,temperature=.1)
-        try:
-            for delta in stream:
-                draft += delta
-                if len(draft)>40000:
-                    raise ValueError('Decision exceeds the output limit')
-                if time.monotonic()-flushed>.3:
-                    store.update_run(run['id'],draft=draft)
-                    flushed = time.monotonic()
-        finally:
-            stream.close()
+        research_result = {}
+        if prompt_version == 'portfolio-tools-v1':
+            from app.services.automation.research import run as research_run
+            draft, research_result = research_run(service, row, evidence, messages, cancelled,
+                lambda draft, result: store.update_run(run['id'], draft=draft, result=result))
+        else:
+            draft, flushed = '', 0.
+            stream = service.stream_llm_api_cancellable(messages,cancelled,temperature=.1)
+            try:
+                for delta in stream:
+                    draft += delta
+                    if len(draft)>40000:
+                        raise ValueError('Decision exceeds the output limit')
+                    if time.monotonic()-flushed>.3:
+                        store.update_run(run['id'],draft=draft)
+                        flushed = time.monotonic()
+            finally:
+                stream.close()
         if cancelled():
             raise TimeoutError('Decision cancelled or expired')
         decision = parse_decision(draft,evidence,config)
+        decision.update(research_result)
+        if evidence.get('event'):
+            decision['event'] = evidence['event']
         decision['latency_ms'] = round((time.monotonic()-started)*1000)
-        decision['prompt_version'] = 'portfolio-json-v2'
+        decision['prompt_version'] = prompt_version
         decision['task_revision'] = run['revision']
-        decision['usage'] = build_usage_display(provider=service.last_provider,model=service.last_model,
-                                               usage=service.last_usage,
-                                               estimated_input_tokens=len(store.dumps(messages))//3,
-                                               estimated_output_tokens=len(draft)//3)
+        if not research_result:
+            decision['usage'] = build_usage_display(provider=service.last_provider,model=service.last_model,
+                                                   usage=service.last_usage,
+                                                   estimated_input_tokens=len(store.dumps(messages))//3,
+                                                   estimated_output_tokens=len(draft)//3)
         automatic = not run['preview'] and config['execution_mode']=='paper_auto'
         store.update_run(run['id'],draft=draft,result=decision,
                          status='planned' if automatic else 'completed',
                          phase='等待交易时段复核' if automatic else '研究完成',
                          finished_at=None if automatic else utcnow())
-        if automatic and config['kind']=='price_trigger':
+        if automatic and config['kind'] in {'price_trigger', 'event_portfolio'}:
             execute(row,{**run,'result':decision})
         elif not run['preview'] and not automatic:
             store.query("UPDATE qd_agent_automations SET state=jsonb_set(state,'{last_plan}',%s::jsonb) WHERE id=%s AND revision=%s RETURNING id",

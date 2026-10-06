@@ -36,6 +36,8 @@ def public_task(row):
     result['managed_quantities'] = store.owned_quantities(row)
     result['monitor_status'] = (row['state'] or {}).get('monitor_status','等待调度器启动') if row['active'] else '已暂停'
     result['latest_run'] = store.query('SELECT id,status,phase,created_at FROM qd_agent_automation_runs WHERE task_id=%s ORDER BY id DESC LIMIT 1',(row['id'],),one=True)
+    result['decision_budget'] = store.decision_budget(row)
+    result['event_review'] = (row['state'] or {}).get('event_review') or {}
     result['risk'] = (row['state'] or {}).get('risk') or {}
     if row['config']['kind']=='daily_portfolio':
         result['schedule'] = session_schedule(row['config'])
@@ -47,6 +49,9 @@ def public_run(run, *, evidence=False):
     result.pop('user_id',None)
     if not evidence:
         result.pop('evidence',None)
+        result['result'] = dict(result.get('result') or {})
+        if 'tool_trace' in result['result']:
+            result['result']['tool_request_count'] = len(result['result'].pop('tool_trace'))
     # Show the streamed summary/reasons, never raw machine JSON.
     text = run.get('draft') or ''
     parts = re.findall(r'"(?:summary|reason)"\s*:\s*"((?:\\.|[^"\\])*)',text)
@@ -136,7 +141,7 @@ def preview_task(task_id):
     expiry = datetime.now(timezone.utc)+timedelta(seconds=180)
     run = store.create_run(row,'preview:'+str(uuid.uuid4()),expiry,preview=True)
     if not run:
-        raise ValueError('此任务已有正在运行的分析，请先等待或停止')
+        raise ValueError('此任务已有待完成的分析，或每日决策额度已用完')
     return public_run(run)
 
 
