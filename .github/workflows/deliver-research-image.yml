@@ -32,6 +32,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Checkout the exact application revision
+        uses: actions/checkout@v7
+        with:
+          ref: 2a047d0db09ce1eb1eafe7e1c5f92b1083c3e229
+
       - name: Download and verify published amd64 image
         shell: bash
         run: |
@@ -39,9 +44,25 @@ jobs:
           docker pull --platform linux/amd64 "$IMAGE_REF"
           test "$(docker image inspect --format '{{.Architecture}}' "$IMAGE_REF")" = amd64
           test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$IMAGE_REF")" = "$EXPECTED_REVISION"
-          docker tag "$IMAGE_REF" "$IMAGE_TAG"
-          docker save "$IMAGE_TAG" | gzip -1 > "$RUNNER_TEMP/backend-image.tar.gz"
-          sha256sum "$RUNNER_TEMP/backend-image.tar.gz"
+          mkdir -p "$RUNNER_TEMP/research-release/source" "$RUNNER_TEMP/research-release/wheels"
+          git archive HEAD backend_api_python | tar -xf - --strip-components=1 -C "$RUNNER_TEMP/research-release/source"
+          docker run --rm --entrypoint python \
+            -v "$RUNNER_TEMP/research-release/wheels:/export" "$IMAGE_REF" \
+            -m pip download --index-url https://pypi.org/simple --only-binary=:all: --no-deps \
+            --dest /export ccxt==4.5.85 litellm==1.93.2 PyJWT==2.15.1 pypdf==6.19.0 urllib3==2.8.0
+          python3 - "$RUNNER_TEMP/research-release/wheels" <<'PY'
+          import hashlib, json, pathlib, sys, urllib.request
+          for path in pathlib.Path(sys.argv[1]).glob('*.whl'):
+              name, version = path.name.split('-')[:2]
+              with urllib.request.urlopen(f'https://pypi.org/pypi/{name}/{version}/json') as response:
+                  document = json.load(response)
+              expected = next(item['digests']['sha256'] for item in document['urls'] if item['filename'] == path.name)
+              assert hashlib.sha256(path.read_bytes()).hexdigest() == expected, path.name
+              print('Verified official wheel SHA-256:', path.name)
+          PY
+          tar -czf "$RUNNER_TEMP/research-release.tar.gz" -C "$RUNNER_TEMP/research-release" .
+          sha256sum "$RUNNER_TEMP/research-release.tar.gz"
+          split -n 8 -d "$RUNNER_TEMP/research-release.tar.gz" "$RUNNER_TEMP/research-part"
 
       - name: Deliver staging archive over restricted SSH
         shell: bash
@@ -58,8 +79,14 @@ jobs:
           trap 'rm -f "$key_path" "$hosts_path"' EXIT
           printf '%s\n' "$UPLOAD_KEY" > "$key_path"
           printf '%s\n' "$KNOWN_HOSTS" > "$hosts_path"
-          ssh -T -i "$key_path" -o BatchMode=yes -o StrictHostKeyChecking=yes \
-            -o UserKnownHostsFile="$hosts_path" -o ConnectTimeout=15 \
-            -o ServerAliveInterval=30 -o ServerAliveCountMax=3 \
-            ubuntu@106.55.138.232 upload-backend-2a047d0 < "$RUNNER_TEMP/backend-image.tar.gz"
-          echo 'Verified image archive delivered to the fixed server staging path.'
+          uploads=()
+          for number in $(seq 0 7); do
+            part=$(printf '%02d' "$number")
+            ssh -T -i "$key_path" -o BatchMode=yes -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile="$hosts_path" -o ConnectTimeout=15 \
+              -o ServerAliveInterval=30 -o ServerAliveCountMax=3 \
+              ubuntu@106.55.138.232 "upload-research-2a047d0-part$number" < "$RUNNER_TEMP/research-part$part" &
+            uploads+=("$!")
+          done
+          for upload in "${uploads[@]}"; do wait "$upload"; done
+          echo 'Verified incremental release delivered to fixed server staging paths.'
