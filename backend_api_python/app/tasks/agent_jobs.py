@@ -15,6 +15,9 @@ SUPPORTED_KINDS = frozenset(
         "backtest",
         "strategy_evolution",
         "ai_evaluation",
+        "polymarket_scan",
+        "polymarket_paper",
+        "polymarket_replay",
     }
 )
 
@@ -36,6 +39,10 @@ def _execute(kind: str, payload: dict, on_progress):
     if kind == "ai_evaluation":
         from app.services.ai_evaluation import run_shadow_job
         return run_shadow_job(request_payload, on_progress)
+    if kind in {"polymarket_scan", "polymarket_paper", "polymarket_replay"}:
+        from app.services.polymarket.jobs import run_scan, run_paper, run_replay
+        runner = {"polymarket_scan": run_scan, "polymarket_paper": run_paper, "polymarket_replay": run_replay}[kind]
+        return runner(request_payload, on_progress)
 
     raise ValueError(f"Unsupported durable agent job kind: {kind}")
 

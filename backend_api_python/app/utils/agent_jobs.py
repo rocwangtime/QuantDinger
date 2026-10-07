@@ -102,11 +102,11 @@ def submit_job(
     request_payload = dict(request_payload)
     with get_db_connection() as db:
         cur = db.cursor()
-        if idempotency_key and agent_token_id:
+        if idempotency_key:
             cur.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
                         (f"agent-job:{user_id}:{agent_token_id}:{kind}:{idempotency_key}",))
             cur.execute("""SELECT job_id, kind, status, request, created_at FROM qd_agent_jobs
-                WHERE user_id = %s AND agent_token_id = %s AND kind = %s AND idempotency_key = %s
+                WHERE user_id = %s AND agent_token_id IS NOT DISTINCT FROM %s AND kind = %s AND idempotency_key = %s
                 ORDER BY id DESC LIMIT 1""", (user_id, agent_token_id, kind, idempotency_key))
             existing = cur.fetchone()
             if existing:
@@ -117,6 +117,15 @@ def submit_job(
                 db.commit()
                 cur.close()
                 return _job_receipt(existing, duplicate=True)
+        if kind in {"polymarket_scan", "polymarket_paper", "polymarket_replay"}:
+            # Serialize admission across API processes. Repeating an admitted
+            # idempotency key above still succeeds when the capacity is full.
+            cur.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (f"polymarket-jobs:{user_id}",))
+            cur.execute("SELECT COUNT(*) AS count FROM qd_agent_jobs WHERE user_id=%s "
+                        "AND kind IN ('polymarket_scan','polymarket_paper','polymarket_replay') "
+                        "AND status IN ('queued','running')", (int(user_id),))
+            if int((cur.fetchone() or {}).get("count") or 0) >= 2:
+                raise BillingError("polymarket.tooManyActiveJobs", status=409)
         if kind == "backtest":
             request_payload["__billing"] = get_billing_service().consume_in_transaction(
                 cur, int(user_id), "backtest", f"agent-backtest:{job_id}")
