@@ -133,7 +133,7 @@ def unavailable(row):
 def dashboard(row):
     """Cached dashboard never invokes a model or submits broker orders."""
     runs = store.query('SELECT * FROM qd_agent_automation_runs WHERE task_id=%s ORDER BY id DESC LIMIT 30', (row['id'],))
-    usage_rows = store.query("SELECT result->'usage' AS usage,result->'research_calls' AS calls FROM qd_agent_automation_runs WHERE task_id=%s AND result ? 'usage'",
+    usage_rows = store.query("SELECT result->'usage' AS usage,result->'research_calls' AS calls FROM qd_agent_automation_runs WHERE task_id=%s AND jsonb_exists(result, 'usage')",
                              (row['id'],))
     usage = []
     for entry in usage_rows:
