@@ -531,3 +531,24 @@ def test_connect_trade_only_skips_quote_context(ensure):
     status = client.get_connection_status()
     assert status["quote_ctx"] is False
     assert status["trade_ctx"] is True
+
+
+@pytest.mark.parametrize('market,code,env,accepted', [
+    ('US', 'US.AAPL', 'SIMULATE', True),
+    ('HK', 'HK.01810', 'SIMULATE', True),
+    ('HK', 'US.AAPL', 'SIMULATE', False),
+    ('US', 'HK.01810', 'SIMULATE', False),
+    ('HK', 'SH.600000', 'SIMULATE', False),
+    ('HK', 'HK.01810', 'REAL', False),
+    ('US', 'US.AAPL', 'REAL', False),
+])
+@patch('app.services.futu_trading.client._ensure_futu', return_value=_FakeFT)
+def test_order_push_respects_configured_stock_market_and_paper_env(_ensure, market, code, env, accepted):
+    client, _, trade = _client_with_mocks()
+    client.config.trade_market = market
+    callback = MagicMock()
+    client.add_order_handler(callback)
+    assert client.start_push()
+    handler = trade.set_handler.call_args.args[0]
+    handler.on_recv_rsp((0, pd.DataFrame([{'code': code, 'trd_env': env, 'order_id': 'test'}])))
+    assert callback.call_count == int(accepted)
