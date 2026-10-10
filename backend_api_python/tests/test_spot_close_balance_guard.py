@@ -150,7 +150,7 @@ def test_worker_never_restores_blocked_spot_sell_quantity(monkeypatch, retry, fa
         cfg={"user_id": 1}, exchange_config={"exchange_id": "htx"},
         safe_exchange_config={}, exchange_id="htx", market_category="Crypto", market_type="spot",
     )
-    monkeypatch.setattr(module, "build_live_order_context", lambda **kw: ctx)
+    monkeypatch.setattr(module, "prepare_live_order_context", lambda **kw: ctx)
     monkeypatch.setattr(module, "create_client", lambda *args, **kw: client)
     monkeypatch.setattr(module, "append_strategy_log", MagicMock())
     monkeypatch.setattr(module, "LiveOrderNotifier", MagicMock())
