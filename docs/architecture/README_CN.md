@@ -23,6 +23,8 @@ QuantDinger v5 将 HTTP 请求、长期交易运行、领域调度、有限后�
 
 ## 按修改类型阅读
 
+本个人 fork 的研发进度、后续验收顺序与云端接手说明见 [研发交接文档](DEVELOPMENT_HANDOFF_CN.md)。
+
 | 修改任务 | 详细文档 |
 | --- | --- |
 | 理解包与进程归属 | [后端架构（英文）](ARCHITECTURE.md) |
