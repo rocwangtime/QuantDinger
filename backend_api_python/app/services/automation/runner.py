@@ -6,7 +6,7 @@ import time
 from datetime import datetime, timezone
 
 from app.services.automation import store, health
-from app.services.automation.domain import parse_decision, size_order
+from app.services.automation.domain import available_buy_cash, parse_decision, size_order
 from app.services.automation.market import build_evidence, account_snapshot
 
 
@@ -192,7 +192,7 @@ def execute(row, run):
             reserved += sum(max(0,float(r['order_spec']['qty'])-float(r.get('filled_qty') or 0))*float(r['order_spec']['limit_price'])
                             for r in outstanding if r['order_spec']['side']=='buy' and str(r.get('broker_order_id')) not in broker_ids)
             funds = account['funds']
-            cash = min(float(funds.get('cash') or 0),float(funds.get('power') or 0),
+            cash = min(available_buy_cash(funds, config['market']),
                        max(0,config['budget']*(1-config['reserve_ratio'])-exposure-reserved))
             if item['action']=='BUY':
                 remaining_buy_cash = cash if remaining_buy_cash is None else min(cash,remaining_buy_cash)
@@ -207,8 +207,9 @@ def execute(row, run):
                 if not still_met:
                     raise ValueError('Trigger condition no longer holds')
             lot = client.get_lot_size(item['symbol']) if config['market']=='HKStock' else 1
+            maximum = client.get_max_cash_buy(item['symbol'], price) if config['market']=='HKStock' and item['action']=='BUY' else None
             order = size_order(item,config,price=price,lot=lot,owned_qty=owned.get(item['symbol'],0),
-                               broker_qty=broker_qty,power=cash,open_symbols=open_symbols)
+                               broker_qty=broker_qty,power=cash,open_symbols=open_symbols,max_cash_buy=maximum)
             if not order:
                 checks.append({'symbol':item['symbol'],'status':'skipped',
                                'reason':'价格区间、整手数量、已有挂单或可用资金/持仓不满足'})

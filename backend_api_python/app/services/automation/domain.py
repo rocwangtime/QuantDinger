@@ -192,7 +192,17 @@ def parse_decision(text, evidence, config):
     return {'items': items, 'summary': str(decision.get('summary') or '')[:2000]}
 
 
-def size_order(item, config, *, price, lot, owned_qty, broker_qty, power, open_symbols):
+def available_buy_cash(funds, market):
+    """HK SIMULATE may omit generic power; exact stock limits are checked separately."""
+    cash = float(funds.get('cash') or 0)
+    power = float(funds.get('power') or 0)
+    if market == 'HKStock' and power == 0:
+        return cash
+    return min(cash, power)
+
+
+def size_order(item, config, *, price, lot, owned_qty, broker_qty, power, open_symbols,
+               max_cash_buy=None):
     code = item['symbol']
     if code in open_symbols or item['action'] in {'HOLD', 'WAIT'}:
         return None
@@ -205,6 +215,9 @@ def size_order(item, config, *, price, lot, owned_qty, broker_qty, power, open_s
         # Existing external positions contribute to exposure, but are never sold.
         delta = max(0, target - broker_qty)
         cap = min(config['max_order_notional'], max(0, power), delta * price)
+        if config['market'] == 'HKStock' and max_cash_buy is not None:
+            # Futu max_cash_buy is a quantity, not a monetary balance.
+            cap = min(cap, number(max_cash_buy) * price)
         qty, side = math.floor(cap / price / lot) * lot, 'buy'
     else:
         delta = owned if item['action'] == 'EXIT' else min(owned, max(0, broker_qty - target))

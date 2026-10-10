@@ -1073,7 +1073,9 @@ class FutuClient:
                             pushed_account = row_data.get("acc_id")
                             if pushed_account not in (None, "") and int(pushed_account) != client._acc_id_arg():
                                 continue
-                            if not str(row_data.get("code") or "").startswith("US."):
+                            if client.config.trade_market not in {"US", "HK"} or not str(
+                                row_data.get("code") or ""
+                            ).startswith(f"{client.config.trade_market}."):
                                 continue
                             raw = order_row_to_raw(row)
                             for cb in list(client._order_handlers):

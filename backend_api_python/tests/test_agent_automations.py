@@ -198,3 +198,60 @@ def test_multi_symbol_run_cannot_reuse_cash_when_broker_snapshot_lags(monkeypatc
     assert [o['qty'] for o in orders]==[4,1]
     assert sum(o['qty']*o['limit_price'] for o in orders)+400 <= 900
     assert updates[-1]['status']=='completed'
+
+
+@pytest.mark.parametrize('cash,power,maximum,expected', [
+    (10000, 0, 1000, 200), (10000, None, 1000, 200),
+    (999, 0, 1000, 0), (10000, 0, 150, 100),
+    (10000, 0, 0, 0), (10000, 1000, 1000, 100),
+])
+def test_hk_zero_power_sizing_preserves_cash_notional_and_broker_limits(cash, power, maximum, expected):
+    cfg = config(market='HKStock', symbols=['01810'], budget=10000, max_order_notional=2000)
+    item = decision(symbol='01810.HK', target_weight=.5, min_price=1, max_price=100)
+    order = domain.size_order(item, cfg, price=10, lot=100, owned_qty=0, broker_qty=0,
+        power=domain.available_buy_cash({'cash': cash, 'power': power}, 'HKStock'),
+        open_symbols=set(), max_cash_buy=maximum)
+    assert (order['qty'] if order else 0) == expected
+
+
+@pytest.mark.parametrize('power,expected', [(0, 0), (None, 0), (500, 500), (2000, 1000)])
+def test_us_cash_power_behavior_unchanged(power, expected):
+    assert domain.available_buy_cash({'cash': 1000, 'power': power}, 'USStock') == expected
+
+
+@pytest.mark.parametrize('maximum,pending,expected', [
+    (1000, 0, [400, 100]), (150, 0, [100, 100]), (0, 0, []),
+    (1000, 100, [400]),
+])
+def test_hk_run_preserves_reserve_exposure_and_lagging_cash(monkeypatch, maximum, pending, expected):
+    from app.services.automation import runner
+    cfg=config(market='HKStock',symbols=['01810','00700'],budget=100000,max_order_notional=50000,max_daily_notional=100000,execution_mode='paper_auto',max_weight=.5)
+    row={'id':1,'token_id':4,'user_id':1,'config':cfg,'revision':1,'state':{}}
+    run={'id':3,'preview':False,'revision':1,'expires_at':datetime.now(timezone.utc)+timedelta(seconds=60),
+         'result':{'items':[decision(symbol='01810.HK',target_weight=.4),decision(symbol='00700.HK',target_weight=.4)]}}
+    monkeypatch.setattr(store,'query',lambda *_a,**_k:{'id':4,'paper_only':True})
+    monkeypatch.setattr(store,'cancelled',lambda _:False)
+    monkeypatch.setattr(store,'receipts',lambda _:[])
+    monkeypatch.setattr(store,'task',lambda *_:row)
+    monkeypatch.setattr(store,'owned_quantities',lambda _:{})
+    updates=[]
+    monkeypatch.setattr(store,'update_run',lambda _id,**fields:updates.append(fields))
+    # Simulate a lagging broker snapshot: it never includes either new fill.
+    monkeypatch.setattr(runner,'account_snapshot',lambda *_:{'funds':{'cash':100000,'power':0},
+        'positions':[{'symbol':'QQQ','side':'long','quantity':4,'marketValue':40000}], 'open_orders':[{'symbol':'00883.HK','order_id':'pending','side':'buy',
+            'qty':pending,'filled':0,'price':100}] if pending else []})
+    client=MagicMock()
+    client.get_lot_size.return_value=100
+    client.get_max_cash_buy.return_value=maximum
+    client.get_simulate_execution_quote.return_value={'simulate_execution_eligible':True,'price':100}
+    monkeypatch.setattr('app.services.futu_agent_execution._load_client',lambda *_:client)
+    orders=[]
+    def submit(_user,_token,order,_key):
+        orders.append(order)
+        return {'id':len(orders)}
+    monkeypatch.setattr('app.services.agent_trade_intents.submit_intent',submit)
+    monkeypatch.setattr('app.services.futu_agent_execution.execute_simulate_intent',lambda *_a,**_k:{'status':'FILLED'})
+    runner.execute(row,run)
+    assert [o['qty'] for o in orders]==expected
+    assert sum(o['qty']*o['limit_price'] for o in orders)+40000+pending*100 <= 90000
+    assert updates[-1]['status']=='completed'
