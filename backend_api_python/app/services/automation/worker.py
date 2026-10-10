@@ -15,6 +15,10 @@ from app.services.research_workflow import market_clock
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
+# Use the function form: the DB wrapper treats every question mark as a bind placeholder.
+MONITORED_AUTOMATIONS_QUERY = """SELECT * FROM qd_agent_automations WHERE
+    (config->>'execution_mode'='paper_auto' AND (active=TRUE OR jsonb_exists(state, 'performance')))
+    OR (active=TRUE AND config->>'kind'='event_portfolio') ORDER BY id"""
 STOP = threading.Event()
 _thread = None
 
@@ -95,8 +99,7 @@ def loop():
                         observations.pop(key)
                 # Paused portfolios remain visible; observation never overrides
                 # pause. A separate pool keeps LLM latency out of protection.
-                monitored = store.query("""SELECT * FROM qd_agent_automations WHERE
-                    (config->>'execution_mode'='paper_auto' AND (active=TRUE OR state ? 'performance')) OR (active=TRUE AND config->>'kind'='event_portfolio') ORDER BY id""")
+                monitored = store.query(MONITORED_AUTOMATIONS_QUERY)
                 for observed_row in sorted(monitored, key=lambda r: (not r['active'], next_observation.get(r['id'], 0))):
                     key = observed_row['id']
                     if key not in observations and time.monotonic() >= next_observation.get(key, 0) and len(observations) < 2:

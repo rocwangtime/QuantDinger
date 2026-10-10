@@ -90,7 +90,7 @@ def report(user_id, task_id, days=14):
                 raise ValueError('Task not found')
             cur.execute("""SELECT id,status,preview,result->>'source' AS source,
                 result->'usage' AS usage,result->'research_calls' AS calls,result->'event' AS event,
-                result ? 'items' AS has_decision,
+                jsonb_exists(result, 'items') AS has_decision,
                 (SELECT jsonb_agg(jsonb_build_object('symbol',i->>'symbol','action',i->>'action'))
                  FROM jsonb_array_elements(COALESCE(r.result->'items','[]'::jsonb)) i) AS items
                 FROM qd_agent_automation_runs r WHERE task_id=%s AND created_at >= %s AND created_at <= %s
