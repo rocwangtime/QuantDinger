@@ -813,6 +813,7 @@ class FutuClient:
             ft = _ensure_futu()
             account_id = self._acc_id_arg()
             rows_by_id: Dict[str, Dict[str, Any]] = {}
+            market_prefix = f"{self.config.trade_market}."
             successful_queries = 0
             for method_name in ("history_order_list_query", "order_list_query"):
                 query = getattr(self._trade_ctx, method_name, None)
@@ -828,7 +829,7 @@ class FutuClient:
                     raw = order_row_to_raw(row)
                     code = str(raw.get("code") or "")
                     order_id = str(raw.get("order_id") or "")
-                    if not order_id or not code.startswith("US."):
+                    if not order_id or not code.startswith(market_prefix):
                         continue
                     display, _ = from_futu_code(code)
                     rows_by_id[order_id] = {
