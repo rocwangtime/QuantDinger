@@ -41,10 +41,11 @@ def main() -> None:
                     )
                     if not leader:
                         break
+                from app.services.automation.health import snapshot as agent_health
                 repository.record_worker_heartbeat(
                     worker_id=worker_id,
                     role="scheduler",
-                    metadata={"leader": leader},
+                    metadata={"leader": leader, "agent_automation": agent_health()},
                 )
                 shutdown.event.wait(10)
         finally:

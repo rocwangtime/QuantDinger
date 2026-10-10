@@ -5,7 +5,7 @@ import copy
 import time
 from datetime import datetime, timezone
 
-from app.services.automation import store
+from app.services.automation import store, health
 from app.services.automation.domain import parse_decision, size_order
 from app.services.automation.market import build_evidence, account_snapshot
 
@@ -15,6 +15,9 @@ def utcnow():
 
 
 def analyze(row, run, evidence=None, trigger_quote=None):
+    run = {**run, '_worker_generation': run.get('_worker_generation', health.generation())}
+    if store.runtime_changed(run):
+        return
     started = time.monotonic()
     config = row['config']
     deadline = min(run['expires_at'].timestamp(), time.time()+(180 if run['preview'] else config['decision_timeout_seconds']))
@@ -26,7 +29,8 @@ def analyze(row, run, evidence=None, trigger_quote=None):
         nonlocal last_check, stopped
         now = time.monotonic()
         from app.services.automation.worker import STOP
-        if STOP.is_set():
+        if STOP.is_set() or run['_worker_generation'] != health.generation():
+            stopped = True
             return True
         if time.time()>=deadline:
             return True
@@ -40,7 +44,7 @@ def analyze(row, run, evidence=None, trigger_quote=None):
         if not claimed:
             return
         if evidence is None:
-            evidence = build_evidence(row,cancelled=cancelled)
+            evidence = build_evidence(row,news=(config.get('research') or {}).get('mode') != 'tool_loop',cancelled=cancelled)
         else:
             evidence = copy.deepcopy(evidence)
         if trigger_quote:
@@ -49,8 +53,14 @@ def analyze(row, run, evidence=None, trigger_quote=None):
             instrument = evidence['instruments'][config['symbols'][0]]
             instrument.update(price=trigger_quote['price'],quote_as_of=trigger_quote['as_of'])
             evidence['trigger'] = trigger_quote
+        if (run.get('evidence') or {}).get('event'):
+            evidence['event'] = run['evidence']['event']
         evidence['managed_quantities'] = store.owned_quantities(row)
-        evidence['previous_plan'] = (row.get('state') or {}).get('last_plan')
+        previous = (row.get('state') or {}).get('last_plan') or {}
+        evidence['previous_plan'] = {key: previous[key] for key in ('summary', 'items', 'task_revision', 'prompt_version') if key in previous}
+        evidence['task_config'] = config
+        prompt_version = 'portfolio-tools-v1' if (config.get('research') or {}).get('mode') == 'tool_loop' else 'portfolio-json-v2'
+        evidence['prompt_version'] = prompt_version
         store.update_run(run['id'],evidence=evidence,phase='Agent 正在评估持仓与候选机会')
         if cancelled():
             raise TimeoutError('Decision cancelled or expired')
@@ -59,7 +69,7 @@ def analyze(row, run, evidence=None, trigger_quote=None):
         service = LLMService(selection=config.get('llm_selection') or {})
         if service.provider.value not in {'openai','deepseek','volcengine'}:
             raise ValueError('Trading tasks currently require OpenAI, DeepSeek or Volcengine streaming')
-        service.get_max_tokens = lambda: 700 if config['kind']=='price_trigger' else 3500
+        service.get_max_tokens = lambda: min(700 if config['kind']=='price_trigger' else 3500, (config.get('research') or {}).get('max_output_tokens', 7000))
         messages = [
             {'role':'system','content':(
                 'You manage a long-only simulated stock portfolio. Use only supplied timestamped evidence. '
@@ -78,32 +88,44 @@ def analyze(row, run, evidence=None, trigger_quote=None):
             )},
             {'role':'user','content':store.dumps({'task':config,'evidence':evidence})},
         ]
-        draft, flushed = '', 0.
-        stream = service.stream_llm_api_cancellable(messages,cancelled,temperature=.1)
-        try:
-            for delta in stream:
-                draft += delta
-                if len(draft)>40000:
-                    raise ValueError('Decision exceeds the output limit')
-                if time.monotonic()-flushed>.3:
-                    store.update_run(run['id'],draft=draft)
-                    flushed = time.monotonic()
-        finally:
-            stream.close()
+        research_result = {}
+        if prompt_version == 'portfolio-tools-v1':
+            from app.services.automation.research import run as research_run
+            draft, research_result = research_run(service, row, evidence, messages, cancelled,
+                lambda draft, result: store.update_run(run['id'], draft=draft, result=result))
+        else:
+            draft, flushed = '', 0.
+            stream = service.stream_llm_api_cancellable(messages,cancelled,temperature=.1)
+            try:
+                for delta in stream:
+                    draft += delta
+                    if len(draft)>40000:
+                        raise ValueError('Decision exceeds the output limit')
+                    if time.monotonic()-flushed>.3:
+                        store.update_run(run['id'],draft=draft)
+                        flushed = time.monotonic()
+            finally:
+                stream.close()
         if cancelled():
             raise TimeoutError('Decision cancelled or expired')
         decision = parse_decision(draft,evidence,config)
+        decision.update(research_result)
+        if evidence.get('event'):
+            decision['event'] = evidence['event']
         decision['latency_ms'] = round((time.monotonic()-started)*1000)
-        decision['usage'] = build_usage_display(provider=service.last_provider,model=service.last_model,
-                                               usage=service.last_usage,
-                                               estimated_input_tokens=len(store.dumps(messages))//3,
-                                               estimated_output_tokens=len(draft)//3)
+        decision['prompt_version'] = prompt_version
+        decision['task_revision'] = run['revision']
+        if not research_result:
+            decision['usage'] = build_usage_display(provider=service.last_provider,model=service.last_model,
+                                                   usage=service.last_usage,
+                                                   estimated_input_tokens=len(store.dumps(messages))//3,
+                                                   estimated_output_tokens=len(draft)//3)
         automatic = not run['preview'] and config['execution_mode']=='paper_auto'
         store.update_run(run['id'],draft=draft,result=decision,
                          status='planned' if automatic else 'completed',
                          phase='等待交易时段复核' if automatic else '研究完成',
                          finished_at=None if automatic else utcnow())
-        if automatic and config['kind']=='price_trigger':
+        if automatic and config['kind'] in {'price_trigger', 'event_portfolio'}:
             execute(row,{**run,'result':decision})
         elif not run['preview'] and not automatic:
             store.query("UPDATE qd_agent_automations SET state=jsonb_set(state,'{last_plan}',%s::jsonb) WHERE id=%s AND revision=%s RETURNING id",
@@ -118,6 +140,9 @@ def analyze(row, run, evidence=None, trigger_quote=None):
 def execute(row, run):
     from app.services.agent_trade_intents import submit_intent
     from app.services.futu_agent_execution import _load_client, execute_simulate_intent, reconcile_simulate_intent
+    run = {**run, '_worker_generation': run.get('_worker_generation', health.generation())}
+    if store.runtime_changed(run):
+        return
     config = row['config']
     if run['preview'] or config['execution_mode']!='paper_auto':
         return
@@ -151,6 +176,11 @@ def execute(row, run):
             if item['action'] in {'HOLD','WAIT'}:
                 continue
             account = account_snapshot(row['user_id'],config)
+            from app.services.automation.performance import purchase_allowed
+            if item['action'] == 'BUY' and not purchase_allowed(store.task(row['user_id'], row['id']), item['symbol']):
+                checks.append({'symbol': item['symbol'], 'status': 'skipped',
+                               'reason': '独立保护已暂停买入，或账户行情监测已过期'})
+                continue
             broker_qty = sum(float(p['quantity']) for p in account['positions'] if p['symbol']==item['symbol'] and p['side']=='long')
             open_symbols = {o['symbol'] for o in account['open_orders']}
             # Include unreconciled accepted orders even if the broker's list lags.
@@ -171,7 +201,7 @@ def execute(row, run):
             if not quote.get('simulate_execution_eligible'):
                 raise ValueError('Fresh regular-session SIMULATE quote is unavailable')
             price = float(quote['price'])
-            if config['kind']=='price_trigger':
+            if config['kind']=='price_trigger' and not run.get('event_key', '').startswith('protection:'):
                 trigger = config['trigger']
                 still_met = price>=trigger['price'] if trigger['type']=='price_above' else price<=trigger['price']
                 if not still_met:
@@ -187,6 +217,7 @@ def execute(row, run):
             intent = submit_intent(row['user_id'],token,order,f"auto:{run['id']}:{item['symbol']}")
 
             def guard(cur):
+                cur.execute('SELECT pg_advisory_xact_lock(824112,%s)', (row['user_id'],))
                 cur.execute('''SELECT t.active,t.revision,r.cancel_requested,r.expires_at
                     FROM qd_agent_automations t JOIN qd_agent_automation_runs r ON r.task_id=t.id
                     WHERE t.id=%s AND r.id=%s FOR UPDATE OF t,r''',(row['id'],run['id']))
@@ -196,7 +227,7 @@ def execute(row, run):
 
             outcome = execute_simulate_intent(row['user_id'],token,intent['id'],before_submit=guard,
                                     deadline_at=run['expires_at'].timestamp(),
-                                    submit_guard=lambda: store.submission_guard(row,run))
+                                    submit_guard=lambda: store.submission_guard(row,run,order))
             checks.append({'symbol':item['symbol'],'status':outcome['status'],'intent_id':intent['id']})
             if order['side']=='buy':
                 # Broker positions/cash may lag even an immediate fill. Do not

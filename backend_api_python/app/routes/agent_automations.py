@@ -2,12 +2,14 @@
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 import json
+import math
 import re
 import time
 import uuid
 
 from flask import Response, g, jsonify, request, stream_with_context
 from app.openapi.blueprint import HumanBlueprint
+from app.openapi.schemas.automations import AutomationDashboardEnvelopeSchema, AutomationReadinessEnvelopeSchema, AutomationReviewEnvelopeSchema
 from app.utils.auth import login_required
 from app.services.automation import store
 from app.services.automation.domain import normalize_config, session_schedule
@@ -34,6 +36,9 @@ def public_task(row):
     result['managed_quantities'] = store.owned_quantities(row)
     result['monitor_status'] = (row['state'] or {}).get('monitor_status','等待调度器启动') if row['active'] else '已暂停'
     result['latest_run'] = store.query('SELECT id,status,phase,created_at FROM qd_agent_automation_runs WHERE task_id=%s ORDER BY id DESC LIMIT 1',(row['id'],),one=True)
+    result['decision_budget'] = store.decision_budget(row)
+    result['event_review'] = (row['state'] or {}).get('event_review') or {}
+    result['risk'] = (row['state'] or {}).get('risk') or {}
     if row['config']['kind']=='daily_portfolio':
         result['schedule'] = session_schedule(row['config'])
     return result
@@ -44,6 +49,9 @@ def public_run(run, *, evidence=False):
     result.pop('user_id',None)
     if not evidence:
         result.pop('evidence',None)
+        result['result'] = dict(result.get('result') or {})
+        if 'tool_trace' in result['result']:
+            result['result']['tool_request_count'] = len(result['result'].pop('tool_trace'))
     # Show the streamed summary/reasons, never raw machine JSON.
     text = run.get('draft') or ''
     parts = re.findall(r'"(?:summary|reason)"\s*:\s*"((?:\\.|[^"\\])*)',text)
@@ -97,7 +105,11 @@ def set_task_state(task_id):
     row = store.task(g.user_id,task_id)
     config = row['config']
     baseline = None
+    baseline_prices = None
+    external_quantities = None
     if data['active']:
+        from app.services.automation.readiness import require_configuration
+        require_configuration(row)
         snapshot = account_snapshot(g.user_id,config)
         if config['execution_mode']=='paper_auto':
             from app.services.futu_trading.operator_gate import hard_switch_enabled, state_for_user
@@ -110,7 +122,16 @@ def set_task_state(task_id):
                 raise ValueError('账户存在挂单，请先处理后再启用交易任务')
             if config['manage_existing']:
                 baseline = {p['symbol']:p['quantity'] for p in snapshot['positions'] if p['side']=='long' and p['symbol'] in config['symbols']}
-    return public_task(store.set_active(g.user_id,task_id,data['active'],baseline))
+                baseline_prices = {p['symbol']:float(p['marketValue']) / float(p['quantity'])
+                                   for p in snapshot['positions'] if p['symbol'] in baseline and float(p['quantity']) > 0}
+                if any(not math.isfinite(p) or p <= 0 for p in baseline_prices.values()) or sum(baseline[s] * baseline_prices[s] for s in baseline) > config['budget']:
+                    raise ValueError('接管持仓缺少有效市值，或市值超过任务预算')
+            totals = {}
+            for p in snapshot['positions']:
+                if p['side'] == 'long':
+                    totals[p['symbol']] = totals.get(p['symbol'], 0) + float(p['quantity'])
+            external_quantities = {s: max(0, qty - (baseline or {}).get(s, 0)) for s, qty in totals.items()}
+    return public_task(store.set_active(g.user_id,task_id,data['active'],baseline,baseline_prices,external_quantities))
 
 
 @blp.route('/<int:task_id>/preview',methods=['POST'])
@@ -122,7 +143,7 @@ def preview_task(task_id):
     expiry = datetime.now(timezone.utc)+timedelta(seconds=180)
     run = store.create_run(row,'preview:'+str(uuid.uuid4()),expiry,preview=True)
     if not run:
-        raise ValueError('此任务已有正在运行的分析，请先等待或停止')
+        raise ValueError('此任务已有待完成的分析，或每日决策额度已用完')
     return public_run(run)
 
 
@@ -141,6 +162,58 @@ def task_runs(task_id):
 def snapshot(task_id):
     row = store.task(g.user_id,task_id)
     return account_snapshot(g.user_id,row['config'])
+
+
+@blp.route('/<int:task_id>/dashboard', methods=['GET'])
+@blp.doc(summary='Read cached forward performance, independent protection and decision ledger')
+@blp.response(200, AutomationDashboardEnvelopeSchema)
+@login_required
+@envelope
+def task_dashboard(task_id):
+    from app.services.automation.monitor import dashboard
+    row = store.task(g.user_id, task_id)
+    result = dashboard(row)
+    result['task'] = public_task(row)
+    result['runs'] = [public_run(run) for run in result['runs']]
+    return result
+
+
+@blp.route('/<int:task_id>/readiness', methods=['GET'])
+@blp.doc(summary='Read cached task prerequisites and scheduler diagnostics without remote calls')
+@blp.response(200, AutomationReadinessEnvelopeSchema)
+@login_required
+@envelope
+def task_readiness(task_id):
+    from app.services.automation.readiness import read
+    return read(store.task(g.user_id, task_id))
+
+
+@blp.route('/<int:task_id>/check-connection', methods=['POST'])
+@blp.doc(summary='Explicitly probe SIMULATE account and session quotes without submitting orders or calling a model')
+@login_required
+@envelope
+def task_connection_check(task_id):
+    from app.services.automation.readiness import probe
+    return probe(store.task(g.user_id, task_id))
+
+
+@blp.route('/<int:task_id>/review', methods=['GET'])
+@blp.doc(summary='Export a bounded forward paper review from cached database records')
+@blp.response(200, AutomationReviewEnvelopeSchema)
+@blp.doc(parameters=[{'name': 'days', 'in': 'query', 'schema': {'type': 'integer', 'minimum': 1, 'maximum': 90, 'default': 14}, 'description': 'Rolling UTC time window; observations grouped by exchange-local date'}])
+@login_required
+@envelope
+def task_review(task_id):
+    from app.services.automation.review import report
+    return report(g.user_id, task_id, int(request.args.get('days', '14')))
+
+
+@blp.route('/<int:task_id>/risk/reset', methods=['POST'])
+@blp.doc(summary='Explicitly reset a paused task protection latch without erasing performance')
+@login_required
+@envelope
+def reset_task_risk(task_id):
+    return public_task(store.reset_risk(g.user_id, task_id))
 
 
 @blp.route('/runs/<int:run_id>/cancel',methods=['POST'])

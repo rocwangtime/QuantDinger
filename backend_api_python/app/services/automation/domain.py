@@ -31,7 +31,7 @@ def normalize_config(raw):
         raise ValueError('Task config must be an object')
     market = raw.get('market', 'USStock')
     kind = raw.get('kind', 'daily_portfolio')
-    if market not in {'USStock', 'HKStock'} or kind not in {'daily_portfolio', 'price_trigger'}:
+    if market not in {'USStock', 'HKStock'} or kind not in {'daily_portfolio', 'price_trigger', 'event_portfolio'}:
         raise ValueError('Unsupported market or task template')
     if raw.get('execution_mode', 'plan_only') not in {'plan_only', 'paper_auto'}:
         raise ValueError('Only research and SIMULATE execution are supported')
@@ -62,6 +62,40 @@ def normalize_config(raw):
     }
     if config['max_daily_notional'] < config['max_order_notional']:
         raise ValueError('Daily limit must be at least the per-order limit')
+    risk = raw.get('risk', {})
+    if not isinstance(risk, dict) or not isinstance(risk.get('enabled', False), bool):
+        raise ValueError('Risk settings must be an object with a boolean enabled field')
+    config['risk'] = {
+        'enabled': risk.get('enabled', False),
+        'stop_loss_pct': number(risk.get('stop_loss_pct', .08), .001, .5),
+        'max_daily_loss_pct': number(risk.get('max_daily_loss_pct', .03), .001, .5),
+        'max_drawdown_pct': number(risk.get('max_drawdown_pct', .1), .001, .9),
+    }
+    research = raw.get('research', {})
+    if not isinstance(research, dict) or research.get('mode', 'snapshot') not in {'snapshot', 'tool_loop'}:
+        raise ValueError('Unsupported research mode')
+    if kind == 'price_trigger' and research.get('mode', 'snapshot') != 'snapshot':
+        raise ValueError('Fast price triggers require snapshot research')
+
+    def integer(value, low, high):
+        value = number(value, low, high)
+        if not value.is_integer():
+            raise ValueError('Limit must be an integer')
+        return int(value)
+
+    config['research'] = {
+        'mode': research.get('mode', 'snapshot'),
+        'max_model_calls': integer(research.get('max_model_calls', 3), 1, 4),
+        'max_tool_requests': integer(research.get('max_tool_requests', 6), 1, 8),
+        'max_output_tokens': integer(research.get('max_output_tokens', 7000), 700, 14000),
+        'max_decisions_per_day': integer(research.get('max_decisions_per_day', 8), 1, 100),
+    }
+    if kind == 'event_portfolio':
+        events = raw.get('events', {})
+        if not isinstance(events, dict) or not isinstance(events.get('on_fill', True), bool):
+            raise ValueError('Invalid portfolio event settings')
+        config['events'] = {'price_move_pct': number(events.get('price_move_pct', .02), .001, .5),
+                            'on_fill': events.get('on_fill', True)}
     if kind == 'price_trigger':
         trigger = raw.get('trigger') or {}
         if trigger.get('type') not in {'price_above', 'price_below'}:

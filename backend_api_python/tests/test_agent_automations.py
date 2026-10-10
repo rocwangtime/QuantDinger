@@ -147,6 +147,28 @@ def test_expired_pending_orders_request_cancel_then_reconcile(monkeypatch,status
     assert reconcile.call_count==1+cancel_count
 
 
+@pytest.mark.parametrize('changes,cancels', [
+    ({'active': False}, 1), ({'cancel_requested': True}, 1),
+    ({'risk': {'halted': True}}, 1), ({'risk': {'stopped_symbols': ['AAPL']}}, 1),
+    ({'risk': {'stopped_symbols': ['TSLA']}}, 0),
+    ({'side': 'sell', 'risk': {'halted': True}}, 0),
+])
+def test_pause_cancel_and_protection_cancel_pending_orders_before_expiry(monkeypatch, changes, cancels):
+    from app.services.automation import worker
+    worker.STOP.clear()
+    row = {'id': 1, 'user_id': 1, 'account_ref': 'credential:7', 'active': True,
+           'cancel_requested': False, 'side': 'buy', 'symbol': 'AAPL',
+           'expires_at': datetime.now(timezone.utc) + timedelta(seconds=60), **changes}
+    monkeypatch.setattr(store, 'query', lambda *_: [row])
+    reconcile = MagicMock(return_value={'status': 'SUBMITTED', 'broker_order_id': 'fixture-order'})
+    monkeypatch.setattr('app.services.futu_agent_execution.reconcile_simulate_intent', reconcile)
+    client = MagicMock()
+    monkeypatch.setattr('app.services.futu_agent_execution._load_client', lambda *_: client)
+    worker.reconcile_orders()
+    assert client.cancel_order.call_count == cancels
+    assert reconcile.call_count == 1 + cancels
+
+
 def test_multi_symbol_run_cannot_reuse_cash_when_broker_snapshot_lags(monkeypatch):
     from app.services.automation import runner
     cfg=config(symbols=['AAPL','TSLA'],execution_mode='paper_auto',max_weight=.5)

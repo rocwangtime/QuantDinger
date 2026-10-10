@@ -7,7 +7,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
-from app.services.automation import store
+from app.services.automation import store, health
 from app.services.automation.domain import session_schedule, trigger_state
 from app.services.automation.market import PushFeed, build_evidence, account_snapshot
 from app.services.automation.runner import analyze, execute
@@ -31,6 +31,7 @@ def start():
 
 def stop():
     STOP.set()
+    health.stopped()
     if _thread:
         _thread.join(timeout=3)
 
@@ -42,7 +43,9 @@ def reconcile_orders():
     acknowledgement. Always reconcile the final broker result afterwards.
     """
     from app.services.futu_agent_execution import _load_client, reconcile_simulate_intent
-    rows = store.query("""SELECT i.user_id,i.id,i.account_ref,r.expires_at
+    rows = store.query("""SELECT i.user_id,i.id,i.account_ref,r.expires_at,
+        t.active,r.cancel_requested,i.order_spec->>'side' AS side,
+        i.order_spec->>'symbol' AS symbol,t.state->'risk' AS risk
         FROM qd_agent_trade_intents i JOIN qd_agent_automations t ON t.token_id=i.agent_token_id
         JOIN qd_agent_automation_runs r ON i.order_spec->>'strategy_version'=
             'automation:'||t.id::text||':'||r.id::text
@@ -52,7 +55,11 @@ def reconcile_orders():
             return
         try:
             receipt = reconcile_simulate_intent(row['user_id'],row['id'])
-            if row['expires_at'] >= datetime.now(timezone.utc) or receipt['status'] not in {'SUBMITTED','PARTIALLY_FILLED'} or not receipt.get('broker_order_id'):
+            risk = row.get('risk') or {}
+            should_cancel = (row['expires_at'] < datetime.now(timezone.utc) or row.get('active') is False
+                             or row.get('cancel_requested') is True
+                             or (row.get('side') == 'buy' and (risk.get('halted') or row.get('symbol') in risk.get('stopped_symbols', []))))
+            if not should_cancel or receipt['status'] not in {'SUBMITTED','PARTIALLY_FILLED'} or not receipt.get('broker_order_id'):
                 continue
             client = _load_client(row['user_id'],row['account_ref'])
             try:
@@ -66,8 +73,11 @@ def reconcile_orders():
 
 
 def loop():
+    health.started()
     pool = ThreadPoolExecutor(max_workers=2,thread_name_prefix='AgentDecision')
     preparation = ThreadPoolExecutor(max_workers=2,thread_name_prefix='AgentContext')
+    monitoring = ThreadPoolExecutor(max_workers=2,thread_name_prefix='AgentProtection')
+    observations, next_observation = {}, {}
     pending, warm, feeds, cache, fast_events = {}, {}, {}, {}, {}
     retry_after = {}
     last_reconcile = 0.
@@ -75,6 +85,23 @@ def loop():
         while not STOP.is_set():
             try:
                 now = datetime.now(timezone.utc)
+                from app.services.automation.monitor import observe, unavailable
+                for key, (future, observed_row) in list(observations.items()):
+                    if future.done():
+                        try:
+                            future.result()
+                        except Exception:
+                            unavailable(observed_row)
+                        observations.pop(key)
+                # Paused portfolios remain visible; observation never overrides
+                # pause. A separate pool keeps LLM latency out of protection.
+                monitored = store.query("""SELECT * FROM qd_agent_automations WHERE
+                    (config->>'execution_mode'='paper_auto' AND (active=TRUE OR state ? 'performance')) OR (active=TRUE AND config->>'kind'='event_portfolio') ORDER BY id""")
+                for observed_row in sorted(monitored, key=lambda r: (not r['active'], next_observation.get(r['id'], 0))):
+                    key = observed_row['id']
+                    if key not in observations and time.monotonic() >= next_observation.get(key, 0) and len(observations) < 2:
+                        observations[key] = (monitoring.submit(observe, observed_row), observed_row)
+                        next_observation[key] = time.monotonic() + 30
                 tasks = store.query('SELECT * FROM qd_agent_automations WHERE active=TRUE ORDER BY id')
                 active_ids = {r['id'] for r in tasks}
                 for key in list(feeds):
@@ -112,6 +139,8 @@ def loop():
                         if (row['state'] or {}).get('monitor_status') != message:
                             store.query("UPDATE qd_agent_automations SET state=jsonb_set(state,'{monitor_status}',%s::jsonb) WHERE id=%s AND revision=%s RETURNING id",
                                         (store.dumps(message),task_id,row['revision']),one=True)
+                    if config['kind']=='event_portfolio':
+                        continue  # The independent observation pool admits durable review events.
                     if config['kind']=='daily_portfolio':
                         schedule = session_schedule(config,now)
                         if schedule['due']:
@@ -167,6 +196,7 @@ def loop():
                     if run['id'] in pending:
                         continue
                     row = store.task(run['user_id'],run['task_id'])
+                    run = {**run, '_worker_generation': health.generation()}
                     if run['status']=='planned':
                         pending[run['id']] = pool.submit(execute,row,run)
                     elif row['config']['kind']=='price_trigger' and not run['preview']:
@@ -180,11 +210,15 @@ def loop():
                 if time.monotonic()-last_reconcile>5 and ('reconcile',0) not in warm:
                     warm[('reconcile',0)] = preparation.submit(reconcile_orders)
                     last_reconcile = time.monotonic()
+                health.tick(True)
             except Exception:
+                health.tick(False)
                 logger.warning('Agent automation tick failed; retrying without submitting new work',exc_info=False)
             STOP.wait(1)
     finally:
+        health.stopped()
         for feed in feeds.values():
             feed.stop()
         pool.shutdown(wait=False,cancel_futures=True)
         preparation.shutdown(wait=False,cancel_futures=True)
+        monitoring.shutdown(wait=False,cancel_futures=True)
