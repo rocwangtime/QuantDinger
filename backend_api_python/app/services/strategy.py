@@ -127,6 +127,8 @@ class StrategyService:
             values.append(int(user_id))
         with get_db_connection() as db:
             cur = db.cursor()
+            if status == "running":
+                self._assert_group_unreserved(cur, int(strategy_id))
             cur.execute(
                 f"UPDATE qd_strategies_trading SET status = ?, updated_at = NOW() WHERE {where}",
                 tuple(values),
@@ -176,6 +178,11 @@ class StrategyService:
             "params": (existing.get("trading_config") or {}).get("params") or {},
             "directionMode": (existing.get("trading_config") or {}).get("direction_mode") or "",
             "positionSide": (existing.get("trading_config") or {}).get("position_side") or "",
+            "credentialId": (existing.get("trading_config") or {}).get("credential_id"),
+            "aiDecisionFilter": bool((existing.get("trading_config") or {}).get("ai_decision_filter")),
+            "aiDecisionMode": (existing.get("trading_config") or {}).get("ai_decision_mode") or "advisory",
+            "portfolioRisk": (existing.get("trading_config") or {}).get("portfolio_risk") or {},
+            "researchEvidenceJobId": (existing.get("trading_config") or {}).get("research_evidence_job_id") or "",
         }
         merged.update({key: value for key, value in changes.items() if value is not None})
         get_strategy_v2_deployment_service().save(
@@ -193,6 +200,10 @@ class StrategyService:
         if not existing:
             return False
         config = _strip_legacy_risk_pct_basis(dict(existing.get("trading_config") or {}))
+        if "params" in patch and config.get("research_evidence_job_id"):
+            from app.services.strategy_evolution.bundles import content_hash
+            if content_hash(patch["params"]) != content_hash(config.get("params")):
+                raise ValueError("strategyV2.researchEvidenceMismatch")
         config.update(patch)
         config = _strip_legacy_risk_pct_basis(config)
         with get_db_connection() as db:
@@ -214,6 +225,7 @@ class StrategyService:
             values.append(int(user_id))
         with get_db_connection() as db:
             cur = db.cursor()
+            self._assert_group_unreserved(cur, int(strategy_id))
             cur.execute(f"DELETE FROM qd_strategies_trading WHERE {where}", tuple(values))
             changed = int(cur.rowcount or 0)
             db.commit()
@@ -273,11 +285,20 @@ class StrategyService:
         }
 
     @staticmethod
+    def _assert_group_unreserved(cur, strategy_id):
+        cur.execute("SELECT id FROM qd_strategies_trading WHERE id=%s FOR UPDATE", (strategy_id,))
+        cur.execute("SELECT group_id FROM qd_order_groups WHERE config->>'strategyId'=%s "
+                    "AND state->>'status' NOT IN ('cancelled','unwound','resolved') LIMIT 1", (str(strategy_id),))
+        if cur.fetchone():
+            raise ValueError("orderGroup.strategyReserved")
+
+    @staticmethod
     def _deployment_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         allowed = {
             "sourceId", "name", "initialCapital", "executionMode", "credentialId",
             "leverageEnabled", "leverage", "params", "notificationChannels",
             "notificationTargets", "directionMode", "positionSide", "aiDecisionFilter",
+            "aiDecisionMode", "portfolioRisk", "researchEvidenceJobId",
         }
         unsupported = set(payload) - allowed - {"user_id"}
         if unsupported:

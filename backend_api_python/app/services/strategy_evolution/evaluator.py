@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import math
+import copy
 from typing import Any
 
 import pandas as pd
@@ -34,6 +35,8 @@ class PreparedEvolutionEvaluator:
         leverage: float,
         source_id: int,
         strategy_name: str,
+        bundle_id: str = "",
+        bundle_store=None,
     ) -> None:
         self.user_id = user_id
         self.code = code
@@ -50,56 +53,77 @@ class PreparedEvolutionEvaluator:
         manifest = program.manifest
         self.driving_frequency = manifest.driving_frequency
         self.warmup_bars = manifest.warmup_bars
-        candidates, _universe_id = backtest_service.resolve_candidates(
-            user_id=user_id,
-            manifest=manifest,
-            start_date=start_date,
-            end_date=end_date,
-        )
-        _attach_catalog_products(candidates)
-        fetch_starts = {
-            frequency: start_date
-            - timedelta(
-                days=_warmup_calendar_days(
-                    frequency,
-                    manifest.warmup_bars,
-                    candidates,
-                )
-            )
-            for frequency in manifest.frequencies
-        }
-        for frequency in manifest.frequencies:
-            _enforce_backtest_range(
-                candidates=candidates,
-                timeframe=frequency,
-                start_date=start_date,
-                end_date=end_date,
-                warmup_bars=manifest.warmup_bars,
-                fetch_start=fetch_starts[frequency],
-            )
-        frequency_frames, _skipped = backtest_service.fetch_frequency_frames(
-            candidates,
-            manifest.frequencies,
-            fetch_starts,
-            end_date,
-        )
-        for frequency, frames in frequency_frames.items():
-            for member in candidates:
-                frame = frames.get(str(member.get("key") or ""))
-                if frame is None or frame.empty:
-                    continue
-                self._frames[self._identity(member, frequency)] = frame
+        from .bundles import EvolutionBundleStore, FrozenUniverse, pack_frame, unpack_frame, content_hash, runtime_identity
+        from app.services.fundamental_data import get_fundamental_data_service
+        from app.services.instrument_rules import InstrumentRulesSnapshot
+        from app.services.strategy_v2.service import _instrument_rules_as_of
 
+        replaying = bool(bundle_id)
+        store = bundle_store or EvolutionBundleStore()
+        if bundle_id:
+            document = store.load(bundle_id, user_id=user_id)
+            if document["codeHash"] != content_hash(code):
+                raise ValueError("strategyEvolution.replaySourceChanged")
+            candidates = document["candidates"]
+            universe = document["universe"]
+            for row in document["frames"]:
+                self._frames[tuple(row["identity"])] = unpack_frame(row["frame"])
+            rules = InstrumentRulesSnapshot.from_metadata(document["rules"]) if document["rules"] else None
+        else:
+            candidates, universe_id = backtest_service.resolve_candidates(
+                user_id=user_id, manifest=manifest, start_date=start_date, end_date=end_date,
+            )
+            _attach_catalog_products(candidates)
+            universe = next((item for item in backtest_service.universe_service.list_universes(user_id)
+                             if int(item.get("id") or 0) == universe_id), None) if universe_id else None
+            fetch_starts = {
+                frequency: start_date - timedelta(days=_warmup_calendar_days(frequency, manifest.warmup_bars, candidates))
+                for frequency in manifest.frequencies
+            }
+            for frequency in manifest.frequencies:
+                _enforce_backtest_range(candidates=candidates, timeframe=frequency, start_date=start_date,
+                                       end_date=end_date, warmup_bars=manifest.warmup_bars,
+                                       fetch_start=fetch_starts[frequency])
+            frequency_frames, _skipped = backtest_service.fetch_frequency_frames(
+                candidates, manifest.frequencies, fetch_starts, end_date,
+            )
+            if manifest.fundamental_dependencies:
+                enricher = backtest_service.fundamental_enricher or get_fundamental_data_service().enrich_panel
+                driving = frequency_frames.get(manifest.driving_frequency, {})
+                frequency_frames[manifest.driving_frequency] = enricher(driving, candidates)
+            for frequency, frames in frequency_frames.items():
+                for member in candidates:
+                    frame = frames.get(str(member.get("key") or ""))
+                    if frame is not None and not frame.empty:
+                        self._frames[self._identity(member, frequency)] = frame.copy(deep=True)
+            rules = None
+            if any(item.get("market") == "Crypto" for item in candidates):
+                rules = backtest_service.instrument_rules_provider.historical_snapshot(
+                    candidates, as_of=_instrument_rules_as_of(frequency_frames.get(manifest.driving_frequency, {}), end_date),
+                    persist=False,
+                )
+            candidates = [{**item, "_catalog_frozen": True} for item in candidates]
+            document = {
+                "schema": "evolution-full-input-v1", "userId": int(user_id), "codeHash": content_hash(code),
+                "capturedAt": datetime.now(timezone.utc).isoformat(), "runtime": runtime_identity(),
+                "candidates": candidates, "universe": universe,
+                "rules": rules.metadata() if rules else None,
+                "frames": [{"identity": list(identity), "frame": pack_frame(frame)}
+                           for identity, frame in sorted(self._frames.items())],
+            }
+            bundle_id = store.save(document)
+        self.bundle_id = bundle_id
+        self.bundle_metadata = {"bundleId": bundle_id, "codeHash": document["codeHash"],
+                                "capturedAt": document["capturedAt"], "runtime": document["runtime"],
+                                "schema": document["schema"], "replay": replaying}
         self.backtest_service = StrategyV2BacktestService(
-            repository=backtest_service.repository,
-            universe_service=backtest_service.universe_service,
-            frame_fetcher=self._fetch_frame,
-            fundamental_enricher=backtest_service.fundamental_enricher,
-            data_kind=backtest_service.data_kind,
-            data_source=f"{backtest_service.data_source}:evolution_memory",
+            repository=backtest_service.repository, universe_service=FrozenUniverse(candidates, universe),
+            frame_fetcher=self._fetch_frame, fundamental_enricher=lambda frames, members: frames,
+            data_kind=backtest_service.data_kind, data_source="frozen_evolution_bundle",
             snapshot_store=backtest_service.snapshot_store,
-            instrument_rules_provider=_CachedInstrumentRulesProvider(backtest_service.instrument_rules_provider),
+            instrument_rules_provider=_FrozenInstrumentRules(rules),
         )
+        self.backtest_service.resolve_candidates = lambda **kwargs: (copy.deepcopy(candidates), universe.get("id") if universe else None)
 
     def walk_forward_context(self, start_date: datetime, end_date: datetime) -> dict[str, Any]:
         merged = pd.DatetimeIndex([])
@@ -337,3 +361,11 @@ def _in_range(value: Any, start: pd.Timestamp, end: pd.Timestamp) -> bool:
     except (TypeError, ValueError):
         return False
     return start <= timestamp <= end
+
+
+class _FrozenInstrumentRules:
+    def __init__(self, snapshot):
+        self.snapshot = snapshot
+
+    def historical_snapshot(self, candidates, **kwargs):
+        return self.snapshot

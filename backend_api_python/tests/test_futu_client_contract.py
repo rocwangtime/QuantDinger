@@ -282,18 +282,38 @@ def test_paper_order_rejects_outside_regular_session_and_short_sell(_ensure):
     trade.place_order.assert_not_called()
 
 
+@pytest.mark.parametrize(
+    ("market", "code", "other_code", "display", "quantity"),
+    [
+        ("US", "US.AAPL", "HK.00700", "AAPL", 1),
+        ("HK", "HK.00700", "US.AAPL", "00700.HK", 100),
+    ],
+)
 @patch("app.services.futu_trading.client._ensure_futu", return_value=_FakeFT)
-def test_recent_paper_orders_include_terminal_states_and_deduplicate(_ensure):
+def test_recent_paper_orders_include_terminal_states_and_deduplicate(
+    _ensure, market, code, other_code, display, quantity,
+):
     client, _quote, trade = _client_with_mocks()
+    client.config = FutuConfig(
+        trade_market=market, market_category=f"{market}Stock", acc_id=99,
+    )
+    client._accounts = [{
+        "acc_id": 99, "trd_env": "SIMULATE", "trdmarket_auth": [market],
+        "sim_acc_type": "STOCK",
+    }]
     history = pd.DataFrame([{
-        "order_id": "OID-1", "code": "US.AAPL", "order_status": "SUBMITTED",
-        "qty": 1, "dealt_qty": 0, "price": 100,
+        "order_id": "OID-1", "code": code, "order_status": "SUBMITTED",
+        "qty": quantity, "dealt_qty": 0, "price": 100,
         "updated_time": "2026-09-28 09:30:00",
     }])
     current = pd.DataFrame([{
-        "order_id": "OID-1", "code": "US.AAPL", "order_status": "FILLED_ALL",
-        "qty": 1, "dealt_qty": 1, "dealt_avg_price": 100, "price": 100,
+        "order_id": "OID-1", "code": code, "order_status": "FILLED_ALL",
+        "qty": quantity, "dealt_qty": quantity, "dealt_avg_price": 100, "price": 100,
         "updated_time": "2026-09-28 09:31:00",
+    }, {
+        "order_id": "OTHER-MARKET", "code": other_code, "order_status": "FILLED_ALL",
+        "qty": 1, "dealt_qty": 1, "dealt_avg_price": 100, "price": 100,
+        "updated_time": "2026-09-28 09:32:00",
     }])
     trade.history_order_list_query.return_value = (_FakeFT.RET_OK, history)
     trade.order_list_query.return_value = (_FakeFT.RET_OK, current)
@@ -301,8 +321,10 @@ def test_recent_paper_orders_include_terminal_states_and_deduplicate(_ensure):
     orders = client.get_recent_orders()
 
     assert len(orders) == 1
+    assert orders[0]["symbol"] == display
     assert orders[0]["status"] == "filled"
-    assert orders[0]["filled"] == 1
+    assert orders[0]["filled"] == quantity
+    assert orders[0]["avgFillPrice"] == 100
     assert trade.history_order_list_query.call_args.kwargs["trd_env"] == _FakeFT.TrdEnv.SIMULATE
     assert trade.history_order_list_query.call_args.kwargs["acc_id"] == 99
 

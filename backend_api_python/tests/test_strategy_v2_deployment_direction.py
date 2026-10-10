@@ -28,6 +28,9 @@ class _Cursor:
     def execute(self, _query, params=()):
         self.params = params
 
+    def fetchone(self):
+        return None
+
     def close(self):
         return None
 

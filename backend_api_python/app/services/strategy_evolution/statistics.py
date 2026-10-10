@@ -126,6 +126,57 @@ def probability_of_backtest_overfitting(score_matrix: list[list[float]], *, max_
     }
 
 
+def return_matrix_pbo(candidate_results, *, partitions=8):
+    """CSCV of date-aligned daily equity returns, including pruned candidates.
+
+    Validation windows reset their accounts; no artificial return is formed
+    between windows. Missing dates are intersected, never imputed. Historical
+    trials outside this study are handled by the conservative DSR count.
+    """
+    maps = []
+    for results in candidate_results:
+        dated = {}
+        for result in results:
+            daily = {}
+            for point in result.get("equityCurve") or []:
+                stamp = str(point.get("time") or point.get("date") or "")[:10]
+                if stamp and _finite(point.get("value")):
+                    daily[stamp] = float(point["value"])
+            ordered = sorted(daily)
+            for previous, current in zip(ordered, ordered[1:]):
+                if daily[previous] > 0:
+                    dated[current] = daily[current] / daily[previous] - 1
+        maps.append(dated)
+    metadata = {"method": "alignedDailyReturnMatrixCSCV", "selectedCandidatesOnly": False,
+                "candidates": len(maps), "partitions": partitions,
+                "limitation": "Window-reset validation returns; pruned runs restrict common dates; only current-study returns are available."}
+    if len(maps) < 2:
+        return {**metadata, "available": False, "reason": "insufficientCandidates", "probability": 0.0, "samples": 0}
+    dates = sorted(set.intersection(*(set(row) for row in maps)))
+    metadata.update(observations=len(dates), firstDate=dates[0] if dates else None, lastDate=dates[-1] if dates else None)
+    if len(dates) < max(40, partitions * 5):
+        return {**metadata, "available": False, "reason": "insufficientAlignedReturns", "probability": 0.0, "samples": 0}
+    matrix = [[row[day] for day in dates] for row in maps]
+    if all(pstdev(row) <= 1e-12 for row in matrix):
+        return {**metadata, "available": False, "reason": "insufficientVariation", "probability": 0.0, "samples": 0}
+    blocks = [[index for index in range(len(dates)) if index * partitions // len(dates) == block]
+              for block in range(partitions)]
+    logits = []
+    for chosen in _combinations(range(partitions), partitions // 2):
+        chosen_set = set(chosen)
+        training = [index for block in chosen for index in blocks[block]]
+        testing = [index for block in range(partitions) if block not in chosen_set for index in blocks[block]]
+        train_scores = [sample_sharpe([row[index] for index in training]) for row in matrix]
+        winner = max(range(len(matrix)), key=lambda index: train_scores[index])
+        test_scores = [sample_sharpe([row[index] for index in testing]) for row in matrix]
+        winning = test_scores[winner]
+        rank = 1 + sum(value < winning for value in test_scores) + (sum(value == winning for value in test_scores) - 1) / 2
+        percentile = rank / (len(matrix) + 1)
+        logits.append(math.log(percentile / (1 - percentile)))
+    return {**metadata, "available": True, "probability": round(sum(value <= 0 for value in logits) / len(logits), 6),
+            "samples": len(logits), "medianLogit": round(median(logits), 6), "logits": [round(value, 5) for value in logits]}
+
+
 def monte_carlo_bootstrap(returns: list[float], *, paths: int, block_size: int, seed: int) -> dict[str, Any]:
     samples = [float(value) for value in returns if math.isfinite(float(value))]
     if len(samples) < 2:

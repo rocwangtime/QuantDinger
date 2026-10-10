@@ -58,6 +58,8 @@ class PendingOrderLoops:
     def _tick(self) -> None:
         if self.lease_guard and not self.lease_guard():
             return
+        from app.services.order_groups import reconcile_order_groups
+        reconcile_order_groups()
         orders = self._fetch_pending_orders(limit=self.batch_size)
         if not orders:
             return

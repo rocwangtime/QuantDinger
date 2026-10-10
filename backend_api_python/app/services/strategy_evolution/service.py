@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import copy
+import uuid
 from datetime import datetime
 from typing import Any
 
 from app.services.script_source import get_script_source_service
 from app.services.strategy_v2 import StrategyV2BacktestService
+from app.services.portfolio.risk import finite_number
 
 from .constraints import discover_parameter_constraints
 from .engine import StrategyEvolutionEngine
@@ -20,13 +23,27 @@ class StrategyEvolutionService:
     def __init__(self, *, backtest_service: StrategyV2BacktestService | None = None) -> None:
         self.backtest_service = backtest_service or StrategyV2BacktestService()
 
+    def prepare_submission(self, *, user_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+        from .bundles import content_hash
+        clean = {key: value for key, value in payload.items() if not key.startswith("__")}
+        source_id = _positive_int(clean.get("sourceId"))
+        source = get_script_source_service().get_source(source_id, user_id=user_id) if source_id else None
+        if not source:
+            raise ValueError("strategyEvolution.sourceNotFound")
+        frozen = copy.deepcopy(source)
+        return {**clean, "__frozenSource": frozen, "__codeHash": content_hash(str(frozen.get("code") or "")),
+                "__studyId": str(uuid.uuid4())}
+
     def run(self, *, user_id: int, payload: dict[str, Any], on_progress=None) -> dict[str, Any]:
         source_id = _positive_int(payload.get("sourceId"))
         if not source_id:
             raise ValueError("strategyEvolution.sourceRequired")
-        source = get_script_source_service().get_source(source_id, user_id=user_id)
+        source = payload.get("__frozenSource") or get_script_source_service().get_source(source_id, user_id=user_id)
         if not source:
             raise ValueError("strategyEvolution.sourceNotFound")
+        from .bundles import content_hash
+        if payload.get("__codeHash") and payload["__codeHash"] != content_hash(str(source.get("code") or "")):
+            raise ValueError("strategyEvolution.frozenSourceHashMismatch")
         code = str(source.get("code") or "").strip()
         if not code:
             raise ValueError("strategyEvolution.sourceCodeRequired")
@@ -37,11 +54,11 @@ class StrategyEvolutionService:
         parameters = [SearchParameter.from_payload(item) for item in parameter_rows]
         code = adapt_source_for_parameters(code, parameter_rows)
         constraints = discover_parameter_constraints(code, {item.name for item in parameters})
-        initial_capital = max(10.0, float(payload.get("initialCapital") or 10_000))
+        initial_capital = max(10.0, finite_number(payload.get("initialCapital") or 10_000))
         leverage_enabled = bool(payload.get("leverageEnabled", False))
-        leverage = max(1.0, float(payload.get("leverage") or 1.0))
-        commission = max(0.0, min(1.0, float(payload.get("commission") or 0.0)))
-        slippage = max(0.0, min(1.0, float(payload.get("slippage") or 0.0)))
+        leverage = max(1.0, finite_number(payload.get("leverage") or 1.0))
+        commission = max(0.0, min(1.0, finite_number(payload.get("commission") or 0.0)))
+        slippage = max(0.0, min(1.0, finite_number(payload.get("slippage") or 0.0)))
 
         if isinstance(self.backtest_service, StrategyV2BacktestService):
             evaluate = PreparedEvolutionEvaluator(
@@ -55,6 +72,7 @@ class StrategyEvolutionService:
                 leverage=leverage,
                 source_id=source_id,
                 strategy_name=str(source.get("name") or ""),
+                bundle_id=str(payload.get("__bundleId") or ""),
             )
         else:
             def evaluate(params, segment_start, segment_end, segment_commission, segment_slippage):
@@ -75,6 +93,14 @@ class StrategyEvolutionService:
                 )
                 return segment_result
 
+        history = None
+        previous_trials = 0
+        if payload.get("__studyId"):
+            from .history import ResearchHistory
+            history = ResearchHistory(user_id=user_id, source_id=source_id, study_id=payload["__studyId"])
+            previous_trials = history.reserve(code_hash=content_hash(code), trials=config.trials)
+            if getattr(evaluate, "bundle_id", ""):
+                history.attach_bundle(evaluate.bundle_id)
         result = StrategyEvolutionEngine(evaluate).run(
             parameters=parameters,
             config=config,
@@ -84,8 +110,23 @@ class StrategyEvolutionService:
             slippage=slippage,
             constraints=constraints,
             on_progress=on_progress,
+            previous_trials=previous_trials,
+            holdout_tracker=history.expose_holdout if history else None,
         )
         result["source"] = {"id": source_id, "name": str(source.get("name") or "")}
+        result["economicAssumptions"] = {"initialCapital": initial_capital, "leverage": leverage if leverage_enabled else 1.0,
+                                         "commission": commission, "slippage": slippage}
+        result["reproducibility"] = {**getattr(evaluate, "bundle_metadata", {}),
+                                     "sourceHash": content_hash(str(source.get("code") or "")),
+                                     "sourceFrozenAtSubmission": bool(payload.get("__frozenSource")),
+                                     "historyTracked": history is not None,
+                                     "studyId": payload.get("__studyId")}
+        if history is None:
+            result["promotion"]["eligible"] = False
+            result["promotion"]["reasons"].append("researchHistoryUnavailable")
+        if commission <= 0 or slippage <= 0:
+            result["promotion"]["eligible"] = False
+            result["promotion"]["reasons"].append("executionCostsUnverified")
         return result
 
     @staticmethod

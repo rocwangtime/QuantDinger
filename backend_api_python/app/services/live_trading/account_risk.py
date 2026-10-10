@@ -151,6 +151,7 @@ def account_risk_snapshot(
     fee_estimate = 0.0
     funding_estimate = 0.0
     symbol_gross: Dict[str, float] = {}
+    symbol_net: Dict[str, float] = {}
     unpriced_position_count = 0
     for row in matched:
         quantity = _positive(row.get("size"))
@@ -174,6 +175,7 @@ def account_risk_snapshot(
             str(row.get("symbol_canonical") or row.get("symbol") or "")
         )
         symbol_gross[symbol] = symbol_gross.get(symbol, 0.0) + notional
+        symbol_net[symbol] = symbol_net.get(symbol, 0.0) + (-notional if side == "short" else notional)
         margin_estimate += notional / leverage
         fee_estimate += notional * fee_rate * 2.0
         funding_estimate += notional * funding_rate
@@ -188,6 +190,7 @@ def account_risk_snapshot(
         else:
             long_notional += proposed_notional
         symbol_gross[proposed_symbol_norm] = symbol_gross.get(proposed_symbol_norm, 0.0) + proposed_notional
+        symbol_net[proposed_symbol_norm] = symbol_net.get(proposed_symbol_norm, 0.0) + (-proposed_notional if proposed_side_norm == "short" else proposed_notional)
         current_row = strategy_rows.get(sid, {})
         fee_rate = _strategy_fee_rate(current_row)
         funding_rate = _strategy_funding_rate(current_row)
@@ -248,6 +251,20 @@ def account_risk_snapshot(
         if symbol_gross.get(proposed_symbol_norm, 0.0) > max_symbol_gross_notional + tolerance:
             violations.append("accountRisk.symbolGrossNotionalExceeded")
 
+    portfolio_risk = {"available": False, "reason": "portfolioModelNotConfigured"}
+    if policy.get("portfolio_model") or policy.get("max_portfolio_daily_volatility"):
+        from app.services.portfolio.risk import projected_model_risk
+        try:
+            portfolio_risk = projected_model_risk(policy.get("portfolio_model"), notionals=symbol_net,
+                capital=capital_budget, max_age_hours=policy.get("portfolio_model_max_age_hours", 96))
+        except (ValueError, TypeError, KeyError):
+            portfolio_risk = {"available": False, "reason": "portfolioModelInvalid"}
+        maximum_volatility = _positive(policy.get("max_portfolio_daily_volatility"))
+        if maximum_volatility and not portfolio_risk["available"]:
+            violations.append("accountRisk.portfolioModelUnavailable")
+        elif maximum_volatility and portfolio_risk.get("daily_volatility", 0) > maximum_volatility:
+            violations.append("accountRisk.portfolioVolatilityExceeded")
+
     return {
         "allowed": not violations,
         "violations": violations,
@@ -266,6 +283,8 @@ def account_risk_snapshot(
         "capital_budget": capital_budget,
         "gross_capacity": gross_capacity,
         "symbol_gross_notional": symbol_gross,
+        "symbol_net_notional": symbol_net,
+        "portfolio_risk": portfolio_risk,
         "unpriced_position_count": unpriced_position_count,
         "limits": {
             "max_gross_notional": max_gross_notional,

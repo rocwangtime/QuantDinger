@@ -21,6 +21,7 @@ from .statistics import (
     monte_carlo_bootstrap,
     parameter_heatmap,
     probability_of_backtest_overfitting,
+    return_matrix_pbo,
     sample_sharpe,
 )
 from .walk_forward import WalkForwardFold, build_walk_forward_plan
@@ -54,6 +55,8 @@ class StrategyEvolutionEngine:
         slippage: float,
         constraints: tuple[ParameterConstraint, ...] = (),
         on_progress: ProgressCallback | None = None,
+        previous_trials: int = 0,
+        holdout_tracker=None,
     ) -> dict[str, Any]:
         started_at = perf_counter()
         if not parameters:
@@ -127,7 +130,10 @@ class StrategyEvolutionEngine:
             )
         best = completed[0]
         blind_result = None
+        holdout_exposures = 0
         if plan.blind_start and plan.blind_end:
+            if holdout_tracker:
+                holdout_exposures = holdout_tracker(plan.blind_start, plan.blind_end)
             blind_result = self.evaluator(best["params"], plan.blind_start, plan.blind_end, commission, slippage)
         final_result = blind_result or best["validationResults"][-1]
         diagnostic_results = list(best["validationResults"])
@@ -139,12 +145,17 @@ class StrategyEvolutionEngine:
             for value in equity_returns(diagnostic_result.get("equityCurve") or [])
         ]
         score_matrix = [[float(item["score"]) for item in row["folds"] if "score" in item] for row in completed]
-        pbo = probability_of_backtest_overfitting(score_matrix)
+        fold_proxy = probability_of_backtest_overfitting(score_matrix)
+        pbo = return_matrix_pbo([row["validationResults"] for row in trials if row.get("folds")])
+        pbo["foldRankDiagnostic"] = {**fold_proxy, "method": "foldReturnRankProxy", "selectedCandidatesOnly": True}
         dsr = deflated_sharpe(
             returns,
             observed_sharpe=sample_sharpe(returns),
-            trials=len(completed),
+            trials=max(1, previous_trials + sum(bool(row.get("folds")) for row in trials)),
         )
+        dsr.update(trialCountMethod="conservativeCumulativeAttempts", previousTrials=previous_trials,
+                   attemptedTrials=sum(bool(row.get("folds")) for row in trials),
+                   effectiveTrials=max(1, previous_trials + sum(bool(row.get("folds")) for row in trials)))
         monte_carlo = monte_carlo_bootstrap(
             returns,
             paths=config.monte_carlo_paths,
@@ -160,12 +171,34 @@ class StrategyEvolutionEngine:
             config.cost_multipliers,
         )
         robustness = self._robustness_grade(pbo, dsr, monte_carlo, cost_stress)
+        evidence_reasons = []
+        if robustness["availableChecks"] != robustness["totalChecks"]:
+            evidence_reasons.append("missingRobustnessChecks")
+        if not blind_result:
+            evidence_reasons.append("holdoutUnavailable")
+        elif len(equity_returns(blind_result.get("equityCurve") or [])) < 30:
+            evidence_reasons.append("insufficientHoldoutObservations")
+        if holdout_exposures:
+            evidence_reasons.append("holdoutPreviouslyExposed")
+        if len(returns) < 60:
+            evidence_reasons.append("insufficientReturnObservations")
+        if sum(int(row.get("totalTrades") or 0) for row in diagnostic_results) < 20:
+            evidence_reasons.append("insufficientClosedTrades")
+        if not dsr.get("available") or float(dsr.get("probability") or 0) < 0.95:
+            evidence_reasons.append("deflatedSharpeBelowThreshold")
+        if not pbo.get("available") or float(pbo.get("probability") or 0) > 0.2:
+            evidence_reasons.append("overfittingRisk")
+        if not cost_stress or float(cost_stress[-1].get("return") or 0) <= 0:
+            evidence_reasons.append("costStressNonPositive")
         return {
             "status": "complete",
             "method": config.method,
             "config": asdict(config),
             "plan": {
                 **plan.metadata(),
+                "evaluationMethod": "fixedParameterWindowValidation",
+                "rollingRefit": False,
+                "holdoutPriorExposures": holdout_exposures,
                 "frequency": walk_forward_context.get("frequency"),
             },
             "summary": {
@@ -197,6 +230,10 @@ class StrategyEvolutionEngine:
                 "monteCarlo": monte_carlo,
                 "costStress": cost_stress,
             },
+            "promotion": {"eligible": not evidence_reasons, "reasons": evidence_reasons,
+                          "minimumObservations": 60, "minimumClosedTrades": 20,
+                          "minimumHoldoutObservations": 30,
+                          "statisticalApprovalIsNotBrokerApproval": True},
             "constraints": [constraint.metadata() for constraint in constraints],
         }
 
@@ -396,7 +433,7 @@ class StrategyEvolutionEngine:
         if cost_available:
             checks.append(1.0 / (1.0 + pow(2.718281828, -stressed / 10.0)))
         score = round(100.0 * mean(checks), 2) if checks else 0.0
-        grade = "A" if score >= 80 else "B" if score >= 65 else "C" if score >= 50 else "D"
+        grade = ("A" if score >= 80 else "B" if score >= 65 else "C" if score >= 50 else "D") if len(checks) == 4 else "insufficient_evidence"
         return {
             "score": score,
             "grade": grade,
