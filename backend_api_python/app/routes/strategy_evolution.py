@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from flask import g, jsonify, request
 
 from app.openapi.blueprint import HumanBlueprint as Blueprint
+from app.openapi.schemas.common import HumanSuccessEnvelopeSchema
 from app.services.backtest_limits import BacktestRangeLimitError
 from app.services.strategy_evolution import StrategyEvolutionService
 from app.utils.auth import login_required
@@ -57,7 +58,8 @@ def estimate_strategy_evolution():
 def run_strategy_evolution():
     try:
         payload = request.get_json(silent=True) or {}
-        job_payload = {**payload, "__userId": int(g.user_id)}
+        prepared = get_strategy_evolution_service().prepare_submission(user_id=int(g.user_id), payload=payload)
+        job_payload = {**prepared, "__userId": int(g.user_id)}
         receipt = agent_jobs.submit_job(
             user_id=int(g.user_id),
             agent_token_id=None,
@@ -107,6 +109,28 @@ def list_strategy_evolution_jobs():
         if row and row.get("kind") == "strategy_evolution":
             items.append(_public_job(row, include_result=False))
     return jsonify({"code": 1, "msg": "common.success", "data": {"items": items}})
+
+
+@strategy_evolution_blp.route("/jobs/<job_id>/replay", methods=["POST"])
+@login_required
+@strategy_evolution_blp.alt_response(202, schema=HumanSuccessEnvelopeSchema, description='Frozen replay queued')
+def replay_strategy_evolution(job_id: str):
+    import uuid
+    row = agent_jobs.get_job(job_id, user_id=int(g.user_id))
+    if not row or row.get("kind") != "strategy_evolution":
+        return jsonify({"code": 0, "msg": "strategyEvolution.jobNotFound"}), 404
+    result, original = row.get("result") or {}, row.get("request") or {}
+    if isinstance(result, str):
+        result = json.loads(result)
+    if isinstance(original, str):
+        original = json.loads(original)
+    bundle = result.get("reproducibility", {}).get("bundleId")
+    if not bundle or not original.get("__frozenSource"):
+        return jsonify({"code": 0, "msg": "strategyEvolution.replayInputsUnavailable"}), 409
+    replay = {**original, "__bundleId": bundle, "__studyId": str(uuid.uuid4()), "__userId": int(g.user_id)}
+    receipt = agent_jobs.submit_job(user_id=int(g.user_id), agent_token_id=None, kind="strategy_evolution",
+                                    request_payload=replay, runner=_run_evolution_job)
+    return jsonify({"code": 1, "msg": "common.success", "data": _public_job(receipt)}), 202
 
 
 def _is_stale_running_job(row) -> bool:

@@ -33,6 +33,7 @@ _PREFIX_TAGS: list[tuple[str, str]] = [
     ("/api/dashboard", "Dashboard"),
     ("/api/settings", "Settings"),
     ("/api/portfolio", "Portfolio"),
+    ("/api/polymarket", "Portfolio"),
     ("/api/agent-automations", "Portfolio"),
     ("/api/ibkr", "IBKR"),
     ("/api/alpaca", "Alpaca"),
@@ -78,6 +79,8 @@ def register_human_blueprints(api: Api) -> None:
     from app.routes.dashboard import dashboard_blp
     from app.routes.settings import settings_blp
     from app.routes.portfolio import portfolio_blp
+    import app.routes.portfolio_research  # noqa: F401
+    from app.routes.polymarket import blp as polymarket_blp
     from app.routes.agent_automations import blp as agent_automations_blp
     from app.routes.ibkr import ibkr_blp
     from app.routes.alpaca import alpaca_blp
@@ -109,6 +112,7 @@ def register_human_blueprints(api: Api) -> None:
         (dashboard_blp, "/api/dashboard"),
         (settings_blp, "/api/settings"),
         (portfolio_blp, "/api/portfolio"),
+        (polymarket_blp, "/api/polymarket"),
         (agent_automations_blp, "/api/agent-automations"),
         (ibkr_blp, "/api/ibkr"),
         (alpaca_blp, "/api/alpaca"),

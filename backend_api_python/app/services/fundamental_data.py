@@ -123,6 +123,24 @@ class FundamentalDataService:
         return enriched
 
     @staticmethod
+    def load_recorded_revision(*, market: str, symbol: str, recorded_as_of: datetime, available_until: date) -> list[dict]:
+        """Reconstruct rows known to this system; history starts at migration.
+
+        recorded_as_of is knowledge time, available_until is public release time.
+        Frozen evolution bundles preserve the exact enriched values separately.
+        """
+        with get_db_connection() as db:
+            cur = db.cursor()
+            cur.execute("SELECT DISTINCT ON (snapshot->>'id') snapshot FROM qd_fundamental_revisions "
+                        "WHERE market=%s AND symbol=%s AND recorded_at<=%s "
+                        "AND (snapshot->>'available_at')::date<=%s "
+                        "ORDER BY snapshot->>'id',recorded_at DESC,id DESC",
+                        (market, str(symbol).upper(), recorded_as_of, available_until))
+            rows = cur.fetchall() or []
+            cur.close()
+        return [row["snapshot"] for row in rows]
+
+    @staticmethod
     def _load_rows(market: str, symbol: str, end: Any) -> list[dict]:
         FundamentalDataService.ensure_schema()
         with get_db_connection() as db:

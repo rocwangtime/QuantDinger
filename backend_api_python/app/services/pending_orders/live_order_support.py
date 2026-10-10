@@ -346,6 +346,32 @@ def attach_instrument_product_contracts(
         member["product_meta"] = dict(product.get("product_meta") or {})
 
 
+def prepare_live_order_context(*, order_id, order_row, payload):
+    """Load context and recheck admission before constructing a broker client.
+
+    Known broker identities continue into reconciliation. Reductions bypass the
+    entry guard even when its model has expired or is unavailable.
+    """
+    from app.services.exchange_execution import load_strategy_configs, resolve_exchange_config, safe_exchange_config_for_log
+    from app.services.portfolio.execution_risk import enforce_portfolio_entry
+    from app.utils.db import get_db_transaction
+
+    ctx = build_live_order_context(order_id=order_id, order_row=order_row, payload=payload,
+        load_strategy_configs=load_strategy_configs, resolve_exchange_config=resolve_exchange_config,
+        safe_exchange_config_for_log=safe_exchange_config_for_log)
+    if (ctx.cfg.get("trading_config") or {}).get("portfolio_risk") and not order_row.get("client_order_id"):
+        try:
+            with get_db_transaction():
+                enforce_portfolio_entry(user_id=int(order_row.get("user_id") or ctx.cfg.get("user_id") or 0),
+                    strategy_id=ctx.strategy_id, action=ctx.signal_type, symbol=ctx.symbol, quantity=ctx.amount,
+                    price=float(payload.get("ref_price") or payload.get("price") or order_row.get("price") or 0),
+                    pending_id=order_id)
+        except (ValueError, TypeError, KeyError) as exc:
+            raise LiveOrderRejected(error=str(exc), strategy_id=ctx.strategy_id,
+                                    strategy_log="Entry rejected by portfolio risk policy") from exc
+    return ctx
+
+
 def build_live_order_context(
     *,
     order_id: int,

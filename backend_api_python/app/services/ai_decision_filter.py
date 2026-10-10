@@ -1,8 +1,9 @@
-"""Fail-open AI decision filter for live entry orders."""
+"""Auditable AI entry policies with explicit shadow and failure semantics."""
 
 from __future__ import annotations
 
 import json
+import math
 import os
 import time
 import uuid
@@ -109,6 +110,7 @@ class AIDecisionRequest:
     order_intent_id: int = 0
     strategy_type: str = ""
     context: dict[str, Any] = field(default_factory=dict)
+    mode: str = "advisory"
 
 
 @dataclass(frozen=True)
@@ -134,6 +136,19 @@ class AIDecisionFilter:
     """Evaluate entry orders with Jev first and an LLM fallback."""
 
     def evaluate(self, request: AIDecisionRequest, *, enabled: bool) -> AIDecisionResult:
+        from app.services.ai_entry_policy import apply_entry_policy, normalize_entry_mode
+
+        mode = normalize_entry_mode(request.mode)
+        result = self._evaluate(request, enabled=enabled)
+        entry = str(request.action or "").strip().lower() in ENTRY_ACTIONS
+        result = apply_entry_policy(result, mode=mode, entry=entry, enabled=enabled)
+        if enabled:
+            persisted = self._persist(request, result)
+            if persisted is False and mode == "required" and entry:
+                result = replace(result, allowed=False, decision="audit_unavailable_rejected", reason="ai_audit_unavailable")
+        return result
+
+    def _evaluate(self, request: AIDecisionRequest, *, enabled: bool) -> AIDecisionResult:
         decision_id = str(uuid.uuid4())
         started = time.perf_counter()
         if not enabled:
@@ -142,11 +157,9 @@ class AIDecisionFilter:
         strategy_type = str(request.strategy_type or "").strip().lower()
         if action not in ENTRY_ACTIONS:
             result = self._result(True, "skipped", "none", "exit_orders_are_not_filtered", decision_id, started)
-            self._persist(request, result)
             return result
         if strategy_type in EXCLUDED_STRATEGY_TYPES:
             result = self._result(True, "skipped", "none", "strategy_type_not_supported", decision_id, started)
-            self._persist(request, result)
             return result
 
         failures: list[str] = []
@@ -159,7 +172,7 @@ class AIDecisionFilter:
                 llm_configured = llm.is_configured()
             except Exception as exc:
                 failures.append(f"llm:{self._safe_error(exc)}")
-                logger.warning("LLM configuration check failed open: %s", exc)
+                logger.warning("LLM configuration unavailable: %s", exc)
             if not llm_configured:
                 reason = "ai_provider_unavailable" if failures else "ai_not_configured"
                 result = self._result(
@@ -171,7 +184,6 @@ class AIDecisionFilter:
                     started,
                     fallback_reason="; ".join(failures),
                 )
-                self._persist(request, result)
                 return result
 
         billing = self._consume_credits(request.user_id, decision_id)
@@ -188,7 +200,6 @@ class AIDecisionFilter:
                 fallback_reason=status,
                 billing=billing,
             )
-            self._persist(request, result)
             return result
 
         if jev_config["api_key"]:
@@ -197,11 +208,10 @@ class AIDecisionFilter:
                     self._evaluate_jev(request, decision_id, started, jev_config),
                     billing=billing,
                 )
-                self._persist(request, result)
                 return result
             except Exception as exc:
                 failures.append(f"jev:{self._safe_error(exc)}")
-                logger.warning("Jev decision failed open: %s", exc)
+                logger.warning("Jev decision provider failed: %s", exc)
 
         if llm is None:
             try:
@@ -209,18 +219,17 @@ class AIDecisionFilter:
                 llm_configured = llm.is_configured()
             except Exception as exc:
                 failures.append(f"llm:{self._safe_error(exc)}")
-                logger.warning("LLM configuration check failed open: %s", exc)
+                logger.warning("LLM configuration unavailable: %s", exc)
         if llm_configured and llm is not None:
             try:
                 result = replace(
                     self._evaluate_llm(request, decision_id, started, failures, service=llm),
                     billing=billing,
                 )
-                self._persist(request, result)
                 return result
             except Exception as exc:
                 failures.append(f"llm:{self._safe_error(exc)}")
-                logger.warning("LLM decision failed open: %s", exc)
+                logger.warning("LLM decision provider failed: %s", exc)
 
         billing = self._refund_credits(request.user_id, billing)
         reason = "ai_not_configured" if not failures else "ai_provider_unavailable"
@@ -234,7 +243,6 @@ class AIDecisionFilter:
             fallback_reason="; ".join(failures),
             billing=billing,
         )
-        self._persist(request, result)
         return result
 
     def _evaluate_jev(
@@ -282,7 +290,9 @@ class AIDecisionFilter:
                 "probabilities": probabilities,
             })
 
-        min_confidence = max(0.0, min(float(config.get("min_confidence") or 0.55), 1.0))
+        min_confidence = self._bounded_float(config.get("min_confidence", 0.55))
+        if min_confidence is None:
+            raise ValueError("Jev confidence threshold is invalid")
         for name in ("risk_check", "execution_quality"):
             confidence = results[name][2]
             if confidence is None or confidence < min_confidence:
@@ -376,6 +386,8 @@ class AIDecisionFilter:
         if decision not in {"pass", "reject"}:
             raise ValueError("LLM response did not contain a valid decision")
         confidence = self._bounded_float(payload.get("confidence"))
+        if confidence is None:
+            raise ValueError("LLM response confidence was invalid")
         checks = payload.get("checks") if isinstance(payload.get("checks"), list) else []
         return self._result(
             decision == "pass",
@@ -403,6 +415,7 @@ class AIDecisionFilter:
             "notional": request.quantity * request.reference_price,
             "leverage": request.leverage,
             "strategy_type": request.strategy_type,
+            "mode": request.mode,
             "signal_reason": request.reason,
             "context": request.context,
         }
@@ -453,7 +466,7 @@ class AIDecisionFilter:
                 probability = float(value)
             except (TypeError, ValueError) as exc:
                 raise ValueError(f"Jev response probability was invalid for {question}") from exc
-            if probability < 0 or probability > 1:
+            if not math.isfinite(probability) or probability < 0 or probability > 1:
                 raise ValueError(f"Jev response probability was out of range for {question}")
             probabilities[str(option)] = probability
         if abs(sum(probabilities.values()) - 1.0) > 0.001:
@@ -475,8 +488,11 @@ class AIDecisionFilter:
 
     @staticmethod
     def _bounded_float(value: Any) -> float | None:
+        if isinstance(value, bool):
+            return None
         try:
-            return max(0.0, min(float(value), 1.0))
+            number = float(value)
+            return number if math.isfinite(number) and 0 <= number <= 1 else None
         except (TypeError, ValueError):
             return None
 
@@ -619,85 +635,108 @@ class AIDecisionFilter:
         )
 
     @staticmethod
-    def _persist(request: AIDecisionRequest, result: AIDecisionResult) -> None:
+    def _persist(request: AIDecisionRequest, result: AIDecisionResult) -> bool:
         try:
             with get_db_connection() as db:
                 cur = db.cursor()
-                cur.execute(
-                    """
-                    SELECT EXISTS (
-                        SELECT 1
-                        FROM information_schema.columns
-                        WHERE table_schema = current_schema()
-                          AND table_name = 'qd_ai_decisions'
-                          AND column_name = 'billing_json'
-                    ) AS present
-                    """
-                )
-                column_row = cur.fetchone()
-                has_billing_column = bool(
-                    column_row.get("present") if isinstance(column_row, dict) else column_row and column_row[0]
-                )
-                values = (
-                    result.decision_id,
-                    int(request.user_id or 0),
-                    str(request.source_type or ""),
-                    int(request.source_id or request.strategy_id or 0),
-                    int(request.strategy_run_id or 0),
-                    int(request.order_intent_id or 0),
-                    str(request.symbol or ""),
-                    str(request.action or ""),
-                    str(request.market_type or ""),
-                    result.provider,
-                    result.model,
-                    result.decision,
-                    bool(result.allowed),
-                    result.confidence,
-                    result.reason,
-                    result.fallback_reason,
-                    json.dumps(result.probabilities, ensure_ascii=False, default=str),
-                    json.dumps(result.checks, ensure_ascii=False, default=str),
-                    AIDecisionFilter._state_text(request),
-                )
-                if has_billing_column:
-                    cur.execute(
-                        """
-                        INSERT INTO qd_ai_decisions
-                          (decision_uid, user_id, source_type, source_id, strategy_run_id,
-                           order_intent_id, symbol, action, market_type, provider, model,
-                           decision, allowed, confidence, reason, fallback_reason,
-                           probabilities_json, checks_json, request_snapshot, billing_json,
-                           latency_ms, created_at)
-                        VALUES
-                          (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                           %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
-                        ON CONFLICT (decision_uid) DO NOTHING
-                        """,
-                        values + (
-                            json.dumps(result.billing, ensure_ascii=False, default=str),
-                            int(result.latency_ms),
-                        ),
-                    )
-                else:
-                    cur.execute(
-                        """
-                        INSERT INTO qd_ai_decisions
-                          (decision_uid, user_id, source_type, source_id, strategy_run_id,
-                           order_intent_id, symbol, action, market_type, provider, model,
-                           decision, allowed, confidence, reason, fallback_reason,
-                           probabilities_json, checks_json, request_snapshot,
-                           latency_ms, created_at)
-                        VALUES
-                          (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                           %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
-                        ON CONFLICT (decision_uid) DO NOTHING
-                        """,
-                        values + (int(result.latency_ms),),
-                    )
-                db.commit()
-                cur.close()
+                nested = hasattr(db, "rollback_only")
+                try:
+                    if nested:
+                        cur.execute("SAVEPOINT ai_audit")
+                    try:
+                        AIDecisionFilter._write_audit(cur, request, result)
+                    except Exception as exc:
+                        # A best-effort shadow audit must not poison an order transaction.
+                        if nested:
+                            cur.execute("ROLLBACK TO SAVEPOINT ai_audit")
+                            cur.execute("RELEASE SAVEPOINT ai_audit")
+                        else:
+                            db.rollback()
+                        logger.warning("AI decision audit persistence unavailable: %s", exc)
+                        return False
+                    if nested:
+                        cur.execute("RELEASE SAVEPOINT ai_audit")
+                    db.commit()
+                    return True
+                finally:
+                    cur.close()
         except Exception as exc:
-            logger.warning("AI decision audit persistence skipped: %s", exc)
+            logger.warning("AI decision audit persistence unavailable: %s", exc)
+            return False
+
+    @staticmethod
+    def _write_audit(cur, request, result):
+        cur.execute(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND table_name = 'qd_ai_decisions'
+                  AND column_name = 'billing_json'
+            ) AS present
+            """
+        )
+        column_row = cur.fetchone()
+        has_billing_column = bool(
+            column_row.get("present") if isinstance(column_row, dict) else column_row and column_row[0]
+        )
+        values = (
+            result.decision_id,
+            int(request.user_id or 0),
+            str(request.source_type or ""),
+            int(request.source_id or request.strategy_id or 0),
+            int(request.strategy_run_id or 0),
+            int(request.order_intent_id or 0),
+            str(request.symbol or ""),
+            str(request.action or ""),
+            str(request.market_type or ""),
+            result.provider,
+            result.model,
+            result.decision,
+            bool(result.allowed),
+            result.confidence,
+            result.reason,
+            result.fallback_reason,
+            json.dumps(result.probabilities, ensure_ascii=False, default=str),
+            json.dumps(result.checks, ensure_ascii=False, default=str),
+            AIDecisionFilter._state_text(request),
+        )
+        if has_billing_column:
+            cur.execute(
+                """
+                INSERT INTO qd_ai_decisions
+                  (decision_uid, user_id, source_type, source_id, strategy_run_id,
+                   order_intent_id, symbol, action, market_type, provider, model,
+                   decision, allowed, confidence, reason, fallback_reason,
+                   probabilities_json, checks_json, request_snapshot, billing_json,
+                   latency_ms, created_at)
+                VALUES
+                  (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                   %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                ON CONFLICT (decision_uid) DO NOTHING
+                """,
+                values + (
+                    json.dumps(result.billing, ensure_ascii=False, default=str),
+                    int(result.latency_ms),
+                ),
+            )
+        else:
+            cur.execute(
+                """
+                INSERT INTO qd_ai_decisions
+                  (decision_uid, user_id, source_type, source_id, strategy_run_id,
+                   order_intent_id, symbol, action, market_type, provider, model,
+                   decision, allowed, confidence, reason, fallback_reason,
+                   probabilities_json, checks_json, request_snapshot,
+                   latency_ms, created_at)
+                VALUES
+                  (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                   %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                ON CONFLICT (decision_uid) DO NOTHING
+                """,
+                values + (int(result.latency_ms),),
+            )
 
 
 def list_ai_decisions(

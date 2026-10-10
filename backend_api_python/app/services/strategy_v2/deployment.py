@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 from typing import Any
 
+from app.services.ai_entry_policy import normalize_entry_mode
 from app.services.script_source import get_script_source_service
 from app.services.live_trading.capabilities import (
     supported_crypto_exchange_ids,
@@ -59,6 +61,12 @@ class StrategyV2DeploymentService:
         execution_mode = str(payload.get("executionMode") or "signal").strip().lower()
         if execution_mode not in {"signal", "live"}:
             raise StrategyV2ContractError("strategyV2.invalidExecutionMode")
+        evidence_job_id = str(payload.get("researchEvidenceJobId") or "").strip()
+        research_assumptions = {}
+        require_evidence = os.getenv("REQUIRE_RESEARCH_EVIDENCE_FOR_LIVE", "false").lower() in {"true", "1", "yes"}
+        if evidence_job_id or (execution_mode == "live" and require_evidence):
+            research_assumptions = self._validate_research_evidence(user_id=user_id, source=source,
+                params=dict(payload.get("params") or {}), job_id=evidence_job_id)
         credential_id = int(payload.get("credentialId") or 0)
         exchange_id = self._credential_exchange(user_id, credential_id) if execution_mode == "live" else ""
         if execution_mode == "live" and not exchange_id:
@@ -106,6 +114,9 @@ class StrategyV2DeploymentService:
         if leverage_enabled and leverage > manifest.max_leverage:
             raise StrategyV2ContractError("strategyV2.leverageExceedsStrategyLimit")
         leverage = max(1.0, leverage if leverage_enabled else 1.0)
+        if research_assumptions and (initial_capital != research_assumptions["initialCapital"]
+                                     or leverage != research_assumptions["leverage"]):
+            raise StrategyV2ContractError("strategyV2.researchEvidenceMismatch")
         declared_payload_direction = payload.get("directionMode") or payload.get("direction_mode") or ""
         requested_direction = declared_payload_direction or (
             payload.get("positionSide") or payload.get("position_side") or ""
@@ -270,8 +281,13 @@ class StrategyV2DeploymentService:
             "position_side": position_side,
             "instrument_products": instrument_products,
             "quote_currency": quote_currency,
-            "ai_decision_filter": bool(payload.get("aiDecisionFilter")),
+            "ai_decision_filter": (bool(payload["aiDecisionFilter"]) if "aiDecisionFilter" in payload else bool(payload.get("aiDecisionMode"))),
+            "ai_decision_mode": normalize_entry_mode(payload.get("aiDecisionMode")),
+            "research_evidence_job_id": evidence_job_id,
+            "portfolio_risk": self._validate_portfolio_risk(payload.get("portfolioRisk")),
         })
+        if research_assumptions:
+            runtime_config.update(commission=research_assumptions["commission"], slippage=research_assumptions["slippage"])
         market_category = manifest.markets[0] if len(manifest.markets) == 1 else "Mixed"
         exchange_config = {"credential_id": credential_id, "exchange_id": exchange_id} if credential_id else {}
 
@@ -292,6 +308,12 @@ class StrategyV2DeploymentService:
                 source_version_id,
             )
             if strategy_id:
+                cur.execute("SELECT id FROM qd_strategies_trading WHERE id=%s AND user_id=%s FOR UPDATE",
+                            (int(strategy_id), int(user_id)))
+                cur.execute("SELECT group_id FROM qd_order_groups WHERE config->>'strategyId'=%s "
+                            "AND state->>'status' NOT IN ('cancelled','unwound','resolved') LIMIT 1", (str(strategy_id),))
+                if (cur.fetchone() or {}).get("group_id"):
+                    raise StrategyV2ContractError("orderGroup.strategyReserved")
                 cur.execute(
                     """
                     UPDATE qd_strategies_trading
@@ -321,6 +343,63 @@ class StrategyV2DeploymentService:
             db.commit()
             cur.close()
         return deployment_id
+
+    @staticmethod
+    def _validate_portfolio_risk(value):
+        if value is None or value == {}:
+            return {}
+        if not isinstance(value, dict):
+            raise StrategyV2ContractError("strategyV2.portfolioRiskInvalid")
+        from app.services.portfolio.risk import finite_number, projected_model_risk
+        allowed = {"max_portfolio_daily_volatility", "portfolio_model_max_age_hours"}
+        if set(value) - allowed - {"portfolio_model"}:
+            raise StrategyV2ContractError("strategyV2.portfolioRiskInvalid")
+        result = {key: finite_number(number) for key, number in value.items() if key in allowed}
+        if any(number <= 0 for number in result.values()):
+            raise StrategyV2ContractError("strategyV2.portfolioRiskInvalid")
+        if not result.get("max_portfolio_daily_volatility") or not value.get("portfolio_model"):
+            raise StrategyV2ContractError("strategyV2.portfolioRiskInvalid")
+        if "portfolio_model" in value:
+            model = value["portfolio_model"]
+            check = projected_model_risk(model, notionals={}, capital=1,
+                                         max_age_hours=result.get("portfolio_model_max_age_hours", 96))
+            if not check["available"]:
+                raise StrategyV2ContractError("strategyV2.portfolioModelUnavailable")
+            result["portfolio_model"] = model
+        return result
+
+    @staticmethod
+    def _validate_research_evidence(*, user_id, source, params, job_id):
+        from app.utils.agent_jobs import get_job
+        from app.services.strategy_evolution.bundles import content_hash, runtime_identity
+        job = get_job(job_id, user_id=int(user_id)) if job_id else None
+        if not job or job.get("kind") != "strategy_evolution" or job.get("status") != "succeeded":
+            raise StrategyV2ContractError("strategyV2.researchEvidenceRequired")
+        result = StrategyV2DeploymentService._object(job.get("result"))
+        evidence = result.get("reproducibility") or {}
+        if (not (result.get("promotion") or {}).get("eligible") or not evidence.get("historyTracked")
+                or not evidence.get("sourceFrozenAtSubmission") or not evidence.get("bundleId")):
+            raise StrategyV2ContractError("strategyV2.researchEvidenceInsufficient")
+        if (int((result.get("source") or {}).get("id") or 0) != int(source["id"])
+                or evidence.get("sourceHash") != content_hash(str(source.get("code") or ""))
+                or content_hash(result.get("bestParams")) != content_hash(params) or evidence.get("runtime") != runtime_identity()):
+            raise StrategyV2ContractError("strategyV2.researchEvidenceMismatch")
+        with get_db_connection() as db:
+            cur = db.cursor()
+            cur.execute("SELECT EXISTS(SELECT 1 FROM qd_research_studies newer WHERE newer.user_id=study.user_id "
+                        "AND newer.source_id=study.source_id AND newer.created_at>study.created_at) AS stale "
+                        "FROM qd_research_studies study WHERE study.study_id=%s AND study.user_id=%s",
+                        (evidence.get("studyId"), int(user_id)))
+            row = cur.fetchone()
+            cur.close()
+        if not row or row["stale"]:
+            raise StrategyV2ContractError("strategyV2.researchEvidenceStale")
+        assumptions = result.get("economicAssumptions") or {}
+        from app.services.portfolio.risk import finite_number
+        if (set(assumptions) != {"initialCapital", "leverage", "commission", "slippage"}
+                or not all(finite_number(value) > 0 for value in assumptions.values())):
+            raise StrategyV2ContractError("strategyV2.researchEvidenceInsufficient")
+        return assumptions
 
     @staticmethod
     def _object(value: Any) -> dict[str, Any]:

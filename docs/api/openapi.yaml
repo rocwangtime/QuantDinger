@@ -327,6 +327,20 @@ components:
       - code
       - new_password
       additionalProperties: false
+    ShadowEvaluationRequest:
+      type: object
+      properties:
+        horizonHours:
+          type: integer
+          default: 24
+          minimum: 1
+          maximum: 168
+        limit:
+          type: integer
+          default: 100
+          minimum: 1
+          maximum: 200
+      additionalProperties: false
     CredentialCreateRequest:
       type: object
       properties:
@@ -500,6 +514,119 @@ components:
       required:
       - code
       - msg
+      additionalProperties: false
+    PortfolioRiskRequest:
+      type: object
+      properties:
+        returns:
+          type: object
+          additionalProperties:
+            type: object
+            additionalProperties: {}
+        weights:
+          type: object
+          additionalProperties:
+            type: number
+        shrinkage:
+          type: number
+          default: 0.2
+          minimum: 0.0
+          maximum: 1.0
+        annualPeriods:
+          type: integer
+          default: 252
+          enum:
+          - 252
+          - 365
+        shocks:
+          type: object
+          default: null
+          additionalProperties:
+            type: number
+          nullable: true
+      required:
+      - returns
+      - weights
+      additionalProperties: false
+    OrderGroupLeg:
+      type: object
+      properties:
+        symbol:
+          type: string
+          minLength: 1
+          maxLength: 80
+        action:
+          type: string
+          enum:
+          - open_long
+          - open_short
+        quantity:
+          type: number
+          minimum: 0.0
+        referencePrice:
+          type: number
+          minimum: 0.0
+      required:
+      - action
+      - quantity
+      - referencePrice
+      - symbol
+      additionalProperties: false
+    OrderGroupRequest:
+      type: object
+      properties:
+        strategyId:
+          type: integer
+          minimum: 1
+        strategyRunId:
+          type: integer
+          default: 0
+          minimum: 0
+          description: Omit to create an isolated order_group run without starting
+            the strategy.
+        executionMode:
+          type: string
+          default: signal
+          enum:
+          - signal
+        legs:
+          type: array
+          minItems: 2
+          maxItems: 8
+          items:
+            $ref: '#/components/schemas/OrderGroupLeg'
+        maxGrossNotional:
+          type: number
+          minimum: 0.0
+        timeoutSeconds:
+          type: integer
+          default: 300
+          minimum: 5
+          maximum: 3600
+      required:
+      - legs
+      - maxGrossNotional
+      - strategyId
+      additionalProperties: false
+    OrderGroupUnwindRequest:
+      type: object
+      properties:
+        referencePrices:
+          type: object
+          additionalProperties:
+            type: number
+      required:
+      - referencePrices
+      additionalProperties: false
+    OrderGroupResolveRequest:
+      type: object
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+      required:
+      - reason
       additionalProperties: false
     BillingOrderRequest:
       type: object
@@ -2324,6 +2451,45 @@ paths:
       operationId: getApiStrategyEvolutionJobs
       summary: Get Api Strategy Evolution Jobs
       x-visibility: internal
+  /api/strategy-evolution/jobs/{job_id}/replay:
+    post:
+      responses:
+        '202':
+          description: Frozen replay queued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      tags:
+      - Strategy
+      operationId: postApiStrategyEvolutionJobsJobIdReplay
+      summary: Post Api Strategy Evolution Jobs Job Id Replay
+      parameters:
+      - name: job_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      x-visibility: internal
+    parameters:
+    - in: path
+      name: job_id
+      required: true
+      schema:
+        type: string
+        minLength: 1
   /api/strategy-evolution/jobs/{job_id}/cancel:
     post:
       responses:
@@ -4668,6 +4834,121 @@ paths:
       operationId: getApiStrategiesAiDecisions
       summary: Get Api Strategies Ai Decisions
       x-visibility: internal
+  /api/strategies/{strategy_id}/ai-evaluation:
+    post:
+      responses:
+        '422':
+          $ref: '#/components/responses/UNPROCESSABLE_ENTITY'
+        '202':
+          description: Evaluation queued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ShadowEvaluationRequest'
+      summary: Post Api Strategies Strategy Id Ai Evaluation
+      tags:
+      - Strategy
+      operationId: postApiStrategiesStrategyIdAiEvaluation
+      description: Compare baseline and shadow suggestions at a fixed horizon, net
+        of assumed costs.
+      parameters:
+      - name: strategy_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      x-visibility: internal
+    parameters:
+    - in: path
+      name: strategy_id
+      required: true
+      schema:
+        type: integer
+        minimum: 0
+  /api/strategies/ai-evaluation/jobs/{job_id}:
+    get:
+      responses:
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      tags:
+      - Strategy
+      operationId: getApiStrategiesAiEvaluationJobsJobId
+      summary: Get Api Strategies Ai Evaluation Jobs Job Id
+      parameters:
+      - name: job_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      x-visibility: internal
+    parameters:
+    - in: path
+      name: job_id
+      required: true
+      schema:
+        type: string
+        minLength: 1
+  /api/strategies/ai-evaluation/jobs/{job_id}/cancel:
+    post:
+      responses:
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      tags:
+      - Strategy
+      operationId: postApiStrategiesAiEvaluationJobsJobIdCancel
+      summary: Post Api Strategies Ai Evaluation Jobs Job Id Cancel
+      parameters:
+      - name: job_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      x-visibility: internal
+    parameters:
+    - in: path
+      name: job_id
+      required: true
+      schema:
+        type: string
+        minLength: 1
   /api/strategy-assets:
     get:
       responses:
@@ -5168,6 +5449,53 @@ paths:
                 $ref: '#/components/schemas/HumanSuccessEnvelope'
       tags:
       - Strategy
+      requestBody:
+        required: true
+        description: Existing Strategy V2 deployment fields plus opt-in research and
+          risk controls.
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              properties:
+                sourceId:
+                  type: integer
+                  minimum: 1
+                params:
+                  type: object
+                  additionalProperties: true
+                aiDecisionFilter:
+                  type: boolean
+                aiDecisionMode:
+                  type: string
+                  enum:
+                  - advisory
+                  - shadow
+                  - required
+                  description: Specifying a mode enables AI unless aiDecisionFilter
+                    is explicitly false.
+                researchEvidenceJobId:
+                  type: string
+                  description: Owned qualifying evolution job matching this deployment.
+                portfolioRisk:
+                  type: object
+                  additionalProperties: false
+                  description: An empty object disables the opt-in entry guard. Otherwise
+                    model and limit are required.
+                  properties:
+                    portfolio_model:
+                      type: object
+                      description: The model returned by risk-analysis.
+                    max_portfolio_daily_volatility:
+                      type: number
+                      minimum: 0
+                      exclusiveMinimum: true
+                    portfolio_model_max_age_hours:
+                      type: number
+                      minimum: 0
+                      exclusiveMinimum: true
+                      default: 96
       operationId: postApiStrategies
       summary: Post Api Strategies
       x-visibility: internal
@@ -5220,6 +5548,53 @@ paths:
                 $ref: '#/components/schemas/HumanSuccessEnvelope'
       tags:
       - Strategy
+      requestBody:
+        required: true
+        description: Existing Strategy V2 deployment fields plus opt-in research and
+          risk controls.
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              properties:
+                sourceId:
+                  type: integer
+                  minimum: 1
+                params:
+                  type: object
+                  additionalProperties: true
+                aiDecisionFilter:
+                  type: boolean
+                aiDecisionMode:
+                  type: string
+                  enum:
+                  - advisory
+                  - shadow
+                  - required
+                  description: Specifying a mode enables AI unless aiDecisionFilter
+                    is explicitly false.
+                researchEvidenceJobId:
+                  type: string
+                  description: Owned qualifying evolution job matching this deployment.
+                portfolioRisk:
+                  type: object
+                  additionalProperties: false
+                  description: An empty object disables the opt-in entry guard. Otherwise
+                    model and limit are required.
+                  properties:
+                    portfolio_model:
+                      type: object
+                      description: The model returned by risk-analysis.
+                    max_portfolio_daily_volatility:
+                      type: number
+                      minimum: 0
+                      exclusiveMinimum: true
+                    portfolio_model_max_age_hours:
+                      type: number
+                      minimum: 0
+                      exclusiveMinimum: true
+                      default: 96
       operationId: putApiStrategiesStrategyId
       summary: Put Api Strategies Strategy Id
       parameters:
@@ -6433,6 +6808,221 @@ paths:
       - Portfolio
       operationId: postApiPortfolioGroupsRename
       x-visibility: internal
+  /api/portfolio/risk-analysis:
+    post:
+      responses:
+        '422':
+          $ref: '#/components/responses/UNPROCESSABLE_ENTITY'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PortfolioRiskRequest'
+      summary: Analyze aligned daily returns in one currency and return a reusable
+        risk model.
+      tags:
+      - Portfolio
+      operationId: postApiPortfolioRiskAnalysis
+      x-visibility: internal
+  /api/portfolio/order-groups:
+    post:
+      responses:
+        '422':
+          $ref: '#/components/responses/UNPROCESSABLE_ENTITY'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrderGroupRequest'
+      summary: Queue 2–8 virtual legs; Idempotency-Key is required and conflicts reject.
+      tags:
+      - Portfolio
+      parameters:
+      - name: Idempotency-Key
+        in: header
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 120
+      operationId: postApiPortfolioOrderGroups
+      x-visibility: internal
+  /api/portfolio/order-groups/{group_id}:
+    get:
+      responses:
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      summary: Read durable leg state and group-attributed residual exposure.
+      tags:
+      - Portfolio
+      operationId: getApiPortfolioOrderGroupsGroupId
+      parameters:
+      - name: group_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      x-visibility: internal
+    parameters:
+    - in: path
+      name: group_id
+      required: true
+      schema:
+        type: string
+        minLength: 1
+  /api/portfolio/order-groups/{group_id}/cancel:
+    post:
+      responses:
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      summary: Stop unfilled group work; filled exposure requires an explicit unwind.
+      tags:
+      - Portfolio
+      operationId: postApiPortfolioOrderGroupsGroupIdCancel
+      parameters:
+      - name: group_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      x-visibility: internal
+    parameters:
+    - in: path
+      name: group_id
+      required: true
+      schema:
+        type: string
+        minLength: 1
+  /api/portfolio/order-groups/{group_id}/unwind:
+    post:
+      responses:
+        '422':
+          $ref: '#/components/responses/UNPROCESSABLE_ENTITY'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrderGroupUnwindRequest'
+      summary: Post Api Portfolio Order Groups Group Id Unwind
+      tags:
+      - Portfolio
+      operationId: postApiPortfolioOrderGroupsGroupIdUnwind
+      description: Queue idempotent reductions using explicit reference marks, including
+        virtual costs.
+      parameters:
+      - name: group_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      x-visibility: internal
+    parameters:
+    - in: path
+      name: group_id
+      required: true
+      schema:
+        type: string
+        minLength: 1
+  /api/portfolio/order-groups/{group_id}/resolve:
+    post:
+      responses:
+        '422':
+          $ref: '#/components/responses/UNPROCESSABLE_ENTITY'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrderGroupResolveRequest'
+      summary: Acknowledge manual closure after checking the virtual account is flat.
+      tags:
+      - Portfolio
+      operationId: postApiPortfolioOrderGroupsGroupIdResolve
+      parameters:
+      - name: group_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      x-visibility: internal
+    parameters:
+    - in: path
+      name: group_id
+      required: true
+      schema:
+        type: string
+        minLength: 1
   /api/agent-automations:
     get:
       responses:

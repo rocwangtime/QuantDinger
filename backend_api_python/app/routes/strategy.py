@@ -13,6 +13,7 @@ from app.services.llm_selection import agent_model_selection
 
 from app import get_trading_executor
 from app.routes.strategy_blueprint import strategy_blp
+from app.openapi.schemas.research_execution import RESEARCH_DEPLOYMENT_DOC
 from app.routes.strategy_services import get_strategy_service
 from app.services.ai_generation_contracts import (
     SCRIPT_STRATEGY_REPAIR_REQUIREMENTS,
@@ -167,6 +168,7 @@ def get_strategy(strategy_id: int):
 
 @strategy_blp.route("/strategies", methods=["POST"])
 @login_required
+@strategy_blp.doc(**RESEARCH_DEPLOYMENT_DOC)
 def create_strategy():
     try:
         payload = dict(request.get_json() or {})
@@ -180,6 +182,7 @@ def create_strategy():
 
 @strategy_blp.route("/strategies/<int:strategy_id>", methods=["PUT"])
 @login_required
+@strategy_blp.doc(**RESEARCH_DEPLOYMENT_DOC)
 def update_strategy(strategy_id: int):
     try:
         changed = get_strategy_service().update_strategy(
@@ -200,8 +203,11 @@ def update_strategy(strategy_id: int):
 def delete_strategy(strategy_id: int):
     if get_trading_executor().is_running(strategy_id):
         return _error("strategyV2.stopBeforeDelete", 409)
-    if not get_strategy_service().delete_strategy(strategy_id, user_id=int(g.user_id)):
-        return _error("strategyV2.strategyNotFound", 404)
+    try:
+        if not get_strategy_service().delete_strategy(strategy_id, user_id=int(g.user_id)):
+            return _error("strategyV2.strategyNotFound", 404)
+    except ValueError as exc:
+        return _error(str(exc), 409)
     return _ok({"id": strategy_id}, "strategyV2.deleted")
 
 
@@ -212,8 +218,11 @@ def start_strategy(strategy_id: int):
     if not row:
         return _error("strategyV2.strategyNotFound", 404)
     service = get_strategy_service()
-    if not service.update_strategy_status(strategy_id, "running", user_id=int(g.user_id)):
-        return _error("strategyV2.strategyNotFound", 404)
+    try:
+        if not service.update_strategy_status(strategy_id, "running", user_id=int(g.user_id)):
+            return _error("strategyV2.strategyNotFound", 404)
+    except ValueError as exc:
+        return _error(str(exc), 409)
     executor = get_trading_executor()
     if executor.start_strategy(strategy_id):
         timeout = max(0.0, float(os.getenv("STRATEGY_COMMAND_START_WAIT_SEC", "8")))

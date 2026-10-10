@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
+import math
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from app.services.strategy_runtime.order_intents import OrderIntentService
 from app.services.strategy_runtime.signals import StrategySignal
-from app.utils.db import get_db_connection
+from app.utils.db import get_db_connection, get_db_transaction
 
 
 @dataclass(frozen=True)
@@ -36,8 +37,11 @@ class LiveOrderRequest:
     sizing: dict[str, Any] | None = None
     client_order_id: str = ""
     ai_decision_filter: bool = False
+    ai_decision_mode: str = "advisory"
     strategy_type: str = ""
     decision_context: dict[str, Any] | None = None
+    order_group_id: str = ""
+    portfolio_risk: dict[str, Any] | None = None
 
 
 class StrategyV2OrderGateway:
@@ -163,6 +167,29 @@ class StrategyV2OrderGateway:
 
     def submit(self, request: LiveOrderRequest) -> int | None:
         request = self._validate(request)
+        if request.execution_mode == "live" and request.portfolio_risk:
+            with get_db_transaction():
+                return self._submit(request)
+        if request.execution_mode == "signal":
+            with get_db_transaction() as db:
+                cur = db.cursor()
+                try:
+                    cur.execute("SELECT id FROM qd_strategies_trading WHERE id=%s AND user_id=%s "
+                                "AND execution_mode='signal' FOR UPDATE", (request.strategy_id, request.user_id))
+                    if not cur.fetchone():
+                        raise ValueError("strategyV2.virtualStrategyNotFound")
+                    cur.execute("SELECT group_id FROM qd_order_groups WHERE config->>'strategyId'=%s "
+                                "AND state->>'status' NOT IN ('cancelled','unwound','resolved') LIMIT 1",
+                                (str(request.strategy_id),))
+                    reserved = cur.fetchone()
+                    if reserved and reserved["group_id"] != request.order_group_id:
+                        raise ValueError("orderGroup.strategyReserved")
+                finally:
+                    cur.close()
+                return self._submit(request)
+        return self._submit(request)
+
+    def _submit(self, request: LiveOrderRequest) -> int | None:
         if (
             request.execution_mode == "live"
             and request.ai_decision_filter
@@ -227,7 +254,13 @@ class StrategyV2OrderGateway:
         if intent.id <= 0:
             raise RuntimeError("strategyV2.orderIntentPersistenceFailed")
 
-        if request.execution_mode == "live" and request.ai_decision_filter:
+        if request.execution_mode == "live" and request.portfolio_risk:
+            from app.services.portfolio.execution_risk import enforce_portfolio_entry
+
+            enforce_portfolio_entry(user_id=request.user_id, strategy_id=request.strategy_id, action=request.action,
+                                    symbol=request.symbol, quantity=request.quantity, price=request.reference_price)
+
+        if request.ai_decision_filter and (request.execution_mode == "live" or request.ai_decision_mode in {"shadow", "required"}):
             from app.services.ai_decision_filter import AIDecisionFilter, AIDecisionRequest
 
             decision_filter = (
@@ -252,6 +285,7 @@ class StrategyV2OrderGateway:
                     reason=request.reason,
                     strategy_type=request.strategy_type,
                     context=dict(request.decision_context or {}),
+                    mode=request.ai_decision_mode,
                 ),
                 enabled=True,
             )
@@ -296,6 +330,7 @@ class StrategyV2OrderGateway:
             "sizing": request.sizing or {},
             "client_order_id": client_order_id,
             "ai_decision_filter": bool(request.ai_decision_filter),
+            "ai_decision_mode": request.ai_decision_mode,
         }
         with get_db_connection() as db:
             cur = db.cursor()
@@ -350,6 +385,10 @@ class StrategyV2OrderGateway:
 
     @staticmethod
     def _validate(request: LiveOrderRequest) -> LiveOrderRequest:
+        from app.services.ai_entry_policy import normalize_entry_mode
+        request = replace(request, ai_decision_mode=normalize_entry_mode(request.ai_decision_mode))
+        if not all(math.isfinite(value) for value in (request.quantity, request.reference_price, request.limit_price)):
+            raise ValueError("strategyV2.invalidOrderSize")
         if request.strategy_id <= 0 or request.user_id <= 0:
             raise ValueError("strategyV2.invalidRuntimeIdentity")
         if request.strategy_run_id <= 0:

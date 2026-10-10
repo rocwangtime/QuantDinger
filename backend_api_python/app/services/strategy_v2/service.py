@@ -679,8 +679,12 @@ def _attach_catalog_products(candidates: list[dict[str, Any]]) -> list[dict[str,
             or not str(member.get("exchange_id") or "").strip()
         ):
             continue
+        if member.get("_catalog_frozen") and not member.get("api_family"):
+            # Freeze a missing catalog result too; inventing a family here
+            # would change the frame identity and silently drop frozen data.
+            continue
         try:
-            product = get_catalog_product(
+            product = member if member.get("_catalog_frozen") else get_catalog_product(
                 market="Crypto",
                 symbol=str(member.get("symbol") or ""),
                 exchange_id=str(member.get("exchange_id") or ""),

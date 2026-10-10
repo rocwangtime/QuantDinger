@@ -35,6 +35,7 @@ serve different reliability requirements.
 | Decide which process owns work | [Process roles](PROCESS_ROLES_AND_TASKS.md) |
 | Add routes, adapters, tasks, or services | [Extension guide](EXTENSION_GUIDE.md) |
 | Change an HTTP contract | [API conventions](API_CONVENTIONS.md) |
+| Change research evidence or virtual order coordination | [Research and execution contracts](RESEARCH_AND_EXECUTION_P0_P1.md) |
 
 Before a large change, identify the owner process, source of truth, retry and
 idempotency behavior, and the test that proves the boundary remains intact.

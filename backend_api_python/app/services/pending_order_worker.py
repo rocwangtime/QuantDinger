@@ -70,7 +70,7 @@ from app.services.pending_orders.live_order_support import (
     LiveOrderRejected,
     apply_execution_result,
     bind_instrument_product_contract,
-    build_live_order_context,
+    prepare_live_order_context,
     console_print,
     make_client_order_id,
     signal_to_side_pos_reduce,
@@ -2076,19 +2076,12 @@ class PendingOrderWorker(
             return ""
 
     def _execute_live_order(self, *, order_id: int, order_row: Dict[str, Any], payload: Dict[str, Any]) -> None:
-        """
-        Execute a pending order using direct exchange REST clients (no ccxt).
-        """
+        """Execute a pending order using direct exchange REST clients."""
         _console_print = console_print
 
         try:
-            ctx = build_live_order_context(
-                order_id=order_id,
-                order_row=order_row,
-                payload=payload,
-                load_strategy_configs=load_strategy_configs,
-                resolve_exchange_config=resolve_exchange_config,
-                safe_exchange_config_for_log=safe_exchange_config_for_log,
+            ctx = prepare_live_order_context(
+                order_id=order_id, order_row=order_row, payload=payload,
             )
         except LiveOrderRejected as rejected:
             self._mark_failed(order_id=order_id, error=rejected.error)

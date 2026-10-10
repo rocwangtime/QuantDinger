@@ -31,6 +31,7 @@ QuantDinger v5 将 HTTP 请求、长期交易运行、领域调度、有限后�
 | 判断任务属于哪个进程 | [进程职责（英文）](PROCESS_ROLES_AND_TASKS.md) |
 | 新增路由、适配器、任务或服务 | [扩展指南（英文）](EXTENSION_GUIDE.md) |
 | 修改 HTTP 契约 | [API 约定（英文）](API_CONVENTIONS.md) |
+| 修改研究证据或虚拟多腿订单协调 | [研究与执行契约（英文）](RESEARCH_AND_EXECUTION_P0_P1.md)及[使用指南（英文）](../trading/RESEARCH_EXECUTION_P0_P1.md) |
 
 进行较大修改前，应先明确：哪个进程拥有该工作、持久状态存在哪里、如何重试与幂等，
 以及哪项测试能够证明边界没有被破坏。
