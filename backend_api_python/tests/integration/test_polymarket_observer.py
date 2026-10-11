@@ -161,3 +161,39 @@ def test_updown_persistence_bucket_keys_samples_and_api(monkeypatch, app):
             finally:
                 cur.close()
         observer._LAST_RESEARCH.pop(market_id, None)
+
+
+@pytest.mark.integration
+def test_batched_pipeline_preserves_start_end_start_and_near_max(monkeypatch):
+    _test_dsn(monkeypatch)
+    identity = 'test-' + uuid4().hex
+    market = {'id': identity, 'slug': 'test', 'question': 'writer transaction order'}
+    pipeline = observer.Pipeline()
+    positive = dict(net_edge=1, net_edge_bps=100, size_available=5)
+    negative = dict(net_edge=-.01, net_edge_bps=-1, size_available=0)
+    try:
+        for quote in (positive, positive, negative, positive, negative, {**negative, 'net_edge_bps': -10}):
+            pipeline.capture(identity, 'observation', lambda: observer.record_sample(market, quote, 'ws'))
+        batch = pipeline.queue.take(500)
+        pipeline.write_batch(batch)
+        with get_db_connection() as db:
+            cur = db.cursor()
+            try:
+                cur.execute('SELECT sample_count,ended_at FROM qd_polymarket_observer_episodes WHERE market_id=%s ORDER BY id', (identity,))
+                rows = cur.fetchall()
+                assert [r['sample_count'] for r in rows] == [2, 1]
+                assert all(r['ended_at'] for r in rows)
+                cur.execute('SELECT samples,best_edge_bps FROM qd_polymarket_observer_near_misses WHERE market_id=%s', (identity,))
+                row = cur.fetchone()
+                assert row['samples'] == 3
+                assert row['best_edge_bps'] == -1
+                assert pipeline.metrics()['written'] == 9
+            finally:
+                cur.close()
+    finally:
+        _delete_episode(identity)
+        with get_db_connection() as db:
+            cur = db.cursor()
+            cur.execute('DELETE FROM qd_polymarket_observer_near_misses WHERE market_id=%s', (identity,))
+            db.commit()
+            cur.close()
