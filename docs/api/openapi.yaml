@@ -7638,6 +7638,149 @@ paths:
       schema:
         type: string
         minLength: 1
+  /api/polymarket/eligibility:
+    get:
+      parameters:
+      - in: query
+        name: refresh
+        schema:
+          type: boolean
+          default: false
+        required: false
+      responses:
+        '422':
+          $ref: '#/components/responses/UNPROCESSABLE_ENTITY'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      tags:
+      - Portfolio
+      operationId: getApiPolymarketEligibility
+      summary: Get Api Polymarket Eligibility
+      x-visibility: internal
+  /api/polymarket/observer/status:
+    get:
+      responses:
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      tags:
+      - Portfolio
+      operationId: getApiPolymarketObserverStatus
+      summary: Get Api Polymarket Observer Status
+      x-visibility: internal
+  /api/polymarket/observer/summary:
+    get:
+      parameters:
+      - in: query
+        name: days
+        schema:
+          type: integer
+          default: 1
+          minimum: 1
+          maximum: 30
+        required: false
+      - in: query
+        name: limit
+        schema:
+          type: integer
+          default: 50
+          minimum: 1
+          maximum: 100
+        required: false
+      - in: query
+        name: offset
+        schema:
+          type: integer
+          default: 0
+          minimum: 0
+          maximum: 10000
+        required: false
+      responses:
+        '422':
+          $ref: '#/components/responses/UNPROCESSABLE_ENTITY'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      tags:
+      - Portfolio
+      operationId: getApiPolymarketObserverSummary
+      summary: Get Api Polymarket Observer Summary
+      x-visibility: internal
+  /api/polymarket/observer/episodes:
+    get:
+      parameters:
+      - in: query
+        name: days
+        schema:
+          type: integer
+          default: 1
+          minimum: 1
+          maximum: 30
+        required: false
+      - in: query
+        name: limit
+        schema:
+          type: integer
+          default: 50
+          minimum: 1
+          maximum: 100
+        required: false
+      - in: query
+        name: offset
+        schema:
+          type: integer
+          default: 0
+          minimum: 0
+          maximum: 10000
+        required: false
+      responses:
+        '422':
+          $ref: '#/components/responses/UNPROCESSABLE_ENTITY'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      tags:
+      - Portfolio
+      operationId: getApiPolymarketObserverEpisodes
+      summary: Get Api Polymarket Observer Episodes
+      x-visibility: internal
   /api/agent-automations:
     get:
       responses:
