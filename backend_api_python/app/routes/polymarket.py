@@ -3,7 +3,7 @@
 from flask import g, jsonify, request
 
 from app.openapi.blueprint import HumanBlueprint
-from app.openapi.schemas.polymarket import JobListQuery, PaperRequest, ScanRequest
+from app.openapi.schemas.polymarket import EligibilityQuery, JobListQuery, ObserverQuery, PaperRequest, ScanRequest
 from app.services.billing_service import BillingError
 from app.services.polymarket import jobs
 from app.services.polymarket.engine import validate_settings
@@ -101,4 +101,64 @@ def evidence(job_id):
         row = jobs.owned_job(job_id, int(g.user_id))
         bundle = jobs.bundle_from_job(job_id, int(g.user_id), row["kind"])
         return {"bundleHash": jobs.digest(bundle), "bundle": bundle}
+    return reply(fetch)
+
+
+@blp.route("/eligibility", methods=["GET"])
+@login_required
+@blp.arguments(EligibilityQuery, location="query")
+def eligibility(query):
+    from app.services.polymarket.eligibility import check
+    return reply(lambda: check(refresh=query["refresh"]))
+
+
+@blp.route("/observer/status", methods=["GET"])
+@login_required
+def observer_status():
+    from app.services.polymarket.observer import get_status
+    return reply(get_status)
+
+
+@blp.route("/observer/summary", methods=["GET"])
+@login_required
+@blp.arguments(ObserverQuery, location="query")
+def observer_summary(query):
+    from app.services.polymarket.observer import get_db_connection
+    days = query["days"]
+    def fetch():
+        with get_db_connection() as db:
+            cur = db.cursor()
+            try:
+                cur.execute("SELECT date_trunc('day',started_at) day,count(*) episodes,avg(duration_ms) avg_duration_ms,max(max_net_edge_bps) max_edge_bps FROM qd_polymarket_observer_episodes WHERE started_at >= NOW() - (%s * INTERVAL '1 day') GROUP BY 1 ORDER BY 1", (days,))
+                daily = cur.fetchall() or []
+                cur.execute("SELECT market_id,slug,question,count(*) episodes,sum(duration_ms) total_duration_ms,max(max_net_edge_bps) max_edge_bps FROM qd_polymarket_observer_episodes WHERE started_at >= NOW() - (%s * INTERVAL '1 day') GROUP BY market_id,slug,question ORDER BY episodes DESC LIMIT 100", (days,))
+                markets = cur.fetchall() or []
+                cur.execute("SELECT COALESCE(sum(samples),0) count FROM qd_polymarket_observer_near_misses WHERE hour_bucket >= NOW() - (%s * INTERVAL '1 day')", (days,))
+                row = cur.fetchone()
+                near = row.get("count", 0) if isinstance(row, dict) else row[0]
+                cur.execute("SELECT CASE WHEN duration_ms < 1000 THEN '<1s' WHEN duration_ms < 10000 THEN '1-10s' WHEN duration_ms < 60000 THEN '10-60s' ELSE '60s+' END bucket,count(*) count FROM qd_polymarket_observer_episodes WHERE started_at >= NOW() - (%s * INTERVAL '1 day') GROUP BY 1", (days,))
+                durations = cur.fetchall() or []
+                cur.execute("SELECT CASE WHEN max_net_edge_bps < 0 THEN '<0' WHEN max_net_edge_bps < 10 THEN '0-10' WHEN max_net_edge_bps < 50 THEN '10-50' WHEN max_net_edge_bps < 100 THEN '50-100' ELSE '100+' END bucket,count(*) count FROM qd_polymarket_observer_episodes WHERE started_at >= NOW() - (%s * INTERVAL '1 day') GROUP BY 1", (days,))
+                edges = cur.fetchall() or []
+                return {"days": days, "episodes_per_day": daily, "duration_distribution": durations, "edge_distribution": edges, "per_market": markets, "near_miss_count": int(near or 0)}
+            finally:
+                cur.close()
+    return reply(fetch)
+
+
+@blp.route("/observer/episodes", methods=["GET"])
+@login_required
+@blp.arguments(ObserverQuery, location="query")
+def observer_episodes(query):
+    from app.utils.db import get_db_connection
+    days = query["days"]
+    limit, offset = query["limit"], query["offset"]
+    def fetch():
+        with get_db_connection() as db:
+            cur = db.cursor()
+            try:
+                cur.execute("SELECT id,market_id,slug,question,started_at,ended_at,duration_ms,max_net_edge,max_net_edge_bps,best_size,sample_count,source FROM qd_polymarket_observer_episodes WHERE started_at >= NOW() - (%s * INTERVAL '1 day') ORDER BY started_at DESC LIMIT %s OFFSET %s", (days, limit, offset))
+                return cur.fetchall() or []
+            finally:
+                cur.close()
     return reply(fetch)

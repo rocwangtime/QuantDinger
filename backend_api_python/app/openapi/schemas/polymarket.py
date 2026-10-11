@@ -37,3 +37,13 @@ class JobListQuery(Schema):
     kind = fields.Str(load_default="polymarket_paper", validate=validate.OneOf([
         "polymarket_scan", "polymarket_paper", "polymarket_replay"]))
     limit = fields.Int(load_default=20, validate=validate.Range(min=1, max=50))
+
+
+class ObserverQuery(Schema):
+    days = fields.Int(load_default=1, validate=validate.Range(min=1, max=30))
+    limit = fields.Int(load_default=50, validate=validate.Range(min=1, max=100))
+    offset = fields.Int(load_default=0, validate=validate.Range(min=0, max=10000))
+
+
+class EligibilityQuery(Schema):
+    refresh = fields.Bool(load_default=False)

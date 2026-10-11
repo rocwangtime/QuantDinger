@@ -116,3 +116,43 @@ explicit operational limits. Public-data access does not establish trading eligi
 - [Order types and independent batch outcomes](https://docs.polymarket.com/trading/place-orders)
 - [Position splitting and merging](https://docs.polymarket.com/trading/positions/manage)
 - [Geographic restrictions](https://docs.polymarket.com/api-reference/geoblock)
+
+## Eligibility probe and continuous observer
+
+`GET /api/polymarket/eligibility` performs a read-only request to Polymarket's
+public geoblock endpoint. The API reports a masked IP only. A blocked response
+maps to `blocked`; documented close-only jurisdictions map to `close_only`;
+other valid unblocked responses map to `eligible`. Network, timeout, malformed,
+and non-200 results map to `unknown`. The endpoint itself has no close-only
+field, so close-only comes from Polymarket's published jurisdiction list and may
+change. Cache TTL defaults to 15 minutes; manual refresh is rate-limited. Any
+future live-entry code must call `require_live_eligibility()` and proceed only
+when it returns true. The frontend `canEnableLive()` has the same fail-closed
+rule. This probe is informational and never enables trading; the feature stays
+paper-only.
+
+The optional observer is disabled by default and starts only in the scheduler
+leader process. It discovers standard YES/NO, non-negative-risk markets using
+the existing engine validation and fee metadata, then maintains public books
+from the documented CLOB market WebSocket using the already locked
+`websocket-client` library. It sends application-level PING frames every ten
+seconds, subscribes with `assets_ids` and `type: market`, consumes `book` and
+`price_change`, and reconnects with backoff. When WebSocket is disabled or
+unavailable it uses bounded REST book snapshots. REST fallback has a default
+10-second interval. Depth-weighted asks, engine fee calculation, merge-cost
+assumption, and net edge are recorded as aggregate opportunity episodes and
+hourly near-miss aggregates. Episodes are retained for 30 days by default and
+near misses for seven days. This is sampled public data; gaps, API limits, and
+latency mean it is not a promise of executable or atomic arbitrage. Crypto
+Up/Down markets are excluded; `POLYMARKET_OBSERVER_INCLUDE_UPDOWN` remains off
+until their market and fee semantics are separately verified.
+
+Configuration: `POLYMARKET_OBSERVER_ENABLED`, `POLYMARKET_OBSERVER_MARKET_COUNT`,
+`POLYMARKET_OBSERVER_SIZE_SHARES`, `POLYMARKET_OBSERVER_MIN_EDGE`,
+`POLYMARKET_OBSERVER_NEAR_MISS_BPS`, `POLYMARKET_OBSERVER_REFRESH_SECONDS`,
+`POLYMARKET_OBSERVER_REST_POLL_SECONDS`, `POLYMARKET_OBSERVER_RETENTION_DAYS`,
+`POLYMARKET_OBSERVER_NEAR_MISS_RETENTION_DAYS` (default 7 days),
+`POLYMARKET_OBSERVER_STALE_GRACE_SECONDS` (default 60 seconds),
+`POLYMARKET_OBSERVER_WS_ENABLED`, `POLYMARKET_OBSERVER_MERGE_COST`, and
+`POLYMARKET_GEOBLOCK_TTL_SECONDS`. Status, summary, and paginated episodes are
+available under authenticated `/api/polymarket/observer/...` endpoints.
