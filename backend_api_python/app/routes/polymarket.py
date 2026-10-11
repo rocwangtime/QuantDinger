@@ -119,28 +119,41 @@ def observer_status():
     return reply(get_status)
 
 
+def observer_filters(query):
+    # Column names are fixed here; every value remains parameterized.
+    terms, params = [], []
+    for key in ('market_type', 'asset', 'interval', 'expiry_bucket'):
+        if key in query:
+            terms.append(f"{key}=%s")
+            params.append(query[key])
+    return (' AND ' + ' AND '.join(terms) if terms else ''), tuple(params)
+
+
 @blp.route("/observer/summary", methods=["GET"])
 @login_required
 @blp.arguments(ObserverQuery, location="query")
 def observer_summary(query):
     from app.services.polymarket.observer import get_db_connection
     days = query["days"]
+    filters, filter_params = observer_filters(query)
     def fetch():
         with get_db_connection() as db:
             cur = db.cursor()
             try:
-                cur.execute("SELECT date_trunc('day',started_at) day,count(*) episodes,avg(duration_ms) avg_duration_ms,max(max_net_edge_bps) max_edge_bps FROM qd_polymarket_observer_episodes WHERE started_at >= NOW() - (%s * INTERVAL '1 day') GROUP BY 1 ORDER BY 1", (days,))
+                cur.execute("SELECT date_trunc('day',started_at) AS day,count(*) episodes,avg(duration_ms) avg_duration_ms,max(max_net_edge_bps) max_edge_bps FROM qd_polymarket_observer_episodes WHERE started_at >= NOW() - (%s * INTERVAL '1 day')" + filters + " GROUP BY 1 ORDER BY 1", (days, *filter_params))
                 daily = cur.fetchall() or []
-                cur.execute("SELECT market_id,slug,question,count(*) episodes,sum(duration_ms) total_duration_ms,max(max_net_edge_bps) max_edge_bps FROM qd_polymarket_observer_episodes WHERE started_at >= NOW() - (%s * INTERVAL '1 day') GROUP BY market_id,slug,question ORDER BY episodes DESC LIMIT 100", (days,))
+                cur.execute("SELECT market_id,slug,question,count(*) episodes,sum(duration_ms) total_duration_ms,max(max_net_edge_bps) max_edge_bps FROM qd_polymarket_observer_episodes WHERE started_at >= NOW() - (%s * INTERVAL '1 day')" + filters + " GROUP BY market_id,slug,question ORDER BY episodes DESC LIMIT 100", (days, *filter_params))
                 markets = cur.fetchall() or []
-                cur.execute("SELECT COALESCE(sum(samples),0) count FROM qd_polymarket_observer_near_misses WHERE hour_bucket >= NOW() - (%s * INTERVAL '1 day')", (days,))
+                cur.execute("SELECT COALESCE(sum(samples),0) count FROM qd_polymarket_observer_near_misses WHERE hour_bucket >= NOW() - (%s * INTERVAL '1 day')" + filters, (days, *filter_params))
                 row = cur.fetchone()
                 near = row.get("count", 0) if isinstance(row, dict) else row[0]
-                cur.execute("SELECT CASE WHEN duration_ms < 1000 THEN '<1s' WHEN duration_ms < 10000 THEN '1-10s' WHEN duration_ms < 60000 THEN '10-60s' ELSE '60s+' END bucket,count(*) count FROM qd_polymarket_observer_episodes WHERE started_at >= NOW() - (%s * INTERVAL '1 day') GROUP BY 1", (days,))
+                cur.execute("SELECT CASE WHEN duration_ms < 1000 THEN '<1s' WHEN duration_ms < 10000 THEN '1-10s' WHEN duration_ms < 60000 THEN '10-60s' ELSE '60s+' END bucket,count(*) count FROM qd_polymarket_observer_episodes WHERE started_at >= NOW() - (%s * INTERVAL '1 day')" + filters + " GROUP BY 1", (days, *filter_params))
                 durations = cur.fetchall() or []
-                cur.execute("SELECT CASE WHEN max_net_edge_bps < 0 THEN '<0' WHEN max_net_edge_bps < 10 THEN '0-10' WHEN max_net_edge_bps < 50 THEN '10-50' WHEN max_net_edge_bps < 100 THEN '50-100' ELSE '100+' END bucket,count(*) count FROM qd_polymarket_observer_episodes WHERE started_at >= NOW() - (%s * INTERVAL '1 day') GROUP BY 1", (days,))
+                cur.execute("SELECT CASE WHEN max_net_edge_bps < 0 THEN '<0' WHEN max_net_edge_bps < 10 THEN '0-10' WHEN max_net_edge_bps < 50 THEN '10-50' WHEN max_net_edge_bps < 100 THEN '50-100' ELSE '100+' END bucket,count(*) count FROM qd_polymarket_observer_episodes WHERE started_at >= NOW() - (%s * INTERVAL '1 day')" + filters + " GROUP BY 1", (days, *filter_params))
                 edges = cur.fetchall() or []
-                return {"days": days, "episodes_per_day": daily, "duration_distribution": durations, "edge_distribution": edges, "per_market": markets, "near_miss_count": int(near or 0)}
+                cur.execute("WITH grouped AS (SELECT market_type,asset,interval,expiry_bucket,count(*) episodes,0::bigint near_misses,max(max_net_edge_bps) max_edge_bps FROM qd_polymarket_observer_episodes WHERE started_at >= NOW() - (%s * INTERVAL '1 day')" + filters + " GROUP BY 1,2,3,4 UNION ALL SELECT market_type,asset,interval,expiry_bucket,0::bigint episodes,sum(samples) near_misses,max(best_edge_bps) max_edge_bps FROM qd_polymarket_observer_near_misses WHERE hour_bucket >= NOW() - (%s * INTERVAL '1 day')" + filters + " GROUP BY 1,2,3,4) SELECT market_type,asset,interval,expiry_bucket,sum(episodes) episodes,sum(near_misses) near_misses,max(max_edge_bps) max_edge_bps FROM grouped GROUP BY 1,2,3,4 ORDER BY 1,2,3,4 LIMIT 200", (days, *filter_params, days, *filter_params))
+                groups = cur.fetchall() or []
+                return {"groups": groups, "days": days, "episodes_per_day": daily, "duration_distribution": durations, "edge_distribution": edges, "per_market": markets, "near_miss_count": int(near or 0)}
             finally:
                 cur.close()
     return reply(fetch)
@@ -152,12 +165,13 @@ def observer_summary(query):
 def observer_episodes(query):
     from app.utils.db import get_db_connection
     days = query["days"]
+    filters, filter_params = observer_filters(query)
     limit, offset = query["limit"], query["offset"]
     def fetch():
         with get_db_connection() as db:
             cur = db.cursor()
             try:
-                cur.execute("SELECT id,market_id,slug,question,started_at,ended_at,duration_ms,max_net_edge,max_net_edge_bps,best_size,sample_count,source FROM qd_polymarket_observer_episodes WHERE started_at >= NOW() - (%s * INTERVAL '1 day') ORDER BY started_at DESC LIMIT %s OFFSET %s", (days, limit, offset))
+                cur.execute("SELECT id,market_id,slug,question,started_at,ended_at,duration_ms,max_net_edge,max_net_edge_bps,best_size,sample_count,source,market_type,asset,interval,expiry_bucket FROM qd_polymarket_observer_episodes WHERE started_at >= NOW() - (%s * INTERVAL '1 day')" + filters + " ORDER BY started_at DESC LIMIT %s OFFSET %s", (days, *filter_params, limit, offset))
                 return cur.fetchall() or []
             finally:
                 cur.close()

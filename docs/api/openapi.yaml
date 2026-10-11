@@ -7691,6 +7691,47 @@ paths:
     get:
       parameters:
       - in: query
+        name: market_type
+        schema:
+          type: string
+          enum:
+          - yes_no
+          - up_down
+        required: false
+      - in: query
+        name: asset
+        schema:
+          type: string
+          enum:
+          - BTC
+          - ETH
+          - SOL
+          - XRP
+        required: false
+      - in: query
+        name: interval
+        schema:
+          type: string
+          enum:
+          - 5m
+          - 15m
+          - 1h
+          - 4h
+          - 1d
+        required: false
+      - in: query
+        name: expiry_bucket
+        schema:
+          type: string
+          enum:
+          - '>10m'
+          - 5-10m
+          - 2-5m
+          - 1-2m
+          - 30-60s
+          - <30s
+        required: false
+      - in: query
         name: days
         schema:
           type: integer
@@ -7737,6 +7778,47 @@ paths:
   /api/polymarket/observer/episodes:
     get:
       parameters:
+      - in: query
+        name: market_type
+        schema:
+          type: string
+          enum:
+          - yes_no
+          - up_down
+        required: false
+      - in: query
+        name: asset
+        schema:
+          type: string
+          enum:
+          - BTC
+          - ETH
+          - SOL
+          - XRP
+        required: false
+      - in: query
+        name: interval
+        schema:
+          type: string
+          enum:
+          - 5m
+          - 15m
+          - 1h
+          - 4h
+          - 1d
+        required: false
+      - in: query
+        name: expiry_bucket
+        schema:
+          type: string
+          enum:
+          - '>10m'
+          - 5-10m
+          - 2-5m
+          - 1-2m
+          - 30-60s
+          - <30s
+        required: false
       - in: query
         name: days
         schema:

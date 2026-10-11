@@ -7,7 +7,8 @@ from datetime import datetime, timezone
 
 from app.utils.db import get_db_connection
 from .client import PublicClient
-from .engine import number, fee, sweep
+from .engine import number, sweep
+from . import updown
 
 STATUS = {"enabled": False, "running": False, "mode": "stopped", "connected": False, "markets_subscribed": 0,
           "last_message_at": None, "reconnect_count": 0, "last_error": None, "started_at": None}
@@ -15,6 +16,8 @@ _LOCK = threading.RLock()
 _STOP = threading.Event()
 _THREAD = None
 _LAST_SAMPLE = {}
+_LAST_RESEARCH = {}
+_REFERENCE = None
 
 
 def enabled():
@@ -102,6 +105,16 @@ def get_status():
 
 def opportunity(market, books, quantity, settlement_cost=0):
     """Depth-weighted ask cost using the engine's fee and sweep model."""
+    if market.get('market_type') == 'up_down':
+        if updown.timestamp(market['endDate']) <= datetime.now(timezone.utc):
+            return None
+        for token in (market['yesAssetId'], market['noAssetId']):
+            book = books.get(token) or {}
+            asks, bids = book.get('asks', {}), book.get('bids', {})
+            if not asks or any(not 0 < number(p) < 1 or number(size) < 0 for side in (asks, bids) for p, size in side.items()):
+                return None
+            if bids and max(map(number, bids)) >= min(map(number, asks)):
+                return None
     qty, rate = number(quantity), number(market["feeRate"])
     legs = []
     for asset in (market["yesAssetId"], market["noAssetId"]):
@@ -134,8 +147,53 @@ def opportunity(market, books, quantity, settlement_cost=0):
             "cost": cost, "yes_ask": legs[0]["averagePrice"], "no_ask": legs[1]["averagePrice"]}
 
 
+def sample_tags(market, now):
+    kind = market.get('market_type', 'yes_no')
+    asset, interval = market.get('asset'), market.get('interval')
+    bucket = updown.expiry_bucket(market, now)
+    return kind, asset, interval, bucket
+
+
+def near_miss_key(tags):
+    return '|'.join(x or '' for x in tags)
+
+
+def record_research(market, books, source, quote=None, now=None):
+    if market.get('market_type') != 'up_down':
+        return
+    now = now or datetime.now(timezone.utc)
+    if updown.timestamp(market['endDate']) <= now:
+        return
+    mono = time.monotonic()
+    if mono - _LAST_RESEARCH.get(market['id'], float('-inf')) < updown.setting('UPDOWN_SAMPLE_SECONDS', 5, 1, 60):
+        return
+    prices = []
+    for token in (market['yesAssetId'], market['noAssetId']):
+        book = books.get(token) or {}
+        asks, bids = book.get('asks', {}), book.get('bids', {})
+        ask = min((number(p) for p in asks), default=None)
+        bid = max((number(p) for p in bids), default=None)
+        if ask is None or bid is not None and bid >= ask:
+            return
+        prices.extend((ask, (ask + bid) / 2 if bid is not None else None))
+    reference = _REFERENCE.get(market['asset']) if _REFERENCE else {'price': None, 'source': 'unavailable', 'observed_at': None}
+    tags = sample_tags(market, now)
+    with get_db_connection() as db:
+        cur = db.cursor()
+        try:
+            cur.execute("INSERT INTO qd_polymarket_observer_samples(market_id,observed_at,market_type,asset,interval,expiry_bucket,end_time,up_ask,up_mid,down_ask,down_mid,price_to_beat,reference_price,reference_source,reference_observed_at,source,net_edge_bps) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", (market['id'], now, *tags, market['endDate'], *prices, market.get('price_to_beat'), reference['price'], reference['source'], reference['observed_at'], source, quote.get('net_edge_bps') if quote else None))
+            db.commit()
+            _LAST_RESEARCH[market['id']] = mono
+        finally:
+            cur.close()
+
+
 def record_sample(market, quote, source, now=None):
     now = now or datetime.now(timezone.utc)
+    if market.get('market_type') == 'up_down' and updown.timestamp(market['endDate']) <= now:
+        _end_episode(market['id'], now)
+        return
+    tags = sample_tags(market, now)
     threshold = number(os.getenv("POLYMARKET_OBSERVER_MIN_EDGE", "0"))
     near = number(os.getenv("POLYMARKET_OBSERVER_NEAR_MISS_BPS", "50"))
     net = number(quote["net_edge"])
@@ -148,9 +206,11 @@ def record_sample(market, quote, source, now=None):
         cur = db.cursor()
         try:
             if kind == "episode":
-                cur.execute("INSERT INTO qd_polymarket_observer_episodes(market_id,slug,question,started_at,last_seen_at,max_net_edge,max_net_edge_bps,best_size,sample_count,source) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,1,%s) ON CONFLICT (market_id) WHERE ended_at IS NULL DO UPDATE SET last_seen_at=EXCLUDED.last_seen_at,max_net_edge=GREATEST(qd_polymarket_observer_episodes.max_net_edge,EXCLUDED.max_net_edge),max_net_edge_bps=GREATEST(qd_polymarket_observer_episodes.max_net_edge_bps,EXCLUDED.max_net_edge_bps),best_size=GREATEST(qd_polymarket_observer_episodes.best_size,EXCLUDED.best_size),sample_count=qd_polymarket_observer_episodes.sample_count+1,source=EXCLUDED.source", (market["id"], market["slug"], market["question"], now, now, net, quote["net_edge_bps"], quote["size_available"], source))
+                if tags[0] == 'up_down':
+                    cur.execute("UPDATE qd_polymarket_observer_episodes SET ended_at=last_seen_at,duration_ms=(EXTRACT(EPOCH FROM (last_seen_at-started_at))*1000)::bigint WHERE market_id=%s AND ended_at IS NULL AND expiry_bucket<>%s", (market['id'], tags[3]))
+                cur.execute("INSERT INTO qd_polymarket_observer_episodes(market_id,slug,question,started_at,last_seen_at,max_net_edge,max_net_edge_bps,best_size,sample_count,source,market_type,asset,interval,expiry_bucket) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,1,%s,%s,%s,%s,%s) ON CONFLICT (market_id) WHERE ended_at IS NULL DO UPDATE SET last_seen_at=EXCLUDED.last_seen_at,max_net_edge=GREATEST(qd_polymarket_observer_episodes.max_net_edge,EXCLUDED.max_net_edge),max_net_edge_bps=GREATEST(qd_polymarket_observer_episodes.max_net_edge_bps,EXCLUDED.max_net_edge_bps),best_size=GREATEST(qd_polymarket_observer_episodes.best_size,EXCLUDED.best_size),sample_count=qd_polymarket_observer_episodes.sample_count+1,source=EXCLUDED.source,expiry_bucket=EXCLUDED.expiry_bucket", (market["id"], market["slug"], market["question"], now, now, net, quote["net_edge_bps"], quote["size_available"], source, *tags))
             else:
-                cur.execute("INSERT INTO qd_polymarket_observer_near_misses(market_id,hour_bucket,slug,question,observed_at,net_edge,net_edge_bps,best_edge_bps) VALUES (%s,date_trunc('hour',%s),%s,%s,%s,%s,%s,%s) ON CONFLICT (market_id,hour_bucket) DO UPDATE SET samples=qd_polymarket_observer_near_misses.samples+1, best_edge_bps=GREATEST(qd_polymarket_observer_near_misses.best_edge_bps,EXCLUDED.best_edge_bps)", (market["id"], now, market["slug"], market["question"], now, net, quote["net_edge_bps"], quote["net_edge_bps"]))
+                cur.execute("INSERT INTO qd_polymarket_observer_near_misses(market_id,hour_bucket,slug,question,observed_at,net_edge,net_edge_bps,best_edge_bps,market_type,asset,interval,expiry_bucket,tag_key) VALUES (%s,date_trunc('hour',%s),%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (market_id,hour_bucket,tag_key) DO UPDATE SET samples=qd_polymarket_observer_near_misses.samples+1, best_edge_bps=GREATEST(qd_polymarket_observer_near_misses.best_edge_bps,EXCLUDED.best_edge_bps)", (market["id"], now, market["slug"], market["question"], now, net, quote["net_edge_bps"], quote["net_edge_bps"], *tags, near_miss_key(tags)))
             db.commit()
         finally:
             cur.close()
@@ -186,6 +246,8 @@ def _run_retention(now_mono):
         try:
             cur.execute("DELETE FROM qd_polymarket_observer_episodes WHERE started_at < NOW() - (%s * INTERVAL '1 day')", (max(1, min(365, int(os.getenv("POLYMARKET_OBSERVER_RETENTION_DAYS", "30")))),))
             cur.execute("DELETE FROM qd_polymarket_observer_near_misses WHERE hour_bucket < NOW() - (%s * INTERVAL '1 day')", (max(1, min(365, int(os.getenv("POLYMARKET_OBSERVER_NEAR_MISS_RETENTION_DAYS", "7")))),))
+            if updown.enabled():
+                cur.execute("DELETE FROM qd_polymarket_observer_samples WHERE observed_at < NOW() - (%s * INTERVAL '1 day')", (updown.setting('UPDOWN_SAMPLE_RETENTION_DAYS', 7, 1, 365),))
             db.commit()
         finally:
             cur.close()
@@ -195,8 +257,19 @@ def _run_retention(now_mono):
 _RETENTION_LAST = [0.0]
 
 
+def subscription_assets(markets):
+    return [a for m in markets for a in (m['yesAssetId'], m['noAssetId'])]
+
+
 def _market_loop():
+    global _REFERENCE
     client = PublicClient()
+    series_cache = {}
+    yes_markets = []
+    yes_refresh = 0
+    if updown.enabled():
+        _REFERENCE = updown.ReferencePrices()
+        _REFERENCE.start()
     backoff = 5
     ws_failures = 0
     refresh = 0
@@ -211,9 +284,24 @@ def _market_loop():
                 _run_retention(now_mono)
                 if not markets or now_mono >= refresh:
                     count = min(50, max(1, int(os.getenv("POLYMARKET_OBSERVER_MARKET_COUNT", "20"))))
-                    markets, _ = client.discover(limit=count)
+                    if not updown.enabled() or not yes_markets or now_mono >= yes_refresh:
+                        yes_markets, _ = client.discover(limit=count)
+                        yes_refresh = now_mono + max(60, int(os.getenv('POLYMARKET_OBSERVER_REFRESH_SECONDS', '1800')))
+                    markets = list(yes_markets)
+                    if updown.enabled():
+                        crypto, rejected = updown.discover(client, series_cache)
+                        markets.extend(crypto)
+                        with _LOCK:
+                            STATUS['updown_subscriptions'] = [{k: m[k] for k in ('id', 'asset', 'interval', 'endDate')} for m in crypto]
+                            STATUS['updown_rejections'] = rejected
+                    active_ids = {m['id'] for m in markets}
+                    for cache in (_LAST_SAMPLE, _LAST_RESEARCH):
+                        for identity in list(cache):
+                            if identity not in active_ids:
+                                cache.pop(identity, None)
+                    books = {}
                     _close_stale_episodes([m["id"] for m in markets], max(1, int(os.getenv("POLYMARKET_OBSERVER_STALE_GRACE_SECONDS", "60"))))
-                    refresh = now_mono + max(60, int(os.getenv("POLYMARKET_OBSERVER_REFRESH_SECONDS", "1800")))
+                    refresh = time.monotonic() + (updown.setting("UPDOWN_REFRESH_SECONDS", 60, 10, 300) if updown.enabled() else max(60, int(os.getenv("POLYMARKET_OBSERVER_REFRESH_SECONDS", "1800"))))
                     with _LOCK:
                         STATUS["markets_subscribed"] = len(markets)
                 if not markets:
@@ -224,15 +312,15 @@ def _market_loop():
                 use_ws = os.getenv("POLYMARKET_OBSERVER_WS_ENABLED", "true").lower() in {"1", "true", "yes"} and ws_failures < 3
                 if use_ws:
                     import websocket
-                    assets = [a for m in markets for a in (m["yesAssetId"], m["noAssetId"])]
-                    def opened(sock):
+                    assets = subscription_assets(markets)
+                    def opened(sock, assets=tuple(assets)):
                         nonlocal ws_failures
                         ws_failures = 0
                         nonlocal backoff
                         backoff = 5
                         sock.send(json.dumps({"assets_ids": assets, "type": "market", "custom_feature_enabled": True}))
                         _ws_connected()
-                    def received(sock, raw):
+                    def received(sock, raw, markets=tuple(markets), books=books):
                         if raw == "PONG":
                             return
                         try:
@@ -246,6 +334,7 @@ def _market_loop():
                                         continue
                                     _LAST_SAMPLE[market["id"]] = now_mono
                                     quote = opportunity(market, books, os.getenv("POLYMARKET_OBSERVER_SIZE_SHARES", "100"), os.getenv("POLYMARKET_OBSERVER_MERGE_COST", "0.02"))
+                                    record_research(market, books, "ws", quote)
                                     if quote:
                                         record_sample(market, quote, "ws")
                                     else:
@@ -257,7 +346,7 @@ def _market_loop():
                                 STATUS["last_error"] = str(exc).splitlines()[0][:160]
                     def failed(_sock, err):
                         _ws_error(err)
-                    def closed(*_args):
+                    def closed(*_args, markets=tuple(markets)):
                         _ws_disconnected()
                         _close_stale_episodes([m["id"] for m in markets], max(1, int(os.getenv("POLYMARKET_OBSERVER_STALE_GRACE_SECONDS", "60"))))
                     ws = websocket.WebSocketApp("wss://ws-subscriptions-clob.polymarket.com/ws/market", on_open=opened, on_message=received,
@@ -272,14 +361,19 @@ def _market_loop():
                             break
                     if _STOP.is_set():
                         ws.close()
+                        stopper.join(5)
                         break
                     if time.monotonic() >= refresh:
                         ws.close()
+                        stopper.join(5)
                         continue
+                    ws.close()
+                    stopper.join(5)
+                    books = {}
                     with _LOCK:
                         STATUS["reconnect_count"] += 1
                     ws_failures += 1
-                    time.sleep(backoff)
+                    _STOP.wait(backoff)
                     backoff = min(backoff * 2, 120)
                 else:
                     with _LOCK:
@@ -288,8 +382,9 @@ def _market_loop():
                     for market in markets:
                         frame = frames.get(market["id"], {})
                         if frame.get("books") and not frame.get("error"):
-                            mapped = {a: {"asks": {str(x["price"]): str(x["size"]) for x in frame["books"][a]["asks"]}} for a in (market["yesAssetId"], market["noAssetId"])}
+                            mapped = {a: {side: {str(x["price"]): str(x["size"]) for x in frame["books"][a][side]} for side in ("asks", "bids")} for a in (market["yesAssetId"], market["noAssetId"])}
                             quote = opportunity(market, mapped, os.getenv("POLYMARKET_OBSERVER_SIZE_SHARES", "100"), os.getenv("POLYMARKET_OBSERVER_MERGE_COST", "0.02"))
+                            record_research(market, mapped, "rest", quote)
                             if quote:
                                 record_sample(market, quote, "rest")
                     with _LOCK:
@@ -312,6 +407,9 @@ def _market_loop():
                 backoff = min(backoff * 2, 120)
                 _close_stale_episodes([m["id"] for m in markets], max(1, int(os.getenv("POLYMARKET_OBSERVER_STALE_GRACE_SECONDS", "60"))))
     finally:
+        if _REFERENCE:
+            _REFERENCE.close()
+            _REFERENCE = None
         client.close()
 
 
