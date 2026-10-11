@@ -92,7 +92,7 @@ def test_polymarket_package_has_no_wallet_signing_or_order_dependencies():
                 assert not any(name.split(".")[0] in forbidden for name in names), path
             if isinstance(node, ast.Constant) and isinstance(node.value, str):
                 assert not any(term in node.value.lower() for term in ("/order", "/orders")), path
-    script = "import app.services.polymarket.client, app.services.polymarket.engine, app.services.polymarket.jobs, app.services.polymarket.eligibility, app.services.polymarket.observer; import sys; assert not ({'py_clob_client','eth_account','web3','eth_keys'} & set(sys.modules))"
+    script = "import app.services.polymarket.client, app.services.polymarket.engine, app.services.polymarket.jobs, app.services.polymarket.eligibility, app.services.polymarket.observer, app.services.polymarket.paper_account, app.services.polymarket.account_api, app.services.polymarket.account_history, app.services.polymarket.account_model; import sys; assert not ({'py_clob_client','eth_account','web3','eth_keys'} & set(sys.modules))"
     subprocess.run([sys.executable, "-c", script], check=True)
 
 

@@ -7863,6 +7863,240 @@ paths:
       operationId: getApiPolymarketObserverEpisodes
       summary: Get Api Polymarket Observer Episodes
       x-visibility: internal
+  /api/polymarket/paper-account/status:
+    get:
+      responses:
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      summary: Global virtual account status; no funded balance is accessed.
+      tags:
+      - Portfolio
+      operationId: getApiPolymarketPaperAccountStatus
+      x-visibility: internal
+  /api/polymarket/paper-account/trades:
+    get:
+      parameters:
+      - in: query
+        name: limit
+        schema:
+          type: integer
+          default: 50
+          minimum: 1
+          maximum: 100
+        required: false
+      - in: query
+        name: offset
+        schema:
+          type: integer
+          default: 0
+          minimum: 0
+          maximum: 100000
+        required: false
+      - in: query
+        name: status
+        schema:
+          type: string
+          enum:
+          - pending
+          - not_filled
+          - filled_merged
+          - single_leg_unwound
+          - single_leg_residual
+          - cancelled_by_limit
+        required: false
+      - in: query
+        name: market_type
+        schema:
+          type: string
+          enum:
+          - yes_no
+          - up_down
+        required: false
+      - in: query
+        name: day
+        schema:
+          type: string
+          format: date
+        required: false
+      responses:
+        '422':
+          $ref: '#/components/responses/UNPROCESSABLE_ENTITY'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      summary: Filter and paginate paper attempts without loading compressed books.
+      tags:
+      - Portfolio
+      operationId: getApiPolymarketPaperAccountTrades
+      x-visibility: internal
+  /api/polymarket/paper-account/trades/{trade_id}:
+    get:
+      responses:
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      summary: Inspect frozen paper evidence and simulated fills.
+      tags:
+      - Portfolio
+      operationId: getApiPolymarketPaperAccountTradesTradeId
+      parameters:
+      - name: trade_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      x-visibility: internal
+    parameters:
+    - in: path
+      name: trade_id
+      required: true
+      schema:
+        type: string
+        minLength: 1
+  /api/polymarket/paper-account/trades/{trade_id}/replay:
+    post:
+      responses:
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      summary: Recompute a completed paper attempt offline from digest-verified evidence.
+      tags:
+      - Portfolio
+      operationId: postApiPolymarketPaperAccountTradesTradeIdReplay
+      parameters:
+      - name: trade_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      x-visibility: internal
+    parameters:
+    - in: path
+      name: trade_id
+      required: true
+      schema:
+        type: string
+        minLength: 1
+  /api/polymarket/paper-account/daily-report:
+    get:
+      parameters:
+      - in: query
+        name: days
+        schema:
+          type: integer
+          default: 30
+          minimum: 1
+          maximum: 90
+        required: false
+      - in: query
+        name: day
+        schema:
+          type: string
+          format: date
+        required: false
+      responses:
+        '422':
+          $ref: '#/components/responses/UNPROCESSABLE_ENTITY'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      summary: UTC daily account activity, fees, equity risk and utilization.
+      tags:
+      - Portfolio
+      operationId: getApiPolymarketPaperAccountDailyReport
+      x-visibility: internal
+  /api/polymarket/paper-account/export:
+    get:
+      parameters:
+      - in: query
+        name: days
+        schema:
+          type: integer
+          default: 30
+          minimum: 1
+          maximum: 90
+        required: false
+      - in: query
+        name: day
+        schema:
+          type: string
+          format: date
+        required: false
+      - in: query
+        name: format
+        schema:
+          type: string
+          default: json
+          enum:
+          - json
+          - csv
+        required: false
+      responses:
+        '422':
+          $ref: '#/components/responses/UNPROCESSABLE_ENTITY'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      summary: Download the bounded UTC daily paper report as CSV or JSON.
+      tags:
+      - Portfolio
+      operationId: getApiPolymarketPaperAccountExport
+      x-visibility: internal
   /api/agent-automations:
     get:
       responses:
