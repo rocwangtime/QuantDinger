@@ -74,3 +74,90 @@ def test_stale_open_episode_is_closed_with_duration(monkeypatch):
                 cur.close()
     finally:
         _delete_episode(market_id)
+
+
+@pytest.mark.integration
+def test_updown_upgrade_preserves_existing_rows_and_is_repeatable(monkeypatch):
+    """Apply both SQL files in an isolated schema containing real legacy rows."""
+    from pathlib import Path
+    _test_dsn(monkeypatch)
+    schema = 'updown_upgrade_' + uuid4().hex
+    migrations = Path(__file__).parents[2] / 'migrations'
+    with get_db_connection() as db:
+        cur = db.cursor()
+        try:
+            cur.execute(f'CREATE SCHEMA {schema}')
+            cur.execute(f'SET LOCAL search_path TO {schema}')
+            cur.execute((migrations / '20261011_polymarket_observer.sql').read_text())
+            cur.execute("INSERT INTO qd_polymarket_observer_near_misses(market_id,hour_bucket,observed_at,net_edge,net_edge_bps,best_edge_bps,samples) VALUES ('legacy',NOW(),NOW(),-1,-10,-10,7)")
+            cur.execute("INSERT INTO qd_polymarket_observer_episodes(market_id,started_at,last_seen_at,max_net_edge,max_net_edge_bps,best_size,source) VALUES ('legacy',NOW(),NOW(),1,100,1,'rest')")
+            sql = (migrations / '20261011_polymarket_updown.sql').read_text()
+            cur.execute(sql)
+            cur.execute(sql)
+            cur.execute("SELECT samples,market_type,asset,interval,expiry_bucket,tag_key FROM qd_polymarket_observer_near_misses")
+            row = cur.fetchone()
+            assert list(row.values()) == [7, 'yes_no', None, None, '', 'yes_no|||']
+            cur.execute("SELECT market_type,asset FROM qd_polymarket_observer_episodes")
+            assert list(cur.fetchone().values()) == ['yes_no', None]
+            cur.execute("INSERT INTO qd_polymarket_observer_near_misses SELECT market_id,hour_bucket,slug,question,observed_at,net_edge,net_edge_bps,best_edge_bps,1,'up_down','BTC','15m','<30s','up_down|BTC|15m|<30s' FROM qd_polymarket_observer_near_misses WHERE market_id='legacy'")
+            cur.execute('SELECT count(*) count FROM qd_polymarket_observer_near_misses')
+            assert cur.fetchone()['count'] == 2
+        finally:
+            db.rollback()  # Includes schema and every fixture row.
+            cur.close()
+
+
+@pytest.mark.integration
+def test_updown_persistence_bucket_keys_samples_and_api(monkeypatch, app):
+    import inspect
+    from datetime import timedelta
+    from app.routes import polymarket as routes
+    from app.services.polymarket import updown
+    _test_dsn(monkeypatch)
+    market_id = 'test-' + uuid4().hex
+    now = datetime.now(timezone.utc)
+    market = {'id': market_id, 'slug': 'test', 'question': 'Up/down test', 'market_type': 'up_down', 'asset': 'BTC', 'interval': '15m', 'endDate': (now + timedelta(minutes=3)).isoformat(), 'yesAssetId': 'u', 'noAssetId': 'd'}
+    books = {'u': {'asks': {'0.4': '100'}, 'bids': {'0.39': '100'}}, 'd': {'asks': {'0.59': '100'}, 'bids': {'0.58': '100'}}}
+    positive = {'net_edge': 1, 'net_edge_bps': 100, 'size_available': 5}
+    negative = {'net_edge': -0.01, 'net_edge_bps': -1, 'size_available': 0}
+    try:
+        observer.record_sample(market, positive, 'ws', now)
+        observer.record_sample(market, positive, 'ws', now + timedelta(seconds=70))
+        observer.record_sample(market, negative, 'ws', now + timedelta(seconds=71))
+        observer.record_sample(market, negative, 'ws', now + timedelta(seconds=130))
+        observer.record_research(market, books, 'ws', positive, now)
+        observer.record_research(market, books, 'ws', positive, now)
+        with get_db_connection() as db:
+            cur = db.cursor()
+            try:
+                cur.execute('SELECT expiry_bucket,ended_at FROM qd_polymarket_observer_episodes WHERE market_id=%s ORDER BY id', (market_id,))
+                episodes = cur.fetchall()
+                assert [e['expiry_bucket'] for e in episodes] == ['2-5m', '1-2m']
+                assert all(e['ended_at'] for e in episodes)
+                cur.execute('SELECT tag_key FROM qd_polymarket_observer_near_misses WHERE market_id=%s', (market_id,))
+                assert {r['tag_key'] for r in cur.fetchall()} == {'up_down|BTC|15m|1-2m', 'up_down|BTC|15m|30-60s'}
+                cur.execute('SELECT * FROM qd_polymarket_observer_samples WHERE market_id=%s', (market_id,))
+                samples = cur.fetchall()
+                assert len(samples) == 1
+                assert samples[0]['up_ask'] == updown.number('0.4')
+                assert samples[0]['up_mid'] == updown.number('0.395')
+                assert samples[0]['reference_source'] == 'unavailable'
+            finally:
+                cur.close()
+        query = {'days': 1, 'limit': 100, 'offset': 0, 'market_type': 'up_down', 'asset': 'BTC', 'interval': '15m'}
+        with app.test_request_context():
+            result = inspect.unwrap(routes.observer_summary)(query)[0].get_json()
+            assert result['code'] == 1
+            assert any(r['expiry_bucket'] == '2-5m' and int(r['episodes']) >= 1 for r in result['data']['groups'])
+            result = inspect.unwrap(routes.observer_episodes)({**query, 'expiry_bucket': '2-5m'})[0].get_json()
+            assert any(r['market_id'] == market_id for r in result['data'])
+    finally:
+        with get_db_connection() as db:
+            cur = db.cursor()
+            try:
+                for table in ('episodes', 'near_misses', 'samples'):
+                    cur.execute(f'DELETE FROM qd_polymarket_observer_{table} WHERE market_id=%s', (market_id,))
+                db.commit()
+            finally:
+                cur.close()
+        observer._LAST_RESEARCH.pop(market_id, None)

@@ -143,9 +143,8 @@ unavailable it uses bounded REST book snapshots. REST fallback has a default
 assumption, and net edge are recorded as aggregate opportunity episodes and
 hourly near-miss aggregates. Episodes are retained for 30 days by default and
 near misses for seven days. This is sampled public data; gaps, API limits, and
-latency mean it is not a promise of executable or atomic arbitrage. Crypto
-Up/Down markets are excluded; `POLYMARKET_OBSERVER_INCLUDE_UPDOWN` remains off
-until their market and fee semantics are separately verified.
+latency mean it is not a promise of executable or atomic arbitrage. Crypto Up/Down observation is a separate default-off option described below.
+Bounded scans and paper experiments continue to accept YES/NO markets only.
 
 Configuration: `POLYMARKET_OBSERVER_ENABLED`, `POLYMARKET_OBSERVER_MARKET_COUNT`,
 `POLYMARKET_OBSERVER_SIZE_SHARES`, `POLYMARKET_OBSERVER_MIN_EDGE`,
@@ -156,3 +155,96 @@ Configuration: `POLYMARKET_OBSERVER_ENABLED`, `POLYMARKET_OBSERVER_MARKET_COUNT`
 `POLYMARKET_OBSERVER_WS_ENABLED`, `POLYMARKET_OBSERVER_MERGE_COST`, and
 `POLYMARKET_GEOBLOCK_TTL_SECONDS`. Status, summary, and paginated episodes are
 available under authenticated `/api/polymarket/observer/...` endpoints.
+
+
+## Recurring crypto Up/Down research observer
+
+`POLYMARKET_OBSERVER_UPDOWN_ENABLED=false` is a separate opt-in; the observer
+itself also defaults off. With this option off, discovery, quotes and retention
+follow the existing YES/NO path. No wallet, credentials, signing, submissions or
+onchain actions are introduced.
+
+Live Gamma data checked on 2026-10-11 confirms exact `Up`/`Down` outcomes, two
+`clobTokenIds`, `negRisk=false`, `enableOrderBook=true`, `acceptingOrders=true`,
+`feesEnabled=true`, and `feeSchedule={rate:0.07, exponent:1, takerOnly:true}`.
+The series recurrence identifies 5m, 15m, hourly, 4h and daily windows. BTC, ETH
+and XRP expose all five; SOL exposes 5m, 15m and 4h (hourly/daily series absent
+at inspection). Short windows now resolve using Chainlink asset/USD 60-second
+TWAP streams; inspected hourly/daily markets instead cite Binance asset/USDT.
+`eventStartTime` is the window start; `startDate` is the catalogue listing date.
+The active BTC 15m events catalogue lists future windows roughly 24 hours ahead
+(the embedded series event list itself is truncated). Explicit fee schedules
+are used; legacy `makerBaseFee`/`takerBaseFee=1000` are not interpreted as the
+current curve rate. Missing, unsupported or conflicting fee schedules reject.
+
+The [official fee page](https://docs.polymarket.com/trading/fees) documents
+`shares × feeRate × p × (1-p)` and the crypto rate 0.07. It matches the existing
+exponent-1 engine; no alternate guessed crypto curve is introduced. A 100-share
+trade at 0.5 costs 1.75 in fees. The engine retains conservative upward rounding
+to five decimals per consumed level, which can exceed the documented nearest
+rounding; rebates remain excluded.
+
+Discovery resolves exact asset/interval series IDs once per observer process,
+then requests current/future events from each verified series. Window duration,
+complete-set metadata and fees are validated for every market. Daily windows
+allow 23/25 hours for daylight-saving transitions. Resolved/closed or expired
+markets are excluded, upcoming starts are bounded by lookahead, and conditions
+are deduplicated. Absent series are retried at process restart. Every discovery
+refresh reconnects the public market WebSocket with the current token set,
+clears old depth and prunes per-market caches. YES/NO discovery retains its own
+existing cadence. Expired Up/Down samples are rejected even between refreshes.
+REST fallback remains available.
+
+Episodes and hourly near misses add `market_type`, nullable `asset`/`interval`,
+and an `expiry_bucket` measured at each observation. Existing rows default to
+`yes_no`, null asset/interval and an empty bucket. Up/Down episodes split at
+bucket transitions; near-miss primary keys include a bounded deterministic tag
+key in addition to market/hour. Buckets are fixed absolute remaining time:
+`>10m` means at least 600 seconds, `5-10m` at least 300, `2-5m` at least 120,
+`1-2m` at least 60, `30-60s` at least 30, `<30s` below 30. Longer intervals spend
+most of their duration in the first bucket; this is intentional for comparisons.
+Episodes/near misses keep their existing configurable retention.
+
+The separate bounded sample table records best Up/Down asks, each token's
+bid/ask midpoint (null if a bid is unavailable), market end/expiry tags, net edge,
+and underlying reference value/source/time. Public Binance spot asset/USDT
+prices come from `api.binance.com/api/v3/ticker/price`, with
+`data-api.binance.vision` fallback. A dedicated worker caches prices per asset,
+including failed reads, and performs no HTTP in book callbacks. Stale or failed
+references are null and never replace order books or become a trading signal.
+These are USDT spot observations, not Chainlink USD/TWAP resolution prices.
+No numeric price-to-beat was observed; an explicit market `priceToBeat`, if
+supplied, is stored without inferring it from spot. Optional Chainlink collection
+is deferred: the [official RTDS migration guide](https://docs.polymarket.com/migrate/rtds-to-polybolt)
+deprecates the public price topics and requires authentication for replacement
+PolyBolt reference-price channels. Under this task's no-credentials constraint,
+no price-stream subscription is enabled and `chainlink_price` remains null.
+Samples are event-driven, at most once per configured period per market, rather
+than guaranteed regular time-series observations. At the default 5-second rate,
+40-market cap allows at most 691,200 rows/day and 4,838,400 rows over seven days;
+26 continuously updating subscriptions allow at most 449,280 rows/day.
+
+Additive registered migration: `20261011_polymarket_updown.sql`. It uses
+`ADD COLUMN IF NOT EXISTS`, preserves legacy rows and replaces the near-miss
+primary key transactionally. It is safe to reapply. Apply through the normal
+migration command before running upgraded observer/API code.
+
+| Environment variable | Default | Bounds / meaning |
+| --- | --- | --- |
+| `POLYMARKET_OBSERVER_UPDOWN_ENABLED` | false | Separate paper research opt-in |
+| `POLYMARKET_OBSERVER_UPDOWN_ASSETS` | BTC,ETH,SOL,XRP | Allowlisted assets |
+| `POLYMARKET_OBSERVER_UPDOWN_INTERVALS` | 5m,15m,1h,4h,1d | Allowlisted intervals; absent series skipped |
+| `POLYMARKET_OBSERVER_UPDOWN_LOOKAHEAD_SECONDS` | 1800 | 0–86400; future start horizon |
+| `POLYMARKET_OBSERVER_UPDOWN_REFRESH_SECONDS` | 60 | 10–300; discovery/reconnect cadence |
+| `POLYMARKET_OBSERVER_UPDOWN_MAX_MARKETS` | 40 | 1–100; Up/Down cap in addition to YES/NO |
+| `POLYMARKET_OBSERVER_UPDOWN_PER_PAIR_LIMIT` | 2 | 1–10; earliest windows per asset/interval |
+| `POLYMARKET_OBSERVER_UPDOWN_SAMPLE_SECONDS` | 5 | 1–60; research sample write interval |
+| `POLYMARKET_OBSERVER_UPDOWN_SAMPLE_RETENTION_DAYS` | 7 | 1–365; ten-minute cleanup cadence |
+| `POLYMARKET_OBSERVER_REFERENCE_CACHE_SECONDS` | 5 | 2–60; shared per-asset cache/worker cadence |
+
+Authenticated observer summary/episodes accept validated `market_type`, `asset`,
+`interval` and `expiry_bucket` filters. Summary includes bounded `groups` with
+episodes, near-miss samples and best net edge by these tags; observer status
+includes current Up/Down subscriptions (ID, asset, interval, end time) and bounded
+rejection reasons. The frontend provides filters and grouped statistics in both
+English and Simplified Chinese. No public submission capability is added.

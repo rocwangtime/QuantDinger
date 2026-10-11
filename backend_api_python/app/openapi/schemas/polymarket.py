@@ -40,6 +40,10 @@ class JobListQuery(Schema):
 
 
 class ObserverQuery(Schema):
+    market_type = fields.Str(validate=validate.OneOf(['yes_no', 'up_down']))
+    asset = fields.Str(validate=validate.OneOf(['BTC', 'ETH', 'SOL', 'XRP']))
+    interval = fields.Str(validate=validate.OneOf(['5m', '15m', '1h', '4h', '1d']))
+    expiry_bucket = fields.Str(validate=validate.OneOf(['>10m', '5-10m', '2-5m', '1-2m', '30-60s', '<30s']))
     days = fields.Int(load_default=1, validate=validate.Range(min=1, max=30))
     limit = fields.Int(load_default=50, validate=validate.Range(min=1, max=100))
     offset = fields.Int(load_default=0, validate=validate.Range(min=0, max=10000))
