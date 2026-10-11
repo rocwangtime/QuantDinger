@@ -189,9 +189,9 @@ then requests current/future events from each verified series. Window duration,
 complete-set metadata and fees are validated for every market. Daily windows
 allow 23/25 hours for daylight-saving transitions. Resolved/closed or expired
 markets are excluded, upcoming starts are bounded by lookahead, and conditions
-are deduplicated. Absent series are retried at process restart. Every discovery
-refresh reconnects the public market WebSocket with the current token set,
-clears old depth and prunes per-market caches. YES/NO discovery retains its own
+are deduplicated. Absent series are retried at process restart. Discovery refresh sends incremental subscribe/unsubscribe frames on the open
+public WebSocket only when the token set changes, preserves retained depth,
+and prunes removed-market books and per-market caches. YES/NO discovery retains its own
 existing cadence. Expired Up/Down samples are rejected even between refreshes.
 REST fallback remains available.
 
@@ -235,7 +235,7 @@ migration command before running upgraded observer/API code.
 | `POLYMARKET_OBSERVER_UPDOWN_ASSETS` | BTC,ETH,SOL,XRP | Allowlisted assets |
 | `POLYMARKET_OBSERVER_UPDOWN_INTERVALS` | 5m,15m,1h,4h,1d | Allowlisted intervals; absent series skipped |
 | `POLYMARKET_OBSERVER_UPDOWN_LOOKAHEAD_SECONDS` | 1800 | 0–86400; future start horizon |
-| `POLYMARKET_OBSERVER_UPDOWN_REFRESH_SECONDS` | 60 | 10–300; discovery/reconnect cadence |
+| `POLYMARKET_OBSERVER_UPDOWN_REFRESH_SECONDS` | 60 | 10–300; discovery cadence; incremental subscriptions |
 | `POLYMARKET_OBSERVER_UPDOWN_MAX_MARKETS` | 40 | 1–100; Up/Down cap in addition to YES/NO |
 | `POLYMARKET_OBSERVER_UPDOWN_PER_PAIR_LIMIT` | 2 | 1–10; earliest windows per asset/interval |
 | `POLYMARKET_OBSERVER_UPDOWN_SAMPLE_SECONDS` | 5 | 1–60; research sample write interval |
@@ -248,3 +248,76 @@ episodes, near-miss samples and best net edge by these tags; observer status
 includes current Up/Down subscriptions (ID, asset, interval, end time) and bounded
 rejection reasons. The frontend provides filters and grouped statistics in both
 English and Simplified Chinese. No public submission capability is added.
+
+
+## WebSocket receive isolation and bounded writer (2026-10-11)
+
+The market receive thread only parses JSON, applies dictionary book snapshots or
+price deltas, marks markets dirty through an asset-to-market index, and updates
+counters. It performs no database/HTTP work or opportunity calculations. A
+separate evaluator copies dirty books under a short lock every 250 ms and runs
+existing depth/fee calculations outside that lock. Markets remain dirty until
+their one-second episode/near-miss throttle permits evaluation. Research keeps
+its independent `POLYMARKET_OBSERVER_UPDOWN_SAMPLE_SECONDS` throttle; reference
+prices come only from the existing worker's cached `ReferencePrices.get()`.
+
+Observation functions record parameterized SQL in an evaluator-local recording
+context; direct callers retain synchronous persistence, while scheduler REST
+fallback uses the same ordered queue as WS evaluation. The
+writer commits ordered transactions, using the PostgreSQL adapter's batched
+`executemany` for adjacent identical statements. Episode end/start and expiry
+bucket transitions stay indivisible and FIFO, and near-miss upserts retain the
+maximum edge and exact accepted observation counts. Failed writer batches stay
+in flight ahead of later records and retry; they are never silently discarded.
+
+The bounded FIFO holds atomic observation groups (usually one or two SQL
+operations). When full, queued research for the same market is replaced with
+the latest value; otherwise oldest queued research is evicted first. New
+research can be dropped if only protected episode/near-miss operations remain.
+Only the evaluator or discovery worker can wait for protected queue capacity;
+the receive thread never accesses the write queue. Pending books coalesce
+naturally in memory while evaluation waits. Queue counters `enqueued`/`written`
+count SQL operations, while `dropped`/`coalesced` and depth/high-water count
+groups. Written operations include updates that affect zero rows and are not a
+count of newly inserted rows. A batch respects the configured SQL operation
+limit except when a single indivisible transition group exceeds that limit.
+
+Current [Polymarket real-time documentation](https://docs.polymarket.com/market-data/realtime-data)
+explicitly supports `{"assets_ids":[...],"operation":"subscribe"}` and
+`unsubscribe` on an existing market connection. Unchanged subscriptions cause
+no wire update; removals and additions are sent in two bounded frames. Two connections are the default: YES/NO and Up/Down have separate receive
+threads, subscription sets and ten-second application `PING` keepalives. A local
+single-socket smoke still hit one slow-consumer close after receive isolation,
+so two shards were selected from that evidence. Unused custom-feature events
+are no longer requested. `WS_SHARDS=1` uses one connection; 3–8 use stable CRC32
+market-ID assignment, keeping both outcomes together. Reconnects affect only
+the failed shard and clear that shard's depth. REST fallback remains available.
+
+Status uses the existing JSON status row and scheduler heartbeat, with cumulative
+WebSocket messages/rate, age, connections, reconnects, close reason counters,
+slow-consumer count, writer queue depth/high-water, operation/drop/coalesce
+counts, oldest pending/in-flight lag, last batch time, last write error, evaluator
+cycle time and final `flush_complete`. Messages/sec is cumulative since pipeline
+start. Subscription and rejection details are capped at 20 entries each; total
+`markets_subscribed` remains accurate. websocket-client 1.9 can report close-frame
+text through `on_error` and omit it from `on_close`; slow-consumer detection
+therefore covers both forms. Stop closes the receive socket, joins workers and
+flushes the writer under a shared timeout, then persists final status. A timeout
+reports `stopping`/`flush_complete=false`, preserving pending work for retry;
+restart is refused while previous workers remain alive. The queue is in-memory:
+process termination or a permanent DB outage beyond shutdown cannot guarantee
+durable transitions. Inspect flush/error metrics before terminating the worker.
+
+| New environment variable | Default | Bounds / meaning |
+| --- | --- | --- |
+| `POLYMARKET_OBSERVER_WS_SHARDS` | 2 | 1–8; separate YES/NO and Up/Down at 2, stable market hashing above 2 |
+| `POLYMARKET_OBSERVER_EVALUATE_MS` | 250 | 50–5000; evaluator cadence |
+| `POLYMARKET_OBSERVER_WRITE_QUEUE_MAX` | 10000 | 1–100000; atomic queued groups |
+| `POLYMARKET_OBSERVER_WRITE_BATCH_SIZE` | 500 | 1–5000; SQL operations per transaction |
+| `POLYMARKET_OBSERVER_WRITE_BATCH_MS` | 1000 | 10–10000; writer idle/retry wait in ms; enqueue wakes writer |
+
+Local-only reproducible probes: run `scripts/polymarket_ws_probe.py load` or
+`live --seconds 150` with the approved `QD_TEST_POSTGRES_DSN`. Each uses a
+disposable schema, deletes all probe rows in `finally`, and broadens near-miss
+threshold to 10000 bps solely to exercise persistence. No wallet, signing,
+orders, credentials, additional dependencies or HTTP schema changes are added.

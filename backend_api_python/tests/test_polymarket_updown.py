@@ -152,12 +152,12 @@ def test_api_filters_parameterized():
     assert params == ('up_down', 'BTC', '15m', '<30s')
 
 
-def test_loop_reconnects_with_new_subscription_at_rediscovery(monkeypatch):
-    """Exercise the loop, public subscription message and close-before-refresh path."""
+def test_loop_updates_subscription_without_reconnect_at_rediscovery(monkeypatch):
+    """Refresh updates the open public socket without clearing retained books."""
     import sys
     from types import SimpleNamespace
     mono = [100.0]
-    sockets, subscriptions = [], []
+    sockets, subscriptions, heartbeats = [], [], []
     base = {'id': 'old', 'asset': 'BTC', 'interval': '15m', 'endDate': (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat(), 'yesAssetId': '1', 'noAssetId': '2'}
     discovered = [[base], [{**base, 'id': 'new', 'yesAssetId': '3', 'noAssetId': '4'}]]
     monkeypatch.setenv('POLYMARKET_OBSERVER_UPDOWN_ENABLED', 'true')
@@ -222,7 +222,7 @@ def test_loop_reconnects_with_new_subscription_at_rediscovery(monkeypatch):
 
     def discovery(*args):
         if len(subscriptions) == 1:
-            assert sockets[0].closed
+            assert not sockets[0].closed
         return discovered.pop(0), []
 
     monkeypatch.setattr(observer, '_STOP', Stop())
@@ -232,13 +232,16 @@ def test_loop_reconnects_with_new_subscription_at_rediscovery(monkeypatch):
     monkeypatch.setattr(observer, 'STATUS', dict(observer.STATUS))
     monkeypatch.setattr(observer, '_run_retention', lambda *_: None)
     monkeypatch.setattr(observer, '_close_stale_episodes', lambda *_: None)
-    monkeypatch.setattr(observer, '_persist_status', lambda: None)
+    monkeypatch.setattr(observer, '_persist_status', lambda: heartbeats.append(mono[0]))
     monkeypatch.setattr(updown, 'ReferencePrices', Reference)
     monkeypatch.setattr(updown, 'discover', discovery)
     monkeypatch.setitem(sys.modules, 'websocket', SimpleNamespace(WebSocketApp=Socket))
     observer._market_loop()
-    assert [s['assets_ids'] for s in subscriptions] == [['1', '2'], ['3', '4']]
-    assert all(s['type'] == 'market' for s in subscriptions)
+    assert [s['assets_ids'] for s in subscriptions] == [['1', '2'], ['1', '2'], ['3', '4']]
+    assert subscriptions[0]['type'] == 'market'
+    assert [s['operation'] for s in subscriptions[1:]] == ['unsubscribe', 'subscribe']
+    assert len(sockets) == 1
+    assert len(heartbeats) == 2
     assert all(sock.closed for sock in sockets)
 
 
