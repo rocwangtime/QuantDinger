@@ -321,3 +321,186 @@ Local-only reproducible probes: run `scripts/polymarket_ws_probe.py load` or
 disposable schema, deletes all probe rows in `finally`, and broadens near-miss
 threshold to 10000 bps solely to exercise persistence. No wallet, signing,
 orders, credentials, additional dependencies or HTTP schema changes are added.
+
+## Continuous paper arbitrage account (2026-10-11)
+
+`POLYMARKET_PAPER_ACCOUNT_ENABLED=false` is a separate default-off gate. Both
+this flag and `POLYMARKET_OBSERVER_ENABLED` must be enabled in scheduler-worker.
+The independent bounded experiments remain available. The new account is a
+single shared virtual account (`account_id=global`), visible to authenticated
+users, with no connection to funded strategy accounts. Defaults are 5,000 virtual
+collateral units and a 1,000-unit trade cap. No additional dependencies, wallet,
+authenticated exchange requests, signing, submissions or chain calls are used.
+
+The evaluator sends bounded book signals to a 256-item paper inbox without
+waiting. A dedicated account thread owns state, timed simulation and atomic
+PostgreSQL writes. A separate public-read thread measures RTT and checks residual
+resolution, so network timeouts do not delay simulated leg scheduling. A dedicated
+PostgreSQL session advisory lock prevents two account workers from writing the
+global account simultaneously. Database failures pause admissions and retry the
+same in-memory transition; the receive threads never perform database work.
+Status persists every ten seconds and after transitions. Inbox overflow counts
+as dropped signals, never synthetic fills. At most 100 pending/held trades are
+allowed; unresolved exposure counts toward this bound.
+
+### Exact sizing and portfolio controls
+
+Sizing walks the union of both tokens' cumulative ask-depth boundaries (top 50
+levels). Every matched marginal tranche must retain the configured minimum net
+edge after the existing upward-rounded per-level engine fees and its allocation
+of the configured fixed merge cost. It stops at the first failing tranche; later
+cheap depth cannot subsidize an expensive intermediate tranche. The accepted
+full depth determines the signal net edge, measured against matched payout.
+
+The ticket's collateral spend, including both entry fees and merge cost, is the
+minimum of eligible depth cost, the trade cap, 20% of current free capital, and
+the edge-scaled cap. The latter is `min_ticket` at `min_edge_bps`, increases
+linearly to `trade_cap` at `full_edge_bps` (default 100), and clamps at both ends.
+Available portfolio deployment also caps it at 60% of current equity. Pending
+reservations and the original cost basis of zero-marked residual inventory both
+count toward this deployment limit. Size rounds down to `market.sizeStep` when
+available, otherwise the configured size step; buy price limits round down to
+market tick. Each leg must meet Gamma's minimum order notional, following the
+existing engine convention. Worst permitted prices and a 0.001-unit fee rounding
+allowance must fit all cash limits and retain the threshold, or size decreases
+again / entry is skipped. All cap inputs, the binding cap and rejection decision
+are frozen in evidence.
+
+A UTC day's first account tick freezes start-of-day equity. When conservative
+equity falls 2% below it, a durable daily-loss-stop event disables new entries for
+that UTC day, including when later gains recover the loss. Existing timed exits
+and settlements continue. The next UTC day resets the gate. Each attempted
+market is reserved against concurrent attempts; the 60-second cooldown is
+refreshed after completion or rejection. Repeated signals during cooldown count
+as opportunities seen, not additional attempts. Books with no qualifying net
+edge do not create trades. Expired markets cannot start new attempts.
+
+### Delayed fill and capital model
+
+The receive path retains timestamped full-book events and deltas in bounded
+per-token rings (10 seconds / 2,000 events by default). Pruned events advance a
+base book; reconstruction, sorting and fee arithmetic run outside receive.
+Removed markets and reconnected shards clear their history. At each step the
+worker reconstructs the last book observed at or before the planned arrival
+instant. Missing, crossed, too-old or evicted observations cannot fill; future
+books cannot replace the required observation. Signal books use this same
+historical lookup rather than attributing a new timestamp to cached depth.
+
+RTT is measured with unauthenticated `GET https://clob.polymarket.com/time`,
+every five minutes by default, retaining 60 samples. Status exposes median, p90,
+measurement time/error, fallback state and delay used. A failed/stale measurement
+uses the configured 150 ms fallback. One-way simulated delay is the ceiling of
+median RTT multiplied by `latency_multiplier` (default 1, intentionally
+conservative). That frozen delay applies to signal→leg1, leg1→leg2, and failed
+leg2→unwind. Scheduling does not sleep in evaluator or receive callbacks.
+
+Both entry legs are individually FOK within their planned worst ask plus the
+configured absolute per-share slippage allowance (default zero), rounded down
+to tick. Competitors remove 50% of the top level on each side before sweeping;
+subsequent levels retain all depth by default, with a separate configurable
+share. The same assumption applies to the unwind bid sweep. First-leg failure
+releases the entire reservation. Second-leg failure triggers one FAK sell of the
+first token against later observed bids, charging the same engine taker fees.
+Partial unwind retains original proportional cost basis separately and marks
+remaining inventory at zero for equity and loss-stop decisions. This deliberately
+conservative mark is not a prediction of the winning outcome.
+
+Successful complete sets lock actual acquisition cost, fees and assumed merge
+cost until the configured 60-second settlement delay. Payout and realized P&L
+are released together. With merging disabled, complete sets remain locked until
+`endDate`, an explicit simulation assumption about settlement timing. Residual
+inventory is not paid merely because `endDate` passed: public Gamma evidence
+must have matching condition, `closed=true`, `umaResolutionStatus=resolved` and
+exact binary 0/1 outcome prices. Unknown/disputed/proposed results remain zero
+marked and held. The finality field is present in Polymarket's
+[official Gamma market model](https://github.com/Polymarket/py-sdk/blob/main/src/polymarket/models/gamma/market.py).
+No winner is inferred from reference spot prices. Daily net P&L reflects
+conservative equity changes, including residual write-downs; trade realized P&L
+excludes unresolved cost basis until actual simulated release. `free + locked +
+positions_value == equity` always holds; residual zero marks have a separate
+`residual_cost_basis`. Restart cancels a pending first entry, or conservatively
+accounts for a previously observed first leg without inventing a missed hedge
+or unwind. Historical books are not persisted as a live feed.
+
+### Storage, replay, reports and UI
+
+Registered additive migration: `20261011_polymarket_paper_account.sql`, bootstrap
+component `20261011_polymarket_paper_account`. Tables are
+`qd_polymarket_paper_accounts`, `qd_polymarket_paper_trades`,
+`qd_polymarket_paper_legs`, `qd_polymarket_paper_ledger`, and
+`qd_polymarket_paper_daily`. Account/transition/trade/leg/report writes commit as
+one transaction. Leg details include requested/filled shares, average prices,
+fees and planned arrival / latency timestamps. Trade evidence is zlib-compressed
+canonical JSON with SHA-256, model version and model/fee-engine source hash.
+Evidence contains signal and per-step top 50 books for both sides of both tokens,
+market metadata, sizing inputs, configuration, RTT observations and decision.
+Replay verifies its digest and model compatibility, recomputes sizing and fills,
+and checks the saved result, including eventual release evidence. No public
+reads occur during replay.
+
+Trade, ledger and daily history have configurable 90-day retention. Evidence for
+pending or held capital is exempt until closed so it remains auditable. The live
+account state retains at most 100 recent event records; ledger snapshots retain
+those events durably within the retention window. Loss-stop events are included
+in ledger event details. Ledger snapshots are produced at least every ten
+seconds while healthy, plus transitions. Reports use UTC days, attempts,
+complete-set fills / fill rate, single-leg failures, unwinds, fees, conservative
+net P&L, absolute equity max drawdown, average/max locked-capital utilization,
+opportunities seen versus attempted, and market-type groups. Average utilization
+samples the lightweight account ticks. Detail / exports remain paper labelled.
+
+Authenticated endpoints under `/api/polymarket/paper-account`:
+
+- `GET /status`: balances, positions / cost basis, today's gate/P&L, measured latency.
+- `GET /trades`: `status`, `market_type`, UTC `day`, `limit` (1–100), `offset`.
+- `GET /trades/{id}`: decoded digest-verified evidence and simulated result.
+- `POST /trades/{id}/replay`: immediate offline sizing/fill comparison; no new trade.
+- `GET /daily-report`: UTC `day` or last `days` (1–90).
+- `GET /export`: same report window, `format=csv|json`, attachment download.
+
+The `/#/polymarket` panel displays paper balance cards, latency, loss stop,
+paginated UTC daily reports and filtered trades, evidence drilldown, replay and
+CSV/JSON report downloads in en-US and zh-CN. OpenAPI is regenerated.
+
+Every account setting uses the prefix `POLYMARKET_PAPER_ACCOUNT_`; full defaults
+are in `backend_api_python/env.example`:
+
+| Suffix | Default |
+| --- | --- |
+| `ENABLED` | false |
+| `INITIAL_CAPITAL`, `TRADE_CAP` | 5000, 1000 |
+| `FREE_FRACTION`, `LOCKED_FRACTION`, `LOSS_FRACTION` | 0.20, 0.60, 0.02 |
+| `MIN_EDGE_BPS`, `FULL_EDGE_BPS`, `MIN_TICKET` | 10, 100, 10 |
+| `SIZE_STEP`, `SLIPPAGE` | 0.01, 0 (absolute price allowance) |
+| `COMPETITOR_TOP`, `COMPETITOR_OTHER` | 0.50, 0 |
+| `MERGE_COST`, `MERGE_ENABLED`, `SETTLEMENT_SECONDS` | 0.02, true, 60 |
+| `COOLDOWN_SECONDS` | 60 |
+| `DEFAULT_LATENCY_MS`, `LATENCY_MULTIPLIER`, `LATENCY_REFRESH_SECONDS` | 150, 1, 300 |
+| `MAX_BOOK_AGE_MS`, `HISTORY_SECONDS`, `HISTORY_EVENTS` | 2000, 10, 2000 |
+| `RETENTION_DAYS` | 90 |
+
+### Observer process isolation follow-up
+
+No process split or container is introduced in this change. A separate observer
+command requires coordinated scheduler ownership / heartbeat and shutdown
+changes, beyond a small flag-only modification. A concrete follow-up is to add
+`SCHEDULER_MODE=polymarket-observer`: acquire a dedicated observer leader lease,
+start only discovery, four public WS shards, evaluator, bounded writer and paper
+worker; emit a separate observer heartbeat; disable observer startup in the
+normal scheduler when that mode is deployed. Run it as a second command in the
+existing worker service, with no new container. Validate lease failover,
+single-account advisory-lock exclusion, stop/drain and existing scheduler tests
+before changing production process ownership. Further paper research can retain
+versioned replay implementations and tune competitor shares / history bounds
+using measured feed rates; no live execution is part of this account.
+
+Validation for this account release: 43 new account unit/PG tests passed; the
+combined Polymarket/scheduler checks passed 188 tests, including 12 PG18
+integration tests. The requested full backend selection passed 3,845 tests with
+62 deselected; frontend passed 417 tests, production build and changed-file
+ESLint. Global Ruff and OpenAPI export passed. The final three-minute isolated
+local PG/public-feed smoke observed 83,387 messages, RTT median 107.1 ms / p90
+369.7 ms, zero qualifying opportunities or attempts, no worker/writer errors,
+one remote-close reconnect and no slow-consumer closes. All smoke rows were
+removed. Full commands, file manifest, assumptions and logs are recorded in
+`deploy/polymarket_paper_account_notes.md` in the development workspace.

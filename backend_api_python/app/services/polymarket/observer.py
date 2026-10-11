@@ -367,6 +367,12 @@ def _market_loop():
                         frame = frames.get(market["id"], {})
                         if frame.get("books") and not frame.get("error"):
                             mapped = {a: {side: {str(x["price"]): str(x["size"]) for x in frame["books"][a][side]} for side in ("asks", "bids")} for a in (market["yesAssetId"], market["noAssetId"])}
+                            if _PIPELINE and _PIPELINE.paper_account:
+                                at = frame['observedMs']
+                                with _PIPELINE.lock:
+                                    for asset, book in mapped.items():
+                                        _PIPELINE.paper_account.history.record(dict(event_type='book', asset_id=asset, **{side: [{'price': p, 'size': z} for p, z in book[side].items()] for side in ('asks', 'bids')}), at)
+                                _PIPELINE.paper_account.submit(market, mapped, at)
                             quote = opportunity(market, mapped, os.getenv("POLYMARKET_OBSERVER_SIZE_SHARES", "100"), os.getenv("POLYMARKET_OBSERVER_MERGE_COST", "0.02"))
                             if _PIPELINE:
                                 with _PIPELINE.evaluation_lock:
@@ -580,6 +586,8 @@ class Pipeline:
         self.lock = threading.Lock()
         self.evaluation_lock = threading.Lock()
         self.books = {}
+        from .paper_account import Runtime, enabled as account_enabled
+        self.paper_account = Runtime(self) if account_enabled() else None
         self.markets = {}
         self.asset_markets = {}
         self.dirty = set()
@@ -600,6 +608,8 @@ class Pipeline:
 
     def start(self):
         self.writer.start()
+        if self.paper_account:
+            self.paper_account.thread.start()
         self.evaluator.start()
 
     def set_markets(self, markets):
@@ -614,6 +624,8 @@ class Pipeline:
             self.markets = {m['id']: m for m in markets}
             self.asset_markets = {a: m['id'] for m in markets for a in subscription_assets([m])}
             self.books = {a: b for a, b in self.books.items() if a in self.asset_markets}
+            if self.paper_account:
+                self.paper_account.history.assets = {a: b for a, b in self.paper_account.history.assets.items() if a in self.asset_markets}
             self.dirty.intersection_update(self.markets)
             self.last_eval = {k: v for k, v in self.last_eval.items() if k in self.markets}
         for identity in previous - self.markets.keys():
@@ -626,6 +638,8 @@ class Pipeline:
             event = json.loads(raw)
             with self.lock:
                 changed = ws_apply_event(event, self.books)
+                if self.paper_account:
+                    self.paper_account.history.record(event, int(time.time() * 1000))
                 self.dirty.update(self.asset_markets[a] for a in changed if a in self.asset_markets)
                 self.messages += 1
                 self.last_message = time.monotonic()
@@ -663,6 +677,8 @@ class Pipeline:
                 self.dirty.discard(identity)
                 self.last_eval[identity] = now
         for market, books in frames:
+            if self.paper_account:
+                self.paper_account.submit(market, books, int(time.time() * 1000))
             quote = opportunity(market, books, os.getenv('POLYMARKET_OBSERVER_SIZE_SHARES', '100'),
                                 os.getenv('POLYMARKET_OBSERVER_MERGE_COST', '0.02'))
             self.capture(market['id'], 'research', lambda: record_research(market, books, 'ws', quote))
@@ -732,12 +748,16 @@ class Pipeline:
         metrics = self.queue.snapshot()
         if self.inflight:
             metrics['writer_lag_seconds'] = max(metrics['writer_lag_seconds'], time.monotonic() - self.inflight[0][3])
+        if self.paper_account:
+            result['paper_account'] = dict(running=self.paper_account.ready, dropped=self.paper_account.dropped, error=self.paper_account.error)
         return {**result, **metrics, 'writer_inflight': len(self.inflight)}
 
     def close(self, timeout):
         deadline = time.monotonic() + timeout
         self.evaluator_stop.set()
         self.evaluator.join(max(0, deadline - time.monotonic()))
+        if self.paper_account:
+            self.paper_account.close(max(0, deadline - time.monotonic()))
         self.writer_stop.set()
         with self.queue.condition:
             self.queue.condition.notify_all()
@@ -800,6 +820,8 @@ class MarketConnections:
                 with _PIPELINE.lock:
                     for asset in state['assets']:
                         _PIPELINE.books.pop(asset, None)
+                        if _PIPELINE.paper_account:
+                            _PIPELINE.paper_account.history.assets.pop(asset, None)
         state['attempts'] += 1
         state['retry_at'] = time.monotonic() + min(120, 5 * 2 ** min(5, state['attempts'] - 1))
 

@@ -3,7 +3,10 @@
 from flask import g, jsonify, request
 
 from app.openapi.blueprint import HumanBlueprint
-from app.openapi.schemas.polymarket import EligibilityQuery, JobListQuery, ObserverQuery, PaperRequest, ScanRequest
+from app.openapi.schemas.polymarket import (
+    AccountExportQuery, AccountReportQuery, AccountTradeQuery, EligibilityQuery,
+    JobListQuery, ObserverQuery, PaperRequest, ScanRequest,
+)
 from app.services.billing_service import BillingError
 from app.services.polymarket import jobs
 from app.services.polymarket.engine import validate_settings
@@ -176,3 +179,70 @@ def observer_episodes(query):
             finally:
                 cur.close()
     return reply(fetch)
+
+
+@blp.route('/paper-account/status', methods=['GET'])
+@login_required
+def account_status():
+    """Global virtual account status; no funded balance is accessed."""
+    from app.services.polymarket import account_api
+    return reply(account_api.status)
+
+
+@blp.route('/paper-account/trades', methods=['GET'])
+@login_required
+@blp.arguments(AccountTradeQuery, location='query')
+def account_trades(query):
+    """Filter and paginate paper attempts without loading compressed books."""
+    from app.services.polymarket import account_api
+    return reply(lambda: account_api.trades(**query))
+
+
+@blp.route('/paper-account/trades/<trade_id>', methods=['GET'])
+@login_required
+def account_trade(trade_id):
+    """Inspect frozen paper evidence and simulated fills."""
+    from app.services.polymarket import account_api
+    return reply(lambda: account_api.detail(trade_id))
+
+
+@blp.route('/paper-account/trades/<trade_id>/replay', methods=['POST'])
+@login_required
+def account_replay(trade_id):
+    """Recompute a completed paper attempt offline from digest-verified evidence."""
+    from app.services.polymarket import account_api
+    return reply(lambda: account_api.replay(trade_id))
+
+
+@blp.route('/paper-account/daily-report', methods=['GET'])
+@login_required
+@blp.arguments(AccountReportQuery, location='query')
+def account_report(query):
+    """UTC daily account activity, fees, equity risk and utilization."""
+    from app.services.polymarket import account_api
+    return reply(lambda: account_api.reports(**query))
+
+
+@blp.route('/paper-account/export', methods=['GET'])
+@login_required
+@blp.arguments(AccountExportQuery, location='query')
+def account_export(query):
+    """Download the bounded UTC daily paper report as CSV or JSON."""
+    import csv
+    import io
+    import json
+    from flask import Response
+    from app.services.polymarket import account_api
+    rows = account_api.reports(**{k: v for k, v in query.items() if k != 'format'})
+    if query['format'] == 'csv':
+        output = io.StringIO()
+        keys = ['day', 'attempted', 'filled', 'fill_rate', 'single_leg_failures', 'unwinds', 'net_pnl',
+                'fees', 'max_drawdown', 'capital_utilization_avg', 'capital_utilization_max', 'opportunities']
+        writer = csv.DictWriter(output, fieldnames=keys, extrasaction='ignore')
+        writer.writeheader()
+        writer.writerows(rows)
+        content, mimetype = output.getvalue(), 'text/csv'
+    else:
+        content, mimetype = json.dumps(rows), 'application/json'
+    return Response(content, mimetype=mimetype, headers={
+        'Content-Disposition': 'attachment; filename="polymarket-paper-report.' + query['format'] + '"'})

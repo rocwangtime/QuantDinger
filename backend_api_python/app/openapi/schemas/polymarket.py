@@ -51,3 +51,21 @@ class ObserverQuery(Schema):
 
 class EligibilityQuery(Schema):
     refresh = fields.Bool(load_default=False)
+
+
+class AccountTradeQuery(Schema):
+    limit = fields.Int(load_default=50, validate=validate.Range(min=1, max=100))
+    offset = fields.Int(load_default=0, validate=validate.Range(min=0, max=100000))
+    status = fields.Str(validate=validate.OneOf(['pending', 'not_filled', 'filled_merged',
+        'single_leg_unwound', 'single_leg_residual', 'cancelled_by_limit']))
+    market_type = fields.Str(validate=validate.OneOf(['yes_no', 'up_down']))
+    day = fields.Date()
+
+
+class AccountReportQuery(Schema):
+    days = fields.Int(load_default=30, validate=validate.Range(min=1, max=90))
+    day = fields.Date()
+
+
+class AccountExportQuery(AccountReportQuery):
+    format = fields.Str(load_default='json', validate=validate.OneOf(['json', 'csv']))
