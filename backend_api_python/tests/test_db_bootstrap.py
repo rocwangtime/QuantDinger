@@ -290,6 +290,7 @@ def test_bootstrap_applies_execution_accounting_after_schema(monkeypatch):
     module._apply_init_sql(MagicMock(), strict=True)
     names = [item["name"] for item in calls]
     assert names[:2] == ["schema-init", "execution-fill-accounting-20260916"]
+    assert "polymarket-observer-heartbeat-role-20261013" in names
     assert names[2] == "exchange-order-pnl-20260916"
     assert names[3] == "ai-decision-billing-20260920"
     assert names[4] == "event-radar-20260925"

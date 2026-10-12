@@ -347,6 +347,10 @@ def _apply_init_sql(logger, *, strict: bool = False):
                 path=Path(__file__).resolve().parent.parent.parent / "migrations" / "20261006_research_execution.sql",
             )
             _apply_migration_component(
+                conn, logger, name="polymarket-observer-heartbeat-role-20261013",
+                path=Path(__file__).resolve().parent.parent.parent / "migrations" / "20261013_polymarket_observer_heartbeat_role.sql",
+            )
+            _apply_migration_component(
                 conn, logger, name="polymarket-observer-20261011",
                 path=Path(__file__).resolve().parent.parent.parent / "migrations" / "20261011_polymarket_observer.sql",
             )

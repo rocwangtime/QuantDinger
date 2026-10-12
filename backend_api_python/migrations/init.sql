@@ -2666,7 +2666,7 @@ CREATE TABLE IF NOT EXISTS qd_worker_heartbeats (
     started_at TIMESTAMP NOT NULL DEFAULT NOW(),
     heartbeat_at TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    CHECK (role IN ('api', 'trading', 'scheduler', 'celery', 'celery-beat')),
+    CHECK (role IN ('api', 'trading', 'scheduler', 'celery', 'celery-beat', 'polymarket-observer')),
     CHECK (status IN ('running', 'stopped', 'failed'))
 );
 CREATE INDEX IF NOT EXISTS idx_worker_heartbeats_role
