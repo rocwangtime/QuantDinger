@@ -9,7 +9,7 @@ import uuid
 
 from flask import Response, g, jsonify, request, stream_with_context
 from app.openapi.blueprint import HumanBlueprint
-from app.openapi.schemas.automations import AutomationLatencyEnvelopeSchema, AutomationDashboardEnvelopeSchema, AutomationReadinessEnvelopeSchema, AutomationReviewEnvelopeSchema
+from app.openapi.schemas.automations import AutomationDailyReportEnvelopeSchema, AutomationScoresEnvelopeSchema, AutomationLatencyEnvelopeSchema, AutomationDashboardEnvelopeSchema, AutomationReadinessEnvelopeSchema, AutomationReviewEnvelopeSchema
 from app.utils.auth import login_required
 from app.services.automation import store
 from app.services.automation.domain import normalize_config, session_schedule
@@ -301,3 +301,28 @@ def symbol_settings_audit(task_id):
 def task_latency(task_id):
     from app.services.automation.latency import read
     return read(store.task(g.user_id, task_id))
+
+
+@blp.route('/<int:task_id>/daily-report', methods=['GET'])
+@blp.doc(summary='Read persisted HK daily decision scores and risk events; gross hypothetical PnL',
+         parameters=[{'name': 'day', 'in': 'query', 'required': True,
+                      'schema': {'type': 'string', 'format': 'date'}, 'description': 'HK local date (YYYY-MM-DD)'}])
+@blp.response(200, AutomationDailyReportEnvelopeSchema)
+@login_required
+@envelope
+def task_daily_report(task_id):
+    from app.services.automation.scoring import read_report
+    return read_report(store.task(g.user_id, task_id), request.args.get('day', ''))
+
+
+@blp.route('/runs/<int:run_id>/scores', methods=['GET'])
+@blp.doc(summary='Read owner-scoped persisted HK decision horizon scores; missing outcomes remain null')
+@blp.response(200, AutomationScoresEnvelopeSchema)
+@login_required
+@envelope
+def run_scores(run_id):
+    run = store.query('SELECT task_id FROM qd_agent_automation_runs WHERE id=%s AND user_id=%s',
+                      (run_id, g.user_id), one=True)
+    if not run:
+        raise ValueError('Run not found')
+    return store.query('SELECT * FROM qd_agent_decision_scores WHERE run_id=%s ORDER BY symbol,due_at', (run_id,))

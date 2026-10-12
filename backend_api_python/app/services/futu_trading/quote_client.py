@@ -157,6 +157,7 @@ class FutuQuoteClient:
                 "success": True,
                 "symbol": format_display_symbol(code),
                 "futu_code": code,
+                "lot_size": safe_float(snap.get("lot_size")),
                 "bid": safe_float(snap.get("bid_price") or snap.get("bid")),
                 "ask": safe_float(snap.get("ask_price") or snap.get("ask")),
                 "last": safe_float(snap.get("last_price") or snap.get("price") or snap.get("last")),

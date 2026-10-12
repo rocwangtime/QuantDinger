@@ -96,3 +96,9 @@ def run_market_catalog_sync(self):
     from app.services.market_catalog_sync import run_market_catalog_sync_inline
 
     return run_market_catalog_sync_inline("celery-beat")
+
+
+@celery_app.task(name="quantdinger.tasks.hk_decision_scoring", soft_time_limit=240, time_limit=300)
+def hk_decision_scoring():
+    from app.services.automation.scoring import tick
+    tick()

@@ -120,6 +120,7 @@ def analyze(row, run, evidence=None, trigger_quote=None):
             raise TimeoutError('Decision cancelled or expired')
         decision = parse_decision(draft,evidence,config)
         decision.update(research_result)
+        decision['decision_at'] = time.time()
         if tracked:
             latency.mark(run, 'decision')
             latency.persist(run)

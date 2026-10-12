@@ -71,6 +71,13 @@ def observe(row):
                 tracking['last_sample_at'] = now
             newly_tripped = (risk.get('halted') and not previous_risk.get('halted')) or (
                 set(risk.get('stopped_symbols', [])) - set(previous_risk.get('stopped_symbols', [])))
+            new_reasons = set(risk.get('reasons', [])) - set(previous_risk.get('reasons', []))
+            new_stops = set(risk.get('stopped_symbols', [])) - set(previous_risk.get('stopped_symbols', []))
+            if current['config']['market'] == 'HKStock' and (new_reasons or new_stops):
+                cur.execute('INSERT INTO qd_agent_risk_events(task_id,occurred_at,event) VALUES(%s,%s,%s::jsonb)',
+                            (current['id'], datetime.fromtimestamp(now, timezone.utc),
+                             store.dumps({'reasons': sorted(new_reasons), 'stop_loss_symbols': sorted(new_stops),
+                                          'halted': risk.get('halted', False)})))
             if newly_tripped:
                 # In-flight model runs observe cancellation on their next poll.
                 # Reductions already accepted by the broker remain reconciled.
