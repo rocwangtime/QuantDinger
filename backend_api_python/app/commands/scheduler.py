@@ -22,6 +22,13 @@ def main() -> None:
     lease_key = "scheduler-global-services"
     lease_seconds = max(10, int(os.getenv("SCHEDULER_LEASE_SEC", "30")))
     leader = False
+    host_observer = os.getenv("POLYMARKET_OBSERVER_IN_SCHEDULER", "false").strip().lower() in {"1", "true", "yes", "on"}
+    if host_observer:
+        from app.services.polymarket.observer import (
+            start as start_polymarket_observer,
+            stop as stop_polymarket_observer,
+            snapshot as polymarket_observer_health,
+        )
     with app.app_context():
         try:
             while not shutdown.event.is_set():
@@ -33,8 +40,8 @@ def main() -> None:
                     )
                     if leader:
                         _start_scheduler_services()
-                        from app.services.polymarket.observer import start as start_polymarket_observer
-                        start_polymarket_observer()
+                        if host_observer:
+                            start_polymarket_observer()
                 else:
                     leader = repository.renew_process_lease(
                         lease_key=lease_key,
@@ -44,17 +51,16 @@ def main() -> None:
                     if not leader:
                         break
                 from app.services.automation.health import snapshot as agent_health
-                from app.services.polymarket.observer import snapshot as polymarket_observer_health
                 repository.record_worker_heartbeat(
                     worker_id=worker_id,
                     role="scheduler",
-                    metadata={"leader": leader, "agent_automation": agent_health(), "polymarket_observer": polymarket_observer_health()},
+                    metadata={"leader": leader, "agent_automation": agent_health(), "polymarket_observer": polymarket_observer_health() if host_observer else {"mode": "external"}},
                 )
                 shutdown.event.wait(10)
         finally:
             from app.services.automation.worker import stop as stop_agent_automation
-            from app.services.polymarket.observer import stop as stop_polymarket_observer
-            stop_polymarket_observer()
+            if host_observer:
+                stop_polymarket_observer()
             stop_agent_automation()
             if leader:
                 repository.release_process_lease(lease_key=lease_key, owner_id=worker_id)

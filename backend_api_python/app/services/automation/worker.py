@@ -76,9 +76,44 @@ def reconcile_orders():
             logger.warning('Task order reconciliation/cancellation pending; will retry')
 
 
+# SQL admission is split before LIMIT so a bulk backlog cannot hide fast work.
+FAST_RUN_PREDICATE = "(t.config->>'kind'='price_trigger' AND t.config->>'market'='HKStock' AND r.preview=FALSE)"
+
+
+def ready_runs(fast):
+    return store.query(f"""SELECT r.* FROM qd_agent_automation_runs r
+        JOIN qd_agent_automations t ON t.id=r.task_id
+        WHERE (r.status='queued' OR (r.status='planned' AND
+            (r.execute_at IS NULL OR r.execute_at<=NOW())))
+        AND {'' if fast else 'NOT '}{FAST_RUN_PREDICATE}
+        ORDER BY r.id LIMIT 8""")
+
+
+def dispatch_runs(pool, pending, capacity, runs, fast_events):
+    for run in runs:
+        if len(pending) >= capacity:
+            break
+        if run['id'] in pending:
+            continue
+        row = store.task(run['user_id'], run['task_id'])
+        run = {**run, '_worker_generation': health.generation()}
+        if run['status'] == 'planned':
+            pending[run['id']] = pool.submit(execute, row, run)
+        elif row['config']['kind'] == 'price_trigger' and not run['preview']:
+            context = fast_events.pop(run['id'], None)
+            if context:
+                pending[run['id']] = pool.submit(analyze, row, run, *context)
+            else:
+                store.update_run(run['id'], status='expired', phase='触发上下文未保留，等待下一次新事件')
+        else:
+            pending[run['id']] = pool.submit(analyze, row, run)
+
+
 def loop():
     health.started()
     pool = ThreadPoolExecutor(max_workers=2,thread_name_prefix='AgentDecision')
+    fast_pool = ThreadPoolExecutor(max_workers=1,thread_name_prefix='AgentFastDecision')
+    fast_pending = {}
     preparation = ThreadPoolExecutor(max_workers=2,thread_name_prefix='AgentContext')
     monitoring = ThreadPoolExecutor(max_workers=2,thread_name_prefix='AgentProtection')
     observations, next_observation = {}, {}
@@ -111,13 +146,14 @@ def loop():
                     if key not in active_ids:
                         feeds.pop(key).stop()
                         cache.pop(key,None)
-                for key, future in list(pending.items()):
-                    if future.done():
-                        try:
-                            future.result()
-                        except Exception:
-                            logger.warning('Automation job failed outside run handler')
-                        pending.pop(key)
+                for lane in (pending, fast_pending):
+                    for key, future in list(lane.items()):
+                        if future.done():
+                            try:
+                                future.result()
+                            except Exception:
+                                logger.warning('Automation job failed outside run handler')
+                            lane.pop(key)
                 for key, future in list(warm.items()):
                     if future.done():
                         try:
@@ -194,25 +230,13 @@ def loop():
                 # reconciled from its existing intent; it is never resubmitted.
                 store.query("""UPDATE qd_agent_automation_runs SET status='expired',finished_at=NOW(),phase='任务已超时'
                     WHERE status IN ('queued','planned','researching','executing') AND expires_at<NOW() RETURNING id""")
-                runs = store.query("""SELECT * FROM qd_agent_automation_runs WHERE status='queued'
-                    OR (status='planned' AND (execute_at IS NULL OR execute_at<=NOW())) ORDER BY id LIMIT 8""")
-                for run in runs:
-                    if len(pending)>=2:
-                        break
-                    if run['id'] in pending:
-                        continue
-                    row = store.task(run['user_id'],run['task_id'])
-                    run = {**run, '_worker_generation': health.generation()}
-                    if run['status']=='planned':
-                        pending[run['id']] = pool.submit(execute,row,run)
-                    elif row['config']['kind']=='price_trigger' and not run['preview']:
-                        context = fast_events.pop(run['id'],None)
-                        if context:
-                            pending[run['id']] = pool.submit(analyze,row,run,*context)
-                        else:
-                            store.update_run(run['id'],status='expired',phase='触发上下文未保留，等待下一次新事件')
-                    else:
-                        pending[run['id']] = pool.submit(analyze,row,run)
+                dispatch_runs(fast_pool, fast_pending, 1, ready_runs(True), fast_events)
+                dispatch_runs(pool, pending, 2, ready_runs(False), fast_events)
+                if fast_events:
+                    live_run_ids = {r['id'] for r in store.query(
+                        "SELECT id FROM qd_agent_automation_runs WHERE status='queued' AND id=ANY(%s)",
+                        (list(fast_events),))}
+                    fast_events = {key: value for key, value in fast_events.items() if key in live_run_ids}
                 if time.monotonic()-last_reconcile>5 and ('reconcile',0) not in warm:
                     warm[('reconcile',0)] = preparation.submit(reconcile_orders)
                     last_reconcile = time.monotonic()
@@ -226,5 +250,6 @@ def loop():
         for feed in feeds.values():
             feed.stop()
         pool.shutdown(wait=False,cancel_futures=True)
+        fast_pool.shutdown(wait=False,cancel_futures=True)
         preparation.shutdown(wait=False,cancel_futures=True)
         monitoring.shutdown(wait=False,cancel_futures=True)

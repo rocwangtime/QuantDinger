@@ -109,3 +109,15 @@ def test_runtime_settings_reload_preserves_process_security_roots(monkeypatch):
         == "live-credential-key-shared-by-all-workers"
     )
     assert os.environ["LLM_PROVIDER"] == "deepseek"
+
+
+def test_observer_role_startup_does_not_launch_other_services(monkeypatch):
+    from flask import Flask
+    from app import startup
+
+    monkeypatch.setenv('QD_PROCESS_ROLE', 'polymarket-observer')
+    monkeypatch.delenv('SKIP_STARTUP_HOOKS', raising=False)
+    monkeypatch.setattr(startup, '_start_trading_support_services', lambda: pytest.fail('trading started'))
+    monkeypatch.setattr(startup, '_start_scheduler_services', lambda **_: pytest.fail('scheduler started'))
+    assert current_process_role() is ProcessRole.POLYMARKET_OBSERVER
+    startup.run_startup_hooks(Flask(__name__))

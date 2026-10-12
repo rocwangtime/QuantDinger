@@ -11,7 +11,7 @@ from app.utils.db import get_db_connection
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("role", choices=("trading", "scheduler", "celery"))
+    parser.add_argument("role", choices=("trading", "scheduler", "celery", "polymarket-observer"))
     parser.add_argument("--max-age", type=int, default=45)
     args = parser.parse_args()
 
