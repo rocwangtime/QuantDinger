@@ -4,7 +4,7 @@ from __future__ import annotations
 import time
 from app.services.automation.review import timestamp
 
-from app.services.automation import store
+from app.services.automation import store, latency
 from app.services.automation.market import account_snapshot
 from app.services.automation.performance import positive
 from app.services.agent_trade_intents import get_policy
@@ -109,6 +109,7 @@ def read(row):
         add('risk', 'pass' if healthy else 'wait', 'risk_healthy' if healthy else 'risk_waiting')
     return {'checked_at': now, 'task_revision': row['revision'], 'configuration_ready': configuration_ready,
             'model': model, 'checks': checks, 'decision_budget': quota, 'account_limits': account_limits,
+            'fast_latency': latency.read(row) if config['kind'] == 'price_trigger' and config['market'] == 'HKStock' else None,
             'scheduler': scheduler, 'connection_check': probe if fresh else None}
 
 

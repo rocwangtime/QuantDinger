@@ -72,6 +72,7 @@ class AutomationReadinessDataSchema(Schema):
     checks = fields.List(fields.Dict(metadata={'description': 'key, status (pass/blocked/wait/unknown), code and optional details'}))
     decision_budget = fields.Dict()
     account_limits = fields.Dict(allow_none=True)
+    fast_latency = fields.Dict(allow_none=True)
     scheduler = fields.Dict()
     connection_check = fields.Dict(allow_none=True, metadata={'description': 'Manual read-only probe, same revision, at most 90 seconds old'})
 
@@ -102,3 +103,9 @@ class AutomationReviewEnvelopeSchema(Schema):
     code = fields.Integer()
     msg = fields.String()
     data = fields.Nested(AutomationReviewDataSchema)
+
+
+class AutomationLatencyEnvelopeSchema(Schema):
+    code = fields.Integer()
+    msg = fields.String()
+    data = fields.Dict(metadata={'description': 'Latest 1000 non-preview runs; stage counts and nearest-rank P50/P95 in ms, null for missing samples. Total measures trigger to terminal decision/skip. Epoch timestamps and elapsed ms are persisted per run in result.fast_latency.'})

@@ -909,6 +909,10 @@ components:
           type: object
           additionalProperties: {}
           nullable: true
+        fast_latency:
+          type: object
+          additionalProperties: {}
+          nullable: true
         scheduler:
           type: object
           additionalProperties: {}
@@ -988,6 +992,21 @@ components:
           type: string
         data:
           $ref: '#/components/schemas/AutomationReviewData'
+      additionalProperties: false
+    AutomationLatencyEnvelope:
+      type: object
+      properties:
+        code:
+          type: integer
+        msg:
+          type: string
+        data:
+          type: object
+          description: Latest 1000 non-preview runs; stage counts and nearest-rank
+            P50/P95 in ms, null for missing samples. Total measures trigger to terminal
+            decision/skip. Epoch timestamps and elapsed ms are persisted per run in
+            result.fast_latency.
+          additionalProperties: {}
       additionalProperties: false
     BillingOrderRequest:
       type: object
@@ -8656,6 +8675,41 @@ paths:
       operationId: getApiAgentAutomationsTaskIdSymbolConfigAudit
       description: List owner-scoped symbol configuration changes, newest first; before
         ID pagination
+      parameters:
+      - name: task_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      x-visibility: internal
+    parameters:
+    - in: path
+      name: task_id
+      required: true
+      schema:
+        type: integer
+        minimum: 0
+  /api/agent-automations/{task_id}/latency:
+    get:
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutomationLatencyEnvelope'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+      tags:
+      - Portfolio
+      summary: Get Api Agent Automations Task Id Latency
+      operationId: getApiAgentAutomationsTaskIdLatency
+      description: HK fast-path nearest-rank P50/P95 milliseconds over latest 1000
+        non-preview runs; incomplete stages excluded
       parameters:
       - name: task_id
         in: path
