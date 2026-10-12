@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import logging
 import time
 from datetime import datetime, timezone
 
@@ -192,7 +193,10 @@ def execute(row, run):
             reserved += sum(max(0,float(r['order_spec']['qty'])-float(r.get('filled_qty') or 0))*float(r['order_spec']['limit_price'])
                             for r in outstanding if r['order_spec']['side']=='buy' and str(r.get('broker_order_id')) not in broker_ids)
             funds = account['funds']
-            cash = min(available_buy_cash(funds, config['market']),
+            available = available_buy_cash(funds, config['market'])
+            if config.get('symbol_params'):
+                available = max(0, available - config['budget']*config['reserve_ratio'] - reserved)
+            cash = min(available,
                        max(0,config['budget']*(1-config['reserve_ratio'])-exposure-reserved))
             if item['action']=='BUY':
                 remaining_buy_cash = cash if remaining_buy_cash is None else min(cash,remaining_buy_cash)
@@ -218,12 +222,17 @@ def execute(row, run):
             maximum = client.get_max_cash_buy(item['symbol'], price) if config['market']=='HKStock' and item['action']=='BUY' else None
             if config.get('symbol_params') and lot != config['symbol_params']['lot_size']:
                 raise ValueError('Configured lot size differs from broker; update symbol settings')
+            rejection = {}
             order = size_order(item,config,price=price,lot=lot,owned_qty=owned.get(item['symbol'],0),
-                               broker_qty=broker_qty,power=cash,open_symbols=open_symbols,max_cash_buy=maximum)
+                               broker_qty=broker_qty,power=cash,open_symbols=open_symbols,max_cash_buy=maximum,rejection=rejection)
             if not order:
+                logging.getLogger(__name__).info('Automation order skipped: %s', rejection['reason_code'])
                 checks.append({'symbol':item['symbol'],'status':'skipped',
+                               'reason_code':rejection['reason_code'],
                                'reason':'价格区间、整手数量、已有挂单或可用资金/持仓不满足'})
                 continue
+            from app.services.automation.symbol_config import validate_order
+            validate_order(order, config, lot=lot, broker_qty=broker_qty, cash=cash)
             order['strategy_version'] = f"automation:{row['id']}:{run['id']}"
             intent = submit_intent(row['user_id'],token,order,f"auto:{run['id']}:{item['symbol']}")
 
@@ -233,6 +242,7 @@ def execute(row, run):
                     FROM qd_agent_automations t JOIN qd_agent_automation_runs r ON r.task_id=t.id
                     WHERE t.id=%s AND r.id=%s FOR UPDATE OF t,r''',(row['id'],run['id']))
                 live = cur.fetchone()
+                validate_order(order, config, lot=lot, broker_qty=broker_qty, cash=cash)
                 if config.get('symbol_params') and order['side'] == 'buy':
                     from app.services.automation.symbol_config import check_daily_buy
                     check_daily_buy(cur, row, order, intent['id'])
@@ -257,7 +267,11 @@ def execute(row, run):
     except Exception as exc:
         from app.services.agent_trade_intents import IntentError
         reason = str(exc) if isinstance(exc,(IntentError,ValueError,TimeoutError)) else '执行状态需要核对'
-        store.update_run(run['id'],status='expired' if utcnow()>=run['expires_at'] else 'blocked',
+        reason_code = reason.split(':', 1)[0] if ':' in reason else 'EXECUTION_BLOCKED'
+        if reason_code not in {'BELOW_ONE_LOT', 'INVALID_LOT', 'PER_ORDER_CAP', 'MAX_POSITION', 'CASH_RESERVE', 'DAILY_BUY_CAP'}:
+            reason_code = 'EXECUTION_BLOCKED'
+        logging.getLogger(__name__).info('Automation execution blocked: %s', reason_code)
+        store.update_run(run['id'],result={**(run.get('result') or {}), 'reason_code': reason_code},status='expired' if utcnow()>=run['expires_at'] else 'blocked',
                          phase=reason[:250],finished_at=utcnow())
     finally:
         if client:
