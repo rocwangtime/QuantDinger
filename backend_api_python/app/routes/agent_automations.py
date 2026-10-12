@@ -9,7 +9,7 @@ import uuid
 
 from flask import Response, g, jsonify, request, stream_with_context
 from app.openapi.blueprint import HumanBlueprint
-from app.openapi.schemas.automations import AutomationDashboardEnvelopeSchema, AutomationReadinessEnvelopeSchema, AutomationReviewEnvelopeSchema
+from app.openapi.schemas.automations import AutomationLatencyEnvelopeSchema, AutomationDashboardEnvelopeSchema, AutomationReadinessEnvelopeSchema, AutomationReviewEnvelopeSchema
 from app.utils.auth import login_required
 from app.services.automation import store
 from app.services.automation.domain import normalize_config, session_schedule
@@ -291,3 +291,13 @@ def update_symbol_settings(task_id):
 def symbol_settings_audit(task_id):
     from app.services.automation.symbol_config import history
     return history(store.task(g.user_id, task_id), request.args.get('before'))
+
+
+@blp.route('/<int:task_id>/latency', methods=['GET'])
+@blp.doc(summary='HK fast-path nearest-rank P50/P95 milliseconds over latest 1000 non-preview runs; incomplete stages excluded')
+@blp.response(200, AutomationLatencyEnvelopeSchema)
+@login_required
+@envelope
+def task_latency(task_id):
+    from app.services.automation.latency import read
+    return read(store.task(g.user_id, task_id))

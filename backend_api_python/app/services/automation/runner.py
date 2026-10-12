@@ -6,7 +6,7 @@ import logging
 import time
 from datetime import datetime, timezone
 
-from app.services.automation import store, health
+from app.services.automation import store, health, latency
 from app.services.automation.domain import available_buy_cash, parse_decision, size_order
 from app.services.automation.market import build_evidence, account_snapshot
 
@@ -19,6 +19,9 @@ def analyze(row, run, evidence=None, trigger_quote=None):
     run = {**run, '_worker_generation': run.get('_worker_generation', health.generation())}
     if store.runtime_changed(run):
         return
+    tracked = latency.enabled(row, run) and bool(run.get('_latency'))
+    if tracked:
+        run['_latency_origin'] = time.monotonic() - max(0, time.time() - run['_latency']['timestamps']['trigger_detected'])
     started = time.monotonic()
     config = row['config']
     deadline = min(run['expires_at'].timestamp(), time.time()+(180 if run['preview'] else config['decision_timeout_seconds']))
@@ -65,6 +68,9 @@ def analyze(row, run, evidence=None, trigger_quote=None):
         store.update_run(run['id'],evidence=evidence,phase='Agent 正在评估持仓与候选机会')
         if cancelled():
             raise TimeoutError('Decision cancelled or expired')
+        if tracked:
+            latency.mark(run, 'context_built')
+            latency.persist(run)
         from app.services.llm import LLMService
         from app.services.llm_cost import build_usage_display
         service = LLMService(selection=config.get('llm_selection') or {})
@@ -89,6 +95,9 @@ def analyze(row, run, evidence=None, trigger_quote=None):
             )},
             {'role':'user','content':store.dumps({'task':config,'evidence':evidence})},
         ]
+        if tracked:
+            latency.mark(run, 'model_call')
+            latency.persist(run)
         research_result = {}
         if prompt_version == 'portfolio-tools-v1':
             from app.services.automation.research import run as research_run
@@ -111,6 +120,9 @@ def analyze(row, run, evidence=None, trigger_quote=None):
             raise TimeoutError('Decision cancelled or expired')
         decision = parse_decision(draft,evidence,config)
         decision.update(research_result)
+        if tracked:
+            latency.mark(run, 'decision')
+            latency.persist(run)
         if evidence.get('event'):
             decision['event'] = evidence['event']
         decision['latency_ms'] = round((time.monotonic()-started)*1000)
@@ -126,6 +138,8 @@ def analyze(row, run, evidence=None, trigger_quote=None):
                          status='planned' if automatic else 'completed',
                          phase='等待交易时段复核' if automatic else '研究完成',
                          finished_at=None if automatic else utcnow())
+        if tracked and not automatic:
+            latency.mark(run, 'submitted')
         if automatic and config['kind'] in {'price_trigger', 'event_portfolio'}:
             execute(row,{**run,'result':decision})
         elif not run['preview'] and not automatic:
@@ -136,6 +150,11 @@ def analyze(row, run, evidence=None, trigger_quote=None):
         # Provider exception bodies may echo credentials; expose bounded classifications only.
         reason = str(exc) if isinstance(exc,(ValueError,TimeoutError)) and type(exc).__module__=='builtins' else '数据或模型调用失败，请检查连接和服务状态'
         store.update_run(run['id'],status=status,phase=reason[:250],finished_at=utcnow())
+
+    finally:
+        if tracked:
+            latency.mark(run, 'finished')
+            latency.persist(run)
 
 
 def execute(row, run):
@@ -252,6 +271,8 @@ def execute(row, run):
             outcome = execute_simulate_intent(row['user_id'],token,intent['id'],before_submit=guard,
                                     deadline_at=run['expires_at'].timestamp(),
                                     submit_guard=lambda: store.submission_guard(row,run,order))
+            if latency.enabled(row, run) and run.get('_latency') and outcome['status'] in {'SUBMITTED', 'PARTIALLY_FILLED', 'FILLED'}:
+                latency.mark(run, 'submitted')
             checks.append({'symbol':item['symbol'],'status':outcome['status'],'intent_id':intent['id']})
             if order['side']=='buy':
                 # Broker positions/cash may lag even an immediate fill. Do not
@@ -261,6 +282,8 @@ def execute(row, run):
                 raise ValueError('订单未确认成功，已停止本次后续提交，请查看成交记录')
         store.update_run(run['id'],status='completed',phase='计划已检查，成交状态持续对账',
                          result={**(run.get('result') or {}),'execution_checks':checks},finished_at=utcnow())
+        if latency.enabled(row, run) and run.get('_latency') and 'submitted' not in run['_latency']['timestamps']:
+            latency.mark(run, 'submitted')  # Valid WAIT/HOLD or skipped plan, no broker order.
         # Preserve the last thesis for the next trading day.
         store.query("UPDATE qd_agent_automations SET state=jsonb_set(state,'{last_plan}',%s::jsonb) WHERE id=%s RETURNING id",
                     (store.dumps(run.get('result') or {}),row['id']),one=True)
@@ -274,5 +297,7 @@ def execute(row, run):
         store.update_run(run['id'],result={**(run.get('result') or {}), 'reason_code': reason_code},status='expired' if utcnow()>=run['expires_at'] else 'blocked',
                          phase=reason[:250],finished_at=utcnow())
     finally:
+        if latency.enabled(row, run):
+            latency.persist(run)
         if client:
             client.disconnect()

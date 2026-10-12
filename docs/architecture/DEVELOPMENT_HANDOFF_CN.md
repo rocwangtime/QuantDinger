@@ -78,6 +78,7 @@
 
 - 快速价格任务维持一次快照判断，不能用多轮工具研究替代。预览可使用较长截止时间，预览延迟不能直接证明实时任务达标。
 - HK Agent P0 item 2 已将非预览 HKStock 价格触发分析及计划执行放入独立单槽 `AgentFastDecision`，普通任务保留两个 `AgentDecision` 槽；保护仍独立。Polymarket observer 改为独立进程。容量隔离不代表真实模型 P95 已达标；部署说明见 [进程职责](PROCESS_ROLES_AND_TASKS.md)。
+- HK Agent P0 item 3：非预览港股价格触发运行在 `result.fast_latency` 保存触发、上下文、模型调用、有效决策、订单/计划提交与终止时间（Unix 秒及耗时毫秒）。认证 `GET /api/agent-automations/{id}/latency` 与 readiness 返回最近 1000 个非预览运行的各阶段 nearest-rank P50/P95、样本数及过期比例；缺失阶段为 null，total 包含失败/跳过的终止耗时。无下单的有效计划也记录提交阶段；这不代表券商成交。离线 PG18 压测默认 32 个并发触发，`HK_LATENCY_STRESS_TRIGGERS`（至少 20）和 `HK_LATENCY_STRESS_P95_MS`（默认 10000 ms）可调整；真实模型/OpenD 的 P95 尚未验收。
 - 盘中组合复核按约 30 秒观测，可能遗漏两次观测之间的波动。
 - 绩效尚未完整计入券商费用、税费、分红和利息；模型费用也保留覆盖缺口。页面没有将这些数据宣称为完整净收益或胜率。
 - 模型工具循环使用应用层 JSON 协议，并非服务商原生 function calling。

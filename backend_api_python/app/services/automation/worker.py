@@ -7,7 +7,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
-from app.services.automation import store, health
+from app.services.automation import store, health, latency
 from app.services.automation.domain import session_schedule, trigger_state
 from app.services.automation.market import PushFeed, build_evidence, account_snapshot
 from app.services.automation.runner import analyze, execute
@@ -97,6 +97,8 @@ def dispatch_runs(pool, pending, capacity, runs, fast_events):
             continue
         row = store.task(run['user_id'], run['task_id'])
         run = {**run, '_worker_generation': health.generation()}
+        if latency.enabled(row, run) and (run.get('result') or {}).get('fast_latency'):
+            run['_latency'] = run['result']['fast_latency']
         if run['status'] == 'planned':
             pending[run['id']] = pool.submit(execute, row, run)
         elif row['config']['kind'] == 'price_trigger' and not run['preview']:
@@ -104,7 +106,7 @@ def dispatch_runs(pool, pending, capacity, runs, fast_events):
             if context:
                 pending[run['id']] = pool.submit(analyze, row, run, *context)
             else:
-                store.update_run(run['id'], status='expired', phase='触发上下文未保留，等待下一次新事件')
+                store.update_run(run['id'], status='expired', phase='触发上下文未保留，等待下一次新事件', finished_at=datetime.now(timezone.utc))
         else:
             pending[run['id']] = pool.submit(analyze, row, run)
 
@@ -219,10 +221,14 @@ def loop():
                     report('实时行情监听中；仅新鲜报价触发分析')
                     fire, state = trigger_state(config,quote,(row['state'] or {}).get('trigger'),time.time())
                     if fire:
+                        detected = time.time()
                         expiry = datetime.fromtimestamp(quote['received_at'],timezone.utc)+timedelta(seconds=15)
                         run = store.create_run(row,f"price:{row['revision']}:{quote['as_of']}",expiry,
                                                state={**row['state'],'trigger':state})
                         if run:
+                            if latency.enabled(row, run):
+                                run['_latency'] = {'timestamps': {'trigger_detected': detected}, 'elapsed_ms': {'trigger_detected': 0}}
+                                latency.persist(run)
                             fast_events[run['id']] = (copy.deepcopy(evidence),quote)
                     elif state != (row['state'] or {}).get('trigger'):
                         store.query("UPDATE qd_agent_automations SET state=jsonb_set(state,'{trigger}',%s::jsonb) WHERE id=%s AND revision=%s RETURNING id",(store.dumps(state),task_id,row['revision']),one=True)

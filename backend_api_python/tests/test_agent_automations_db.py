@@ -714,3 +714,104 @@ def test_fast_admission_not_hidden_by_bulk_backlog(db):
     assert preview_run['id'] not in {r['id'] for r in worker.ready_runs(True)}
     store.update_run(fast_run['id'], status='expired')
     assert worker.ready_runs(True) == []
+
+
+def test_hk_fast_latency_concurrent_triggers_not_starved(db, monkeypatch):
+    """Real PG ledger and runner, offline model/broker, saturated bulk pool."""
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    from app.services.automation import latency
+
+    count = int(os.environ.get('HK_LATENCY_STRESS_TRIGGERS', '32'))
+    bound = float(os.environ.get('HK_LATENCY_STRESS_P95_MS', '10000'))
+    assert count >= 20 and bound > 0
+    release = threading.Event()
+    barrier = threading.Barrier(3)
+
+    class Model:
+        provider = SimpleNamespace(value='openai')
+        last_provider, last_model, last_usage = 'openai', 'offline', {}
+        def __init__(self, **_): pass
+        def stream_llm_api_cancellable(self, messages, cancelled, **_):
+            assert not cancelled()
+            time.sleep(.002)
+            yield '{"summary":"观察","items":[{"symbol":"01810.HK","action":"WAIT","target_weight":0}]}'
+
+    monkeypatch.setattr('app.services.llm.LLMService', Model)
+    monkeypatch.setattr(runner, 'execute', lambda *_: pytest.fail('Advisory plan cannot execute'))
+    monkeypatch.setattr('app.services.futu_agent_execution._load_client', lambda *_: pytest.fail('No network'))
+    def trigger(i):
+        row = create(market='HKStock', symbols=['01810.HK'], kind='price_trigger',
+                     trigger={'type': 'price_above', 'price': 20})
+        row = store.set_active(900001, row['id'], True)
+        run = store.create_run(row, f'stress:{i}', datetime.now(timezone.utc)+timedelta(seconds=15))
+        latency.mark(run, 'trigger_detected')
+        latency.persist(run)
+        evidence = {'as_of': time.time(), 'account': {'as_of': time.time()},
+                    'instruments': {'01810.HK': {'price': 21}}}
+        quote = {'price': 21, 'as_of': time.time(), 'received_at': time.time()}
+        return run, (evidence, quote)
+
+    def slow():
+        barrier.wait(timeout=5)
+        release.wait(timeout=30)
+
+    with ThreadPoolExecutor(max_workers=2) as bulk, ThreadPoolExecutor(max_workers=1) as fast:
+        try:
+            blocked = [bulk.submit(slow) for _ in range(2)]
+            barrier.wait(timeout=5)
+            with ThreadPoolExecutor(max_workers=8) as producers:
+                events = list(producers.map(trigger, range(count)))
+            runs = [run for run, _ in events]
+            contexts = {run['id']: context for run, context in events}
+            pending = {}
+            deadline = time.monotonic()+20
+            while runs or pending:
+                assert time.monotonic() < deadline, 'Fast slot starved'
+                for key, future in list(pending.items()):
+                    if future.done():
+                        future.result()
+                        pending.pop(key)
+                        runs = [run for run in runs if run['id'] != key]
+                worker.dispatch_runs(fast, pending, 1, runs, contexts)
+                assert len(pending) <= 1
+                time.sleep(.001)
+            assert all(not future.done() for future in blocked)
+            rows = store.query('SELECT result,status FROM qd_agent_automation_runs ORDER BY id')
+            assert len(rows) == count and all(row['status'] == 'completed' for row in rows)
+            metrics = latency.summarize(rows)
+            assert metrics['stages_ms']['total']['count'] == count
+            assert metrics['stages_ms']['total']['p95'] <= bound, metrics
+            for stage in latency.STAGES[1:]:
+                assert metrics['stages_ms'][stage]['count'] == count
+            assert latency.read(store.task(900001, events[0][0]['task_id']))['sampled_runs'] == 1
+            print(f'HK stress: {count} plans, P95={metrics["stages_ms"]["total"]["p95"]} ms, bound={bound} ms')
+        finally:
+            release.set()
+
+
+def test_hk_latency_failed_model_has_no_submission(db, monkeypatch):
+    from app.services.automation import latency
+    row = create(market='HKStock', symbols=['01810.HK'], kind='price_trigger',
+                 trigger={'type': 'price_above', 'price': 20})
+    row = store.set_active(900001, row['id'], True)
+    run = run_for(row, preview=False)
+    latency.mark(run, 'trigger_detected')
+    latency.persist(run)
+    evidence = {'as_of': time.time(), 'account': {'as_of': time.time()},
+                'instruments': {'01810.HK': {'price': 21}}}
+    class Model:
+        provider = SimpleNamespace(value='openai')
+        def __init__(self, **_): pass
+        def stream_llm_api_cancellable(self, *_a, **_k):
+            raise RuntimeError('provider body must not be logged')
+    monkeypatch.setattr('app.services.llm.LLMService', Model)
+    runner.analyze(row, run, evidence, {'price': 21, 'as_of': time.time()})
+    saved = store.query('SELECT result,status FROM qd_agent_automation_runs WHERE id=%s', (run['id'],), one=True)
+    assert saved['status'] == 'failed'
+    assert set(saved['result']['fast_latency']['timestamps']) == {'trigger_detected', 'context_built', 'model_call', 'finished'}
+    metrics = latency.read(row)
+    assert metrics['stages_ms']['total']['count'] == 1
+    assert metrics['stages_ms']['decision'] == {'count': 0, 'p50': None, 'p95': None}
+    assert metrics['stages_ms']['submitted']['count'] == 0
+    assert latency.read({**row, 'user_id': 900002})['sampled_runs'] == 0
