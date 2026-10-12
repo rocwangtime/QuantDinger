@@ -1008,6 +1008,39 @@ components:
             result.fast_latency.
           additionalProperties: {}
       additionalProperties: false
+    AutomationDailyReportEnvelope:
+      type: object
+      properties:
+        code:
+          type: integer
+        msg:
+          type: string
+        data:
+          type: object
+          description: generated_at and nullable report. HK local day; task/symbol
+            decisions, triggers, risk transitions, latency nearest-rank P50/P95, scored/missing
+            coverage and per-horizon gross hypothetical PnL. WAIT excluded from hit
+            denominator; fees/taxes excluded. Equity change covers observed samples
+            only.
+          additionalProperties: {}
+      additionalProperties: false
+    AutomationScoresEnvelope:
+      type: object
+      properties:
+        code:
+          type: integer
+        msg:
+          type: string
+        data:
+          type: array
+          items:
+            type: object
+            description: Immutable decision inputs, fixed due_at, checked_at, nullable
+              outcome. Unadjusted Futu minute closes; intraday horizons round up less
+              than 60 seconds, session closes exact. Missing history remains null;
+              fill/slippage fields update after cumulative reconciliation.
+            additionalProperties: {}
+      additionalProperties: false
     BillingOrderRequest:
       type: object
       properties:
@@ -8720,6 +8753,82 @@ paths:
     parameters:
     - in: path
       name: task_id
+      required: true
+      schema:
+        type: integer
+        minimum: 0
+  /api/agent-automations/{task_id}/daily-report:
+    get:
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutomationDailyReportEnvelope'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+      tags:
+      - Portfolio
+      summary: Read persisted HK daily decision scores and risk events; gross hypothetical
+        PnL
+      parameters:
+      - name: day
+        in: query
+        required: true
+        schema:
+          type: string
+          format: date
+        description: HK local date (YYYY-MM-DD)
+      - name: task_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      operationId: getApiAgentAutomationsTaskIdDailyReport
+      x-visibility: internal
+    parameters:
+    - in: path
+      name: task_id
+      required: true
+      schema:
+        type: integer
+        minimum: 0
+  /api/agent-automations/runs/{run_id}/scores:
+    get:
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutomationScoresEnvelope'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+      tags:
+      - Portfolio
+      summary: Get Api Agent Automations Runs Run Id Scores
+      operationId: getApiAgentAutomationsRunsRunIdScores
+      description: Read owner-scoped persisted HK decision horizon scores; missing
+        outcomes remain null
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      x-visibility: internal
+    parameters:
+    - in: path
+      name: run_id
       required: true
       schema:
         type: integer

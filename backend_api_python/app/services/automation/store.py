@@ -26,6 +26,7 @@ def ensure_schema():
         ensure_agent_gateway_schema()
         sql = (Path(__file__).resolve().parents[3] / 'migrations/20261004_agent_automation.sql').read_text()
         sql += (Path(__file__).resolve().parents[3] / 'migrations/20261006_agent_performance.sql').read_text()
+        sql += (Path(__file__).resolve().parents[3] / 'migrations/20261012_agent_scoring.sql').read_text()
         with get_db_connection() as db:
             cur = db.cursor()
             cur.execute(sql)

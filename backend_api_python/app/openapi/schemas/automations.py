@@ -109,3 +109,15 @@ class AutomationLatencyEnvelopeSchema(Schema):
     code = fields.Integer()
     msg = fields.String()
     data = fields.Dict(metadata={'description': 'Latest 1000 non-preview runs; stage counts and nearest-rank P50/P95 in ms, null for missing samples. Total measures trigger to terminal decision/skip. Epoch timestamps and elapsed ms are persisted per run in result.fast_latency.'})
+
+
+class AutomationDailyReportEnvelopeSchema(Schema):
+    code = fields.Integer()
+    msg = fields.String()
+    data = fields.Dict(metadata={'description': 'generated_at and nullable report. HK local day; task/symbol decisions, triggers, risk transitions, latency nearest-rank P50/P95, scored/missing coverage and per-horizon gross hypothetical PnL. WAIT excluded from hit denominator; fees/taxes excluded. Equity change covers observed samples only.'})
+
+
+class AutomationScoresEnvelopeSchema(Schema):
+    code = fields.Integer()
+    msg = fields.String()
+    data = fields.List(fields.Dict(metadata={'description': 'Immutable decision inputs, fixed due_at, checked_at, nullable outcome. Unadjusted Futu minute closes; intraday horizons round up less than 60 seconds, session closes exact. Missing history remains null; fill/slippage fields update after cumulative reconciliation.'}))

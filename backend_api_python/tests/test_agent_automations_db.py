@@ -33,12 +33,15 @@ def db(monkeypatch):
     conn=psycopg2.connect(url)
     conn.autocommit=True
     with conn.cursor() as cur:
+        cur.execute('SHOW server_version_num')
+        assert 180000 <= int(cur.fetchone()[0]) < 190000, 'Tests require local PostgreSQL 18'
         cur.execute(f'CREATE SCHEMA {schema}')
         cur.execute(f'SET search_path TO {schema}')
         cur.execute((Path(__file__).parents[1]/'migrations/init.sql').read_text())
         cur.execute((Path(__file__).parents[1]/'migrations/20261004_agent_automation.sql').read_text())
         cur.execute((Path(__file__).parents[1]/'migrations/20261006_agent_performance.sql').read_text())
         cur.execute((Path(__file__).parents[1]/'migrations/20261012_agent_symbol_config.sql').read_text())
+        cur.execute((Path(__file__).parents[1]/'migrations/20261012_agent_scoring.sql').read_text())
         cur.execute("INSERT INTO qd_users(id,username,password_hash) VALUES(900001,'automation-fixture','not-a-login')")
 
     @contextmanager

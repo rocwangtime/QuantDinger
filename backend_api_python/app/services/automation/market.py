@@ -68,7 +68,7 @@ def build_evidence(row, *, news=True, cancelled=lambda:False):
             today = datetime.now(zone).date()
             bars = [b for b in bars if datetime.fromtimestamp(b['time'],zone).date()<today][-60:]
             item = {'price':price,'quote_as_of':provenance['as_of'],'source':'futu',
-                    'daily_bars':bars,'news':[],'news_status':'not_requested'}
+                    'lot_size': quote.get('lot_size'), 'daily_bars':bars,'news':[],'news_status':'not_requested'}
             if config['kind']=='price_trigger':
                 recent = client.get_history_kline(code,market_type=config['market'],ktype='K_1M',
                     start=(today-timedelta(days=3)).isoformat(),max_count=3000)

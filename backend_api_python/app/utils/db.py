@@ -370,6 +370,10 @@ def _apply_init_sql(logger, *, strict: bool = False):
                 path=Path(__file__).resolve().parent.parent.parent / "migrations" / "20261006_agent_performance.sql",
             )
             _apply_migration_component(
+                conn, logger, name="hk-agent-scoring-20261012",
+                path=Path(__file__).resolve().parent.parent.parent / "migrations" / "20261012_agent_scoring.sql",
+            )
+            _apply_migration_component(
                 conn,
                 logger,
                 name="market-symbols-master",
