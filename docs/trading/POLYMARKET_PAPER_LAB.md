@@ -131,7 +131,7 @@ when it returns true. The frontend `canEnableLive()` has the same fail-closed
 rule. This probe is informational and never enables trading; the feature stays
 paper-only.
 
-The optional observer is disabled by default and starts only in the scheduler
+The optional observer is disabled by default and starts only in the dedicated `polymarket-observer`
 leader process. It discovers standard YES/NO, non-negative-risk markets using
 the existing engine validation and fee metadata, then maintains public books
 from the documented CLOB market WebSocket using the already locked
@@ -293,7 +293,7 @@ are no longer requested. `WS_SHARDS=1` uses one connection; 3–8 use stable CRC
 market-ID assignment, keeping both outcomes together. Reconnects affect only
 the failed shard and clear that shard's depth. REST fallback remains available.
 
-Status uses the existing JSON status row and scheduler heartbeat, with cumulative
+Status uses the existing JSON status row and `polymarket-observer` heartbeat, with cumulative
 WebSocket messages/rate, age, connections, reconnects, close reason counters,
 slow-consumer count, writer queue depth/high-water, operation/drop/coalesce
 counts, oldest pending/in-flight lag, last batch time, last write error, evaluator
@@ -325,7 +325,7 @@ orders, credentials, additional dependencies or HTTP schema changes are added.
 ## Continuous paper arbitrage account (2026-10-11)
 
 `POLYMARKET_PAPER_ACCOUNT_ENABLED=false` is a separate default-off gate. Both
-this flag and `POLYMARKET_OBSERVER_ENABLED` must be enabled in scheduler-worker.
+this flag and `POLYMARKET_OBSERVER_ENABLED` must be enabled in polymarket-observer.
 The independent bounded experiments remain available. The new account is a
 single shared virtual account (`account_id=global`), visible to authenticated
 users, with no connection to funded strategy accounts. Defaults are 5,000 virtual
@@ -481,17 +481,15 @@ are in `backend_api_python/env.example`:
 
 ### Observer process isolation follow-up
 
-No process split or container is introduced in this change. A separate observer
-command requires coordinated scheduler ownership / heartbeat and shutdown
-changes, beyond a small flag-only modification. A concrete follow-up is to add
-`SCHEDULER_MODE=polymarket-observer`: acquire a dedicated observer leader lease,
-start only discovery, four public WS shards, evaluator, bounded writer and paper
-worker; emit a separate observer heartbeat; disable observer startup in the
-normal scheduler when that mode is deployed. Run it as a second command in the
-existing worker service, with no new container. Validate lease failover,
-single-account advisory-lock exclusion, stop/drain and existing scheduler tests
-before changing production process ownership. Further paper research can retain
-versioned replay implementations and tune competitor shares / history bounds
+HK Agent P0 item 2 now implements this process split with
+`python -m app.commands.polymarket_observer` and a Compose `polymarket-observer`
+service. It owns a dedicated renewable leader lease, publishes observer snapshot
+metadata under its own worker heartbeat, and drains through the existing `stop()`
+on shutdown or lease loss. Scheduler hosting defaults off and Compose pins
+`POLYMARKET_OBSERVER_IN_SCHEDULER=false`. Paper-only behavior and account exclusion
+remain unchanged. See [process roles and deployment notes](../architecture/PROCESS_ROLES_AND_TASKS.md).
+
+Further paper research can retain versioned replay implementations and tune competitor shares / history bounds
 using measured feed rates; no live execution is part of this account.
 
 Validation for this account release: 43 new account unit/PG tests passed; the

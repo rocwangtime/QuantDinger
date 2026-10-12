@@ -38,6 +38,7 @@ def db(monkeypatch):
         cur.execute((Path(__file__).parents[1]/'migrations/init.sql').read_text())
         cur.execute((Path(__file__).parents[1]/'migrations/20261004_agent_automation.sql').read_text())
         cur.execute((Path(__file__).parents[1]/'migrations/20261006_agent_performance.sql').read_text())
+        cur.execute((Path(__file__).parents[1]/'migrations/20261012_agent_symbol_config.sql').read_text())
         cur.execute("INSERT INTO qd_users(id,username,password_hash) VALUES(900001,'automation-fixture','not-a-login')")
 
     @contextmanager
@@ -691,3 +692,25 @@ def test_old_queued_callbacks_cannot_claim_durable_work_after_restart(db, monkey
     states = store.query('SELECT id,status FROM qd_agent_automation_runs ORDER BY id')
     assert [r['status'] for r in states] == ['queued', 'planned']
     health.stopped()
+
+
+def test_fast_admission_not_hidden_by_bulk_backlog(db):
+    bulk_ids = []
+    for _ in range(10):
+        row = create()
+        bulk_ids.append(run_for(row)['id'])
+    fast_row = create(kind='price_trigger', market='HKStock', symbols=['01810'], trigger={'type': 'price_above', 'price': 10})
+    store.query('UPDATE qd_agent_automations SET active=TRUE WHERE id=%s RETURNING id', (fast_row['id'],))
+    fast_row = store.task(900001, fast_row['id'])
+    fast_run = run_for(fast_row, preview=False)
+    assert [r['id'] for r in worker.ready_runs(True)] == [fast_run['id']]
+    assert [r['id'] for r in worker.ready_runs(False)] == bulk_ids[:8]
+    store.update_run(fast_run['id'], status='planned')
+    assert [r['id'] for r in worker.ready_runs(True)] == [fast_run['id']]
+
+    preview_row = create(kind='price_trigger', market='HKStock', symbols=['00700'],
+                         trigger={'type': 'price_above', 'price': 10})
+    preview_run = run_for(preview_row)
+    assert preview_run['id'] not in {r['id'] for r in worker.ready_runs(True)}
+    store.update_run(fast_run['id'], status='expired')
+    assert worker.ready_runs(True) == []

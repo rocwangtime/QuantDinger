@@ -29,6 +29,11 @@ services:
     mem_limit: ${SCHEDULER_WORKER_MEMORY_LIMIT:-1g}
     cpus: ${SCHEDULER_WORKER_CPU_LIMIT:-1.0}
 
+  polymarket-observer:
+    <<: *locked-backend
+    mem_limit: ${POLYMARKET_OBSERVER_MEMORY_LIMIT:-1g}
+    cpus: ${POLYMARKET_OBSERVER_CPU_LIMIT:-1.0}
+
   celery-worker:
     <<: *locked-backend
     mem_limit: ${CELERY_WORKER_MEMORY_LIMIT:-2g}

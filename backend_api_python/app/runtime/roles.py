@@ -11,6 +11,7 @@ class ProcessRole(str, Enum):
     API = "api"
     TRADING = "trading"
     SCHEDULER = "scheduler"
+    POLYMARKET_OBSERVER = "polymarket-observer"
     CELERY = "celery"
 
 
