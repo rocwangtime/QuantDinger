@@ -201,13 +201,23 @@ def execute(row, run):
             if not quote.get('simulate_execution_eligible'):
                 raise ValueError('Fresh regular-session SIMULATE quote is unavailable')
             price = float(quote['price'])
+            if config.get('symbol_params') and item['action'] == 'BUY':
+                from app.services.automation.domain import session_schedule
+                closing = session_schedule(config, utcnow())['close_at']
+                if (closing-utcnow()).total_seconds() <= config['symbol_params']['blackout_close_minutes']*60:
+                    raise ValueError('Symbol close blackout prevents new purchases')
             if config['kind']=='price_trigger' and not run.get('event_key', '').startswith('protection:'):
                 trigger = config['trigger']
                 still_met = price>=trigger['price'] if trigger['type']=='price_above' else price<=trigger['price']
+                if config.get('symbol_params'):
+                    from app.services.automation.symbol_trigger import condition
+                    still_met = condition(config['symbol_params'], price, (row['state'].get('trigger') or {}).get('reference') or {})
                 if not still_met:
                     raise ValueError('Trigger condition no longer holds')
             lot = client.get_lot_size(item['symbol']) if config['market']=='HKStock' else 1
             maximum = client.get_max_cash_buy(item['symbol'], price) if config['market']=='HKStock' and item['action']=='BUY' else None
+            if config.get('symbol_params') and lot != config['symbol_params']['lot_size']:
+                raise ValueError('Configured lot size differs from broker; update symbol settings')
             order = size_order(item,config,price=price,lot=lot,owned_qty=owned.get(item['symbol'],0),
                                broker_qty=broker_qty,power=cash,open_symbols=open_symbols,max_cash_buy=maximum)
             if not order:
@@ -223,6 +233,9 @@ def execute(row, run):
                     FROM qd_agent_automations t JOIN qd_agent_automation_runs r ON r.task_id=t.id
                     WHERE t.id=%s AND r.id=%s FOR UPDATE OF t,r''',(row['id'],run['id']))
                 live = cur.fetchone()
+                if config.get('symbol_params') and order['side'] == 'buy':
+                    from app.services.automation.symbol_config import check_daily_buy
+                    check_daily_buy(cur, row, order, intent['id'])
                 if not live or not live['active'] or live['revision']!=run['revision'] or live['cancel_requested'] or live['expires_at']<=utcnow():
                     raise TimeoutError('Task paused, changed or expired before submission')
 

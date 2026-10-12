@@ -8574,6 +8574,99 @@ paths:
       schema:
         type: integer
         minimum: 0
+  /api/agent-automations/{task_id}/symbol-config:
+    get:
+      responses:
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      tags:
+      - Portfolio
+      summary: Read effective HK SIMULATE symbol parameters and task revision
+      operationId: getApiAgentAutomationsTaskIdSymbolConfig
+      parameters:
+      - name: task_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      x-visibility: internal
+    parameters:
+    - in: path
+      name: task_id
+      required: true
+      schema:
+        type: integer
+        minimum: 0
+    put:
+      responses:
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      tags:
+      - Portfolio
+      summary: Validate and audit paused HK symbol settings; never grant trading authorization
+      operationId: putApiAgentAutomationsTaskIdSymbolConfig
+      parameters:
+      - name: task_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      x-visibility: internal
+  /api/agent-automations/{task_id}/symbol-config/audit:
+    get:
+      responses:
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      tags:
+      - Portfolio
+      summary: Get Api Agent Automations Task Id Symbol Config Audit
+      operationId: getApiAgentAutomationsTaskIdSymbolConfigAudit
+      description: List owner-scoped symbol configuration changes, newest first; before
+        ID pagination
+      parameters:
+      - name: task_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      x-visibility: internal
+    parameters:
+    - in: path
+      name: task_id
+      required: true
+      schema:
+        type: integer
+        minimum: 0
   /api/ibkr/status:
     get:
       responses:

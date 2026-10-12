@@ -150,6 +150,9 @@ def loop():
                             store.create_run(row,'session:'+schedule['session'],schedule['expires_at'],schedule['execute_at'])
                         report('等待盘前分析窗口' if not schedule['due'] else '盘前分析窗口已到')
                         continue
+                    if config.get('symbol_params') and (row['state'] or {}).get('risk', {}).get('halted'):
+                        report('风险保护已锁定，等待人工确认')
+                        continue
                     # No regular-session signal or execution during HK lunch/closures.
                     clock = market_clock(config['market'],now)
                     if not clock.get('is_open'):
