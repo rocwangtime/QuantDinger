@@ -198,7 +198,8 @@ def test_hk_runner_rejects_unaffordable_lot_before_intent(db, monkeypatch, cash,
     run['result'] = {'items': [item]}
     store.update_run(run['id'], status='planned', result=run['result'])
     client = MagicMock()
-    client.get_simulate_execution_quote.return_value = dict(simulate_execution_eligible=True, price=price)
+    client.get_simulate_execution_quote.return_value = dict(simulate_execution_eligible=True, price=price, bid=price, ask=price,
+        as_of=datetime.now(timezone.utc).timestamp())
     client.get_lot_size.return_value = 200
     client.get_max_cash_buy.return_value = 10000
     monkeypatch.setattr('app.services.futu_agent_execution._load_client', lambda *_: client)
@@ -209,4 +210,54 @@ def test_hk_runner_rejects_unaffordable_lot_before_intent(db, monkeypatch, cash,
     runner.execute(row, run)
     saved = store.query('SELECT * FROM qd_agent_automation_runs WHERE id=%s', (run['id'],), one=True)
     assert saved['result']['execution_checks'][0]['reason_code'] == expected
+    client.place_order.assert_not_called()
+
+
+@pytest.mark.parametrize('action,expected', [('BUY', 25.02), ('EXIT', 24.98)])
+def test_hk_bid_ask_limit_is_used_for_sizing_and_intent(db, monkeypatch, action, expected):
+    from unittest.mock import MagicMock
+    from datetime import timedelta
+    from app.services.automation import runner
+    row = create()
+    c = row['config']
+    c['execution_mode'] = 'paper_auto'
+    c['risk']['enabled'] = False
+    store.query('UPDATE qd_agent_automations SET config=%s::jsonb WHERE id=%s RETURNING id',
+                (store.dumps(c), row['id']), one=True)
+    row = store.set_active(900001, row['id'], True)
+    run = store.create_run(row, 'protection:test', datetime.now(timezone.utc)+timedelta(seconds=60))
+    run['result'] = {'items': [dict(symbol='01810.HK', action=action, target_weight=.6,
+                                   min_price=24, max_price=26, reason='fixture')]}
+    store.update_run(run['id'], status='planned', result=run['result'])
+    client = MagicMock()
+    client.get_simulate_execution_quote.return_value = dict(simulate_execution_eligible=True,
+        price=25, bid=24.98, ask=25.02, as_of=datetime.now(timezone.utc).timestamp())
+    client.get_lot_size.return_value = 200
+    client.get_max_cash_buy.return_value = 10000
+    monkeypatch.setattr('app.services.futu_agent_execution._load_client', lambda *_: client)
+    monkeypatch.setattr(store, 'owned_quantities', lambda _: {'01810.HK': 400})
+    monkeypatch.setattr(runner, 'account_snapshot', lambda *_: dict(
+        positions=[dict(symbol='01810.HK', quantity=400, side='long', marketValue=10000)],
+        open_orders=[], funds=dict(cash=100000, power=0)))
+    orders = []
+    def submit(_user, _token, order, _key):
+        orders.append(dict(order))
+        return {'id': 1}
+    def execute(*_args, **kwargs):
+        with store.get_db_connection() as connection:
+            with connection.cursor() as cur:
+                kwargs['before_submit'](cur)
+        return {'status': 'SUBMITTED'}
+    monkeypatch.setattr('app.services.agent_trade_intents.submit_intent', submit)
+    monkeypatch.setattr('app.services.futu_agent_execution.execute_simulate_intent', execute)
+    runner.execute(row, run)
+    saved = store.query('SELECT * FROM qd_agent_automation_runs WHERE id=%s', (run['id'],), one=True)
+    assert saved['status'] == 'completed'
+    assert len(orders) == 1 and orders[0]['limit_price'] == expected
+    assert orders[0]['qty'] % 200 == 0
+    assert orders[0]['qty'] * expected <= c['max_order_notional']
+    if action == 'BUY':
+        client.get_max_cash_buy.assert_called_once_with('01810.HK', expected)
+    else:
+        assert orders[0]['qty'] == 400
     client.place_order.assert_not_called()

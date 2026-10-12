@@ -5,6 +5,7 @@ import re
 
 from app.services.automation import store
 from app.services.automation.domain import number
+from app.services.automation.limit_price import DEFAULTS as PRICE_DEFAULTS, settings
 
 DEFAULTS = dict(budget=100000, per_order_cap=20000, daily_buy_cap=40000,
                 cash_reserve_pct=20, max_position=60000, prev_close_pct=2,
@@ -12,6 +13,9 @@ DEFAULTS = dict(budget=100000, per_order_cap=20000, daily_buy_cap=40000,
                 max_triggers_day=8, blackout_auction=True, blackout_lunch=True,
                 blackout_close_minutes=5, stop_loss_pct=5, daily_loss_pct=2,
                 max_drawdown_pct=8, model='deepseek-v4-1-flash', mode='plan_only', lot_size=200, reference_price=None)
+
+
+DEFAULTS.update(PRICE_DEFAULTS)
 
 
 def eligible(row):
@@ -22,9 +26,10 @@ def eligible(row):
 
 
 def validate(raw):
-    if not isinstance(raw, dict) or set(raw) != set(DEFAULTS):
+    if not isinstance(raw, dict) or (set(raw) - set(DEFAULTS)) or (set(DEFAULTS) - set(raw) - set(PRICE_DEFAULTS)):
         raise ValueError('Provide all symbol settings; unknown fields are forbidden')
-    p = dict(raw)
+    p = {**PRICE_DEFAULTS, **raw}
+    p.update(settings(p))
     for key in ('blackout_auction', 'blackout_lunch'):
         if not isinstance(p[key], bool):
             raise ValueError('Blackout switches must be boolean')

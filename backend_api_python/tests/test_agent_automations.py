@@ -186,7 +186,8 @@ def test_multi_symbol_run_cannot_reuse_cash_when_broker_snapshot_lags(monkeypatc
     monkeypatch.setattr(runner,'account_snapshot',lambda *_:{'funds':{'cash':1000,'power':1000},
         'positions':[{'symbol':'QQQ','side':'long','quantity':4,'marketValue':400}], 'open_orders':[]})
     client=MagicMock()
-    client.get_simulate_execution_quote.return_value={'simulate_execution_eligible':True,'price':100}
+    client.get_simulate_execution_quote.return_value={'simulate_execution_eligible':True,'price':100,'bid':100,'ask':100,
+        'as_of':datetime.now(timezone.utc).timestamp()}
     monkeypatch.setattr('app.services.futu_agent_execution._load_client',lambda *_:client)
     orders=[]
     def submit(_user,_token,order,_key):
@@ -223,7 +224,11 @@ def test_us_cash_power_behavior_unchanged(power, expected):
     (1000, 0, [400, 100]), (150, 0, [100, 100]), (0, 0, []),
     (1000, 100, [400]),
 ])
-def test_hk_run_preserves_reserve_exposure_and_lagging_cash(monkeypatch, maximum, pending, expected):
+@pytest.mark.parametrize('unsafe_quote,skip_code', [
+    ({}, None), ({'bid': None}, 'HK_QUOTE_MISSING'),
+    ({'as_of': 1}, 'HK_QUOTE_STALE'), ({'ask': 110}, 'HK_SPREAD_TOO_WIDE'),
+    ({'_error': True}, 'HK_QUOTE_UNAVAILABLE')])
+def test_hk_run_preserves_reserve_exposure_and_lagging_cash(monkeypatch, maximum, pending, expected, unsafe_quote, skip_code):
     from app.services.automation import runner
     cfg=config(market='HKStock',symbols=['01810','00700'],budget=100000,max_order_notional=50000,max_daily_notional=100000,execution_mode='paper_auto',max_weight=.5)
     row={'id':1,'token_id':4,'user_id':1,'config':cfg,'revision':1,'state':{}}
@@ -243,8 +248,11 @@ def test_hk_run_preserves_reserve_exposure_and_lagging_cash(monkeypatch, maximum
     client=MagicMock()
     client.get_lot_size.return_value=100
     client.get_max_cash_buy.return_value=maximum
-    client.get_simulate_execution_quote.return_value={'simulate_execution_eligible':True,'price':100}
+    client.get_simulate_execution_quote.return_value={'simulate_execution_eligible':True,'price':100,'bid':100,'ask':100,
+        'as_of':datetime.now(timezone.utc).timestamp(), **unsafe_quote}
     monkeypatch.setattr('app.services.futu_agent_execution._load_client',lambda *_:client)
+    if unsafe_quote.get('_error'):
+        client.get_simulate_execution_quote.side_effect = RuntimeError('quote provider unavailable')
     orders=[]
     def submit(_user,_token,order,_key):
         orders.append(order)
@@ -252,6 +260,10 @@ def test_hk_run_preserves_reserve_exposure_and_lagging_cash(monkeypatch, maximum
     monkeypatch.setattr('app.services.agent_trade_intents.submit_intent',submit)
     monkeypatch.setattr('app.services.futu_agent_execution.execute_simulate_intent',lambda *_a,**_k:{'status':'FILLED'})
     runner.execute(row,run)
-    assert [o['qty'] for o in orders]==expected
+    if skip_code:
+        assert not orders
+        assert all(c['reason_code'] == skip_code for c in updates[-1]['result']['execution_checks'])
+    else:
+        assert [o['qty'] for o in orders]==expected
     assert sum(o['qty']*o['limit_price'] for o in orders)+40000+pending*100 <= 90000
     assert updates[-1]['status']=='completed'

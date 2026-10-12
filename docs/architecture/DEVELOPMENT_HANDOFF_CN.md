@@ -79,6 +79,7 @@
 - 快速价格任务维持一次快照判断，不能用多轮工具研究替代。预览可使用较长截止时间，预览延迟不能直接证明实时任务达标。
 - HK Agent P0 item 2 已将非预览 HKStock 价格触发分析及计划执行放入独立单槽 `AgentFastDecision`，普通任务保留两个 `AgentDecision` 槽；保护仍独立。Polymarket observer 改为独立进程。容量隔离不代表真实模型 P95 已达标；部署说明见 [进程职责](PROCESS_ROLES_AND_TASKS.md)。
 - HK Agent P0 item 3：非预览港股价格触发运行在 `result.fast_latency` 保存触发、上下文、模型调用、有效决策、订单/计划提交与终止时间（Unix 秒及耗时毫秒）。认证 `GET /api/agent-automations/{id}/latency` 与 readiness 返回最近 1000 个非预览运行的各阶段 nearest-rank P50/P95、样本数及过期比例；缺失阶段为 null，total 包含失败/跳过的终止耗时。无下单的有效计划也记录提交阶段；这不代表券商成交。离线 PG18 压测默认 32 个并发触发，`HK_LATENCY_STRESS_TRIGGERS`（至少 20）和 `HK_LATENCY_STRESS_P95_MS`（默认 10000 ms）可调整；真实模型/OpenD 的 P95 尚未验收。
+- HK Agent P0 item 4：港股限价买入取 ask、卖出取 bid；可在单股设置中选 midpoint ± ticks。`max_slippage_pct` 默认 0.5、`spread_limit_pct` 默认 1，单位为相对 midpoint 的百分数；`limit_offset_ticks` 默认 null（使用最优报价），整数 0–100。旧设置自动使用默认值。按 [HKEX 当前股票 spread table 01](https://www.hkex.com.hk/Services/Trading/Securities/Overview/Trading-Mechanism/Reduction-of-Minimum-Spreads?sc_lang=en)（2026-08-03 Phase 2）买向下、卖向上取整，保持滑点上限和 AI 价格区间；数量、资金及整手使用最终限价计算。缺失、超过 5 秒、未来时间戳、倒挂或过宽报价以 `HK_QUOTE_*` / `HK_SPREAD_TOO_WIDE` 跳过，不回退 last price。此表适用于股票，不适用于 ETP、债券及结构性产品；真实 OpenD 执行尚待验收。
 - 盘中组合复核按约 30 秒观测，可能遗漏两次观测之间的波动。
 - 绩效尚未完整计入券商费用、税费、分红和利息；模型费用也保留覆盖缺口。页面没有将这些数据宣称为完整净收益或胜率。
 - 模型工具循环使用应用层 JSON 协议，并非服务商原生 function calling。

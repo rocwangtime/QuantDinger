@@ -221,7 +221,23 @@ def execute(row, run):
             if item['action']=='BUY':
                 remaining_buy_cash = cash if remaining_buy_cash is None else min(cash,remaining_buy_cash)
                 cash = remaining_buy_cash
-            quote = client.get_simulate_execution_quote(item['symbol'])
+            try:
+                quote = client.get_simulate_execution_quote(item['symbol'])
+            except Exception:
+                if config['market'] != 'HKStock':
+                    raise
+                checks.append({'symbol': item['symbol'], 'status': 'skipped',
+                               'reason_code': 'HK_QUOTE_UNAVAILABLE',
+                               'reason': '港股执行报价获取失败'})
+                continue
+            if config['market'] == 'HKStock':
+                from app.services.automation.limit_price import limit_price
+                limit, reason = limit_price(quote, 'buy' if item['action'] == 'BUY' else 'sell',
+                                            config.get('symbol_params'), now=utcnow().timestamp())
+                if reason:
+                    checks.append({'symbol': item['symbol'], 'status': 'skipped',
+                                   'reason_code': reason, 'reason': '港股执行报价不满足安全限价条件'})
+                    continue
             if not quote.get('simulate_execution_eligible'):
                 raise ValueError('Fresh regular-session SIMULATE quote is unavailable')
             price = float(quote['price'])
@@ -239,6 +255,8 @@ def execute(row, run):
                 if not still_met:
                     raise ValueError('Trigger condition no longer holds')
             lot = client.get_lot_size(item['symbol']) if config['market']=='HKStock' else 1
+            if config['market'] == 'HKStock':
+                price = limit
             maximum = client.get_max_cash_buy(item['symbol'], price) if config['market']=='HKStock' and item['action']=='BUY' else None
             if config.get('symbol_params') and lot != config['symbol_params']['lot_size']:
                 raise ValueError('Configured lot size differs from broker; update symbol settings')

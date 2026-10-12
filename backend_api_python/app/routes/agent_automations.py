@@ -276,7 +276,7 @@ def symbol_settings(task_id):
 
 @blp.route('/<int:task_id>/symbol-config', methods=['PUT'])
 @blp.doc(summary='Validate and audit paused HK symbol settings; never grant trading authorization',
-         description='Symbol settings require a positive reference_price (HKD). Each cap must cover lot_size × reference_price and fit the budget after cash reserve. Execution revalidates fresh broker price and lot size.')
+         description='Symbol settings require a positive reference_price (HKD). Each cap must cover lot_size × reference_price and fit the budget after cash reserve. Execution revalidates fresh broker price and lot size. Optional max_slippage_pct (0–5, default 0.5) and spread_limit_pct (0–10, default 1) use percentage points relative to bid/ask midpoint. Optional limit_offset_ticks (integer 0–100, default null) selects midpoint plus/minus ticks; null buys at ask and sells at bid. Prices round inward on HKEX equities spread table 01 (Phase 2); quotes older than 5 seconds are skipped.')
 @login_required
 @envelope
 def update_symbol_settings(task_id):
