@@ -78,6 +78,11 @@ def observe(row):
                     status=CASE WHEN status IN ('queued','planned') THEN 'cancelled' ELSE status END
                     WHERE task_id=%s AND event_key NOT LIKE 'protection:%%'
                     AND status IN ('queued','researching','planned','executing')""", (current['id'],))
+            if current['config'].get('symbol_params') and 'drawdown_limit' in risk.get('reasons', []):
+                # Drawdown pauses the task and preserves positions for manual review.
+                cur.execute('UPDATE qd_agent_automations SET active=FALSE WHERE id=%s', (current['id'],))
+                current = {**current, 'active': False}
+                state['monitor_status'] = '回撤保护已暂停；请人工确认并重置保护后恢复'
             if current['active'] and exits and not STOP.is_set():
                 cur.execute("""SELECT id FROM qd_agent_automation_runs WHERE task_id=%s
                     AND status IN ('queued','researching','planned','executing') LIMIT 1""", (current['id'],))

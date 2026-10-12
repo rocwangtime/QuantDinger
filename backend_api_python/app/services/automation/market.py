@@ -124,6 +124,7 @@ class PushFeed:
                                 continue
                             with feed.lock:
                                 feed.quote = {'price':price,'as_of':stamp,'received_at':time.time(),
+                                              'prev_close':row.get('prev_close_price'),
                                               'is_realtime':True,'source':'futu_subscribed_push',
                                               'execution_eligible':False}
                         except (KeyError,ValueError,TypeError):

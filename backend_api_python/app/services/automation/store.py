@@ -57,6 +57,9 @@ def task(user_id, task_id):
 def create(user_id, name, config):
     from app.services.agent_trade_intents import account_scope
     from app.utils.agent_auth import generate_token
+    from app.services.automation.symbol_config import DEFAULTS, materialize
+    if config['market'] == 'HKStock' and config['kind'] == 'price_trigger' and config['symbols'] == ['01810.HK']:
+        config = materialize(config, dict(DEFAULTS))
     account_scope(user_id, {'broker': 'futu', 'credential_id': config['credential_id'], 'market': config['market']})
     ensure_schema()
     # No bearer credential is retained or returned. Internal actors cannot log in
@@ -75,6 +78,9 @@ def create(user_id, name, config):
             cur.execute('''INSERT INTO qd_agent_automations(user_id,name,config,token_id)
                 VALUES (%s,%s,%s::jsonb,%s) RETURNING *''', (user_id, name[:120], dumps(config), token_id))
             result = dict(cur.fetchone())
+            if config.get('symbol_params'):
+                from app.services.automation.symbol_config import persist
+                persist(cur, result, user_id, config['symbol_params'])
             db.commit()
             return result
         finally:
@@ -93,6 +99,8 @@ def set_active(user_id, task_id, active, baseline=None, baseline_prices=None, ex
             row = dict(cur.fetchone() or {})
             if not row:
                 raise ValueError('Task not found')
+            if active and row['config'].get('symbol_params') and (row['state'] or {}).get('risk', {}).get('halted'):
+                raise ValueError('Manual risk reset is required before resuming')
             if row['active'] == active:
                 db.commit()
                 return row
@@ -134,7 +142,7 @@ def set_active(user_id, task_id, active, baseline=None, baseline_prices=None, ex
             cur.close()
 
 
-def edit(user_id, task_id, name, config):
+def edit(user_id, task_id, name, config, symbol_params=None, expected_revision=None):
     from app.services.agent_trade_intents import account_scope
     account_scope(user_id, {'broker':'futu','credential_id':config['credential_id'],'market':config['market']})
     with get_db_connection() as db:
@@ -143,6 +151,10 @@ def edit(user_id, task_id, name, config):
             cur.execute('SELECT pg_advisory_xact_lock(824112,%s)', (user_id,))
             cur.execute('SELECT * FROM qd_agent_automations WHERE id=%s AND user_id=%s FOR UPDATE', (task_id,user_id))
             row = cur.fetchone()
+            if row and expected_revision is not None and row['revision'] != expected_revision:
+                raise ValueError('Task changed; refresh settings before saving')
+            if row and row['config'].get('symbol_params') and symbol_params is None:
+                raise ValueError('Use the symbol settings editor for this task')
             if not row or row['active']:
                 raise ValueError('请先暂停任务再修改配置')
             cur.execute('SELECT status,order_spec,filled_qty FROM qd_agent_trade_intents WHERE agent_token_id=%s ORDER BY id', (row['token_id'],))
@@ -163,6 +175,9 @@ def edit(user_id, task_id, name, config):
             cur.execute('''UPDATE qd_agent_automations SET name=%s,config=%s::jsonb,revision=revision+1,
                 state=state-'trigger',updated_at=NOW() WHERE id=%s RETURNING *''', (name[:120],dumps(config),task_id))
             result = dict(cur.fetchone())
+            if symbol_params is not None:
+                from app.services.automation.symbol_config import persist
+                persist(cur, row, user_id, symbol_params)
             cur.execute('''UPDATE qd_agent_tokens SET markets=%s,instruments=%s,max_order_notional=%s,
                 max_daily_notional=%s WHERE id=%s''', (config['market'],','.join(instruments),
                 config['max_order_notional'],config['max_daily_notional'],row['token_id']))

@@ -263,3 +263,30 @@ def run_stream(run_id):
                 return
             time.sleep(.5)
     return Response(events(),mimetype='text/event-stream',headers={'Cache-Control':'no-cache','X-Accel-Buffering':'no'})
+
+
+@blp.route('/<int:task_id>/symbol-config', methods=['GET'])
+@blp.doc(summary='Read effective HK SIMULATE symbol parameters and task revision')
+@login_required
+@envelope
+def symbol_settings(task_id):
+    from app.services.automation.symbol_config import read
+    return read(store.task(g.user_id, task_id))
+
+
+@blp.route('/<int:task_id>/symbol-config', methods=['PUT'])
+@blp.doc(summary='Validate and audit paused HK symbol settings; never grant trading authorization')
+@login_required
+@envelope
+def update_symbol_settings(task_id):
+    from app.services.automation.symbol_config import update
+    return update(g.user_id, task_id, request.get_json())
+
+
+@blp.route('/<int:task_id>/symbol-config/audit', methods=['GET'])
+@blp.doc(summary='List owner-scoped symbol configuration changes, newest first; before ID pagination')
+@login_required
+@envelope
+def symbol_settings_audit(task_id):
+    from app.services.automation.symbol_config import history
+    return history(store.task(g.user_id, task_id), request.args.get('before'))

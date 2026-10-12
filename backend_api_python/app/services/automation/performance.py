@@ -155,7 +155,8 @@ def evaluate(config, state, report, prices, now):
         limits = config.get('risk') or {}
         if limits.get('enabled'):
             reasons = []
-            if equity <= day_equity * (1 - limits['max_daily_loss_pct']):
+            daily_limit = (config['budget'] if limits.get('daily_loss_budget') else day_equity) * limits['max_daily_loss_pct']
+            if equity <= day_equity - daily_limit:
                 reasons.append('daily_loss_limit')
             if equity <= high * (1 - limits['max_drawdown_pct']):
                 reasons.append('drawdown_limit')

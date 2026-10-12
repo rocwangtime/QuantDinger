@@ -133,6 +133,9 @@ def trigger_state(config, quote, previous, now):
     price = number(quote.get('price'), .0001)
     if not quote.get('is_realtime') or not 0 <= now - float(quote.get('as_of', 0)) <= 5:
         return False, previous
+    if config.get('symbol_params'):
+        from app.services.automation.symbol_trigger import evaluate
+        return evaluate(config, quote, previous, now)
     threshold = config['trigger']['price']
     above = config['trigger']['type'] == 'price_above'
     met = price >= threshold if above else price <= threshold
