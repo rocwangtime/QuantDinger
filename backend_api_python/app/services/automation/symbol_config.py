@@ -1,5 +1,6 @@
 """HK single-symbol settings, materialized atomically into the task runtime config."""
 import copy
+import math
 import re
 
 from app.services.automation import store
@@ -10,7 +11,7 @@ DEFAULTS = dict(budget=100000, per_order_cap=20000, daily_buy_cap=40000,
                 short_move_pct=1, window_minutes=5, cooldown_minutes=30,
                 max_triggers_day=8, blackout_auction=True, blackout_lunch=True,
                 blackout_close_minutes=5, stop_loss_pct=5, daily_loss_pct=2,
-                max_drawdown_pct=8, model='deepseek-v4-1-flash', mode='plan_only', lot_size=200)
+                max_drawdown_pct=8, model='deepseek-v4-1-flash', mode='plan_only', lot_size=200, reference_price=None)
 
 
 def eligible(row):
@@ -32,13 +33,22 @@ def validate(raw):
                   short_move_pct=(.01, 50), window_minutes=(1, 120), cooldown_minutes=(1, 1440),
                   max_triggers_day=(1, 100), blackout_close_minutes=(0, 60),
                   stop_loss_pct=(.1, 50), daily_loss_pct=(.1, 50), max_drawdown_pct=(.1, 90),
-                  lot_size=(1, 100000))
+                  lot_size=(1, 100000), reference_price=(.0001, 1e9))
+    if p['reference_price'] is None:
+        raise ValueError('REFERENCE_PRICE_REQUIRED: enter a reference price to validate one lot cost')
     for key, limits in bounds.items():
         p[key] = number(p[key], *limits)
     for key in ('window_minutes', 'cooldown_minutes', 'max_triggers_day', 'blackout_close_minutes', 'lot_size'):
         if not p[key].is_integer():
             raise ValueError(f'{key} must be an integer')
         p[key] = int(p[key])
+    lot_cost = p['lot_size'] * p['reference_price']
+    spendable = p['budget'] * (1-p['cash_reserve_pct']/100)
+    for key in ('per_order_cap', 'daily_buy_cap', 'max_position'):
+        if p[key] < lot_cost:
+            raise ValueError(f'CAP_BELOW_ONE_LOT: {key} must cover one lot ({lot_cost:g} HKD)')
+        if p[key] > spendable:
+            raise ValueError(f'CAP_UNREACHABLE: {key} exceeds budget after cash reserve ({spendable:g} HKD)')
     if not p['per_order_cap'] <= p['daily_buy_cap'] <= p['budget'] or p['max_position'] > p['budget'] * (1-p['cash_reserve_pct']/100):
         raise ValueError('Caps must fit budget and reserve; daily cap must cover each order')
     if p['mode'] not in {'plan_only', 'paper_auto'}:
@@ -51,7 +61,7 @@ def validate(raw):
 def read(row):
     code = eligible(row)
     saved = store.query('SELECT params FROM qd_agent_symbol_configs WHERE task_id=%s AND symbol=%s', (row['id'], code), one=True)
-    return {'symbol': 'HK.'+code.removesuffix('.HK'), 'params': saved['params'] if saved else defaults(row),
+    return {'symbol': 'HK.'+code.removesuffix('.HK'), 'params': {**DEFAULTS, **saved['params']} if saved else defaults(row),
             'applied': bool(saved), 'revision': row['revision'], 'active': row['active'],
             'effective_config': row['config'], 'lot_source': 'known_symbol' if code == '01810.HK' else 'configured; broker revalidated before submission'}
 
@@ -101,7 +111,7 @@ def persist(cur, row, user_id, params):
         ON CONFLICT(task_id,symbol) DO UPDATE SET params=EXCLUDED.params,updated_at=NOW()''',
                 (row['id'], code, store.dumps(params)))
     for field, value in params.items():
-        if old.get(field) != value:
+        if field not in old or old.get(field) != value:
             cur.execute('''INSERT INTO qd_agent_symbol_config_audit(task_id,symbol,user_id,field,old_value,new_value)
                 VALUES(%s,%s,%s,%s,%s::jsonb,%s::jsonb)''',
                         (row['id'], code, user_id, field, store.dumps(old.get(field)), store.dumps(value)))
@@ -123,4 +133,24 @@ def check_daily_buy(cur, row, order, intent_id):
         AND created_at >= (date_trunc('day', NOW() AT TIME ZONE 'Asia/Hong_Kong') AT TIME ZONE 'Asia/Hong_Kong')''',
                 (row['token_id'], intent_id))
     if float(cur.fetchone()['used']) + order['qty'] * order['limit_price'] > row['config']['symbol_params']['daily_buy_cap']:
-        raise ValueError('HK symbol daily buy cap exceeded')
+        raise ValueError('DAILY_BUY_CAP: HK symbol daily buy cap exceeded')
+
+
+def validate_order(order, config, *, lot, broker_qty, cash):
+    """Final sizing invariant check using the broker lot and execution snapshot."""
+    lot = number(lot, 1)
+    if not lot.is_integer():
+        raise ValueError('INVALID_LOT: broker lot must be a positive integer')
+    qty = number(order['qty'])
+    qty = math.floor(qty / lot) * int(lot)
+    order['qty'] = qty
+    if qty < lot:
+        raise ValueError('BELOW_ONE_LOT: order quantity is below one lot')
+    notional = qty * number(order['limit_price'], .0001)
+    if notional > config['max_order_notional']:
+        raise ValueError('PER_ORDER_CAP: order exceeds per-order cap')
+    if order['side'] == 'buy':
+        if (number(broker_qty) + qty) * order['limit_price'] > config['budget'] * config['max_weight']:
+            raise ValueError('MAX_POSITION: purchase exceeds maximum position')
+        if notional > number(cash):
+            raise ValueError('CASH_RESERVE: purchase exceeds cash after budget reserve')

@@ -8624,6 +8624,9 @@ paths:
       tags:
       - Portfolio
       summary: Validate and audit paused HK symbol settings; never grant trading authorization
+      description: Symbol settings require a positive reference_price (HKD). Each
+        cap must cover lot_size × reference_price and fit the budget after cash reserve.
+        Execution revalidates fresh broker price and lot size.
       operationId: putApiAgentAutomationsTaskIdSymbolConfig
       parameters:
       - name: task_id

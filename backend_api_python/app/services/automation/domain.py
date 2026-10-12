@@ -205,13 +205,21 @@ def available_buy_cash(funds, market):
 
 
 def size_order(item, config, *, price, lot, owned_qty, broker_qty, power, open_symbols,
-               max_cash_buy=None):
+               max_cash_buy=None, rejection=None):
+    def reject(reason):
+        if rejection is not None:
+            rejection['reason_code'] = reason
+        return None
+
     code = item['symbol']
     if code in open_symbols or item['action'] in {'HOLD', 'WAIT'}:
-        return None
-    price, lot = number(price, .0001), int(number(lot, 1))
+        return reject('OPEN_ORDER_OR_NO_ACTION')
+    price, lot = number(price, .0001), number(lot, 1)
+    if not lot.is_integer():
+        return reject('INVALID_LOT')
+    lot = int(lot)
     if not item['min_price'] <= price <= item['max_price']:
-        return None
+        return reject('PRICE_OUT_OF_RANGE')
     target = math.floor(config['budget'] * item['target_weight'] / price / lot) * lot
     owned = min(number(owned_qty), number(broker_qty))
     if item['action'] == 'BUY':
@@ -226,8 +234,15 @@ def size_order(item, config, *, price, lot, owned_qty, broker_qty, power, open_s
         delta = owned if item['action'] == 'EXIT' else min(owned, max(0, broker_qty - target))
         qty = math.floor(min(delta, config['max_order_notional'] / price) / lot) * lot
         side = 'sell'
-    if qty <= 0:
-        return None
+    if qty < lot:
+        reason = 'BELOW_ONE_LOT'
+        if config['max_order_notional'] < price * lot:
+            reason = 'PER_ORDER_CAP'
+        elif item['action'] == 'BUY' and power < price * lot:
+            reason = 'CASH_RESERVE'
+        elif item['action'] == 'BUY' and config['budget'] * config['max_weight'] - broker_qty * price < price * lot:
+            reason = 'MAX_POSITION'
+        return reject(reason)
     return {'broker': 'futu', 'credential_id': config['credential_id'], 'market': config['market'],
             'symbol': code, 'side': side, 'qty': qty, 'order_type': 'limit',
             'limit_price': price, 'reason': item['reason']}

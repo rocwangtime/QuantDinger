@@ -275,7 +275,8 @@ def symbol_settings(task_id):
 
 
 @blp.route('/<int:task_id>/symbol-config', methods=['PUT'])
-@blp.doc(summary='Validate and audit paused HK symbol settings; never grant trading authorization')
+@blp.doc(summary='Validate and audit paused HK symbol settings; never grant trading authorization',
+         description='Symbol settings require a positive reference_price (HKD). Each cap must cover lot_size × reference_price and fit the budget after cash reserve. Execution revalidates fresh broker price and lot size.')
 @login_required
 @envelope
 def update_symbol_settings(task_id):
