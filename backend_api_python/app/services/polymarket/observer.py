@@ -14,6 +14,7 @@ from app.utils.db import get_db_connection
 from .client import PublicClient
 from .engine import number, sweep
 from . import updown
+from .ws_balance import RateBalancer, DailyStats
 
 STATUS = {"enabled": False, "running": False, "mode": "stopped", "connected": False, "markets_subscribed": 0,
           "last_message_at": None, "reconnect_count": 0, "ws_connections": 0, "slow_consumer_count": 0, "last_error": None, "started_at": None}
@@ -25,6 +26,7 @@ _LAST_RESEARCH = {}
 _REFERENCE = None
 _PIPELINE = None
 _WS = None
+_DAILY_STATS = DailyStats()
 
 
 def enabled():
@@ -97,6 +99,7 @@ def ws_apply_event(event, books):
 
 
 def _persist_status():
+    _DAILY_STATS.persist()
     with get_db_connection() as db:
         cur = db.cursor()
         try:
@@ -779,18 +782,41 @@ class MarketConnections:
     """Own independent public receive threads and per-socket subscription sets."""
     def __init__(self):
         self.states = {}
-        self.count = updown.setting('WS_SHARDS', 2, 1, 8)
+        self.count = updown.setting('WS_SHARDS', 4, 1, 8)
+        self.balancer = RateBalancer(self.count)
+        self.stats = _DAILY_STATS
+        self.reconnect_pending = False
         self.closed = False
 
     def sync(self, markets):
         assignments = shard_markets(markets, self.count)
+        current = {a: i for i, state in self.states.items() for a in state['assets']}
+        assignment = {a: current.get(a, i) for i, group in assignments.items() for a in subscription_assets(group)}
+        self.balancer.set_assets(assignment)
+        self.apply_assignment(assignment)
+        self.tick()
+
+    def apply_assignment(self, assignment):
+        assignments = {i: [a for a, shard in assignment.items() if shard == i] for i in range(self.count)}
+        # Send all additions before any removals; abort removals on a failed destination.
+        for index, assets in assignments.items():
+            state = self.states.get(index)
+            additions = sorted(set(assets) - set(state['assets'])) if state else []
+            if additions and state and state['connected']:
+                try:
+                    state['socket'].send(json.dumps(dict(assets_ids=additions, operation='subscribe')))
+                except Exception as exc:
+                    state['socket'].close()
+                    state['connected'] = False
+                    _ws_error(exc)
+                    return False
         for index in list(self.states):
             if index not in assignments:
                 state = self.states.pop(index)
                 state['socket'].close()
                 state['thread'].join(5)
         for index, group in assignments.items():
-            assets = subscription_assets(group)
+            assets = group
             state = self.states.get(index)
             if state:
                 with state['lock']:
@@ -799,6 +825,8 @@ class MarketConnections:
                     if state['connected']:
                         try:
                             for message in subscription_changes(previous, assets):
+                                if message['operation'] == 'subscribe':
+                                    continue
                                 state['socket'].send(json.dumps(message))
                         except Exception as exc:
                             state['connected'] = False
@@ -807,7 +835,9 @@ class MarketConnections:
             else:
                 self.states[index] = dict(assets=assets, socket=None, thread=None, connected=False, lock=RLock(),
                                           attempts=0, retry_at=0, ping_at=0)
-        self.tick()
+        with self.balancer.lock:
+            self.balancer.assignment = dict(assignment)
+        return True
 
     def connect(self, index, state):
         import websocket
@@ -816,6 +846,8 @@ class MarketConnections:
             state['thread'].join(5)
             with _LOCK:
                 STATUS['reconnect_count'] += 1
+            self.stats.increment('reconnect_count')
+            self.reconnect_pending = True
             if _PIPELINE:
                 with _PIPELINE.lock:
                     for asset in state['assets']:
@@ -839,18 +871,31 @@ class MarketConnections:
                 STATUS['ws_connections'] = STATUS.get('ws_connections', 0) + 1
 
         def received(_sock, raw):
+            if raw != 'PONG':
+                self.stats.message(index)
+                self.balancer.receive(raw, index)
             if _PIPELINE:
                 _PIPELINE.receive(raw)
 
         def failed(_sock, error):
             state['connected'] = False
-            _ws_error(error)
+            slow = 'slow consumer' in str(error).lower() or 'slow_consumer' in str(error).lower()
+            if not slow or not state.get('slow_error'):
+                _ws_error(error)
+            if slow:
+                if not state.get('slow_error'):
+                    self.stats.increment('slow_consumer_count')
+                state['slow_error'] = True
 
         def closed(_sock, code=None, reason=None):
             state['connected'] = False
-            if code is not None or reason is not None:
+            counted = state.pop('slow_error', False)
+            slow = 'slow consumer' in str(reason).lower() or 'slow_consumer' in str(reason).lower()
+            if slow and not counted:
+                self.stats.increment('slow_consumer_count')
+            if (code is not None or reason is not None) and not (slow and counted):
                 close_reason(code, reason)
-            elif not self.closed and 'slow consumer' not in str(STATUS.get('last_error', '')).lower():
+            elif not counted and not self.closed and 'slow consumer' not in str(STATUS.get('last_error', '')).lower():
                 close_reason(None, STATUS.get('last_error'))
             state['retry_at'] = time.monotonic() + 5
 
@@ -865,6 +910,12 @@ class MarketConnections:
         if self.closed or _STOP.is_set():
             return
         now = time.monotonic()
+        if all(s['connected'] for s in self.states.values()):
+            proposed = self.balancer.propose(now, self.reconnect_pending)
+            self.reconnect_pending = False
+            if proposed and self.apply_assignment(proposed):
+                self.balancer.last_rebalance = now
+                self.stats.increment('rebalance_count')
         for index, state in self.states.items():
             if not state['thread'] or not state['thread'].is_alive():
                 if now >= state['retry_at']:
@@ -878,6 +929,7 @@ class MarketConnections:
                     state['socket'].close()
                     _ws_error(exc)
         with _LOCK:
+            STATUS.update(self.balancer.metrics())
             STATUS['ws_shards'] = self.count
             STATUS['ws_connected'] = sum(bool(s['connected']) for s in self.states.values())
             STATUS['connected'] = bool(self.states) and all(s['connected'] for s in self.states.values())

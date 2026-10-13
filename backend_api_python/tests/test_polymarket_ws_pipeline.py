@@ -314,14 +314,14 @@ def test_shards_dynamic_subscription_ping_and_independent_reconnect(monkeypatch)
     c = market('c', market_type='up_down')
     manager.sync([a, c])
     assert len(sockets) == 2
-    assert sockets[1].sent[1:] == [dict(assets_ids=['bn', 'by'], operation='unsubscribe'),
-                                  dict(assets_ids=['cn', 'cy'], operation='subscribe')]
+    assert sockets[1].sent[1:] == [dict(assets_ids=['cn', 'cy'], operation='subscribe'),
+                                  dict(assets_ids=['bn', 'by'], operation='unsubscribe')]
     clock[0] += 10
     manager.tick()
     assert sockets[0].sent[-1] == sockets[1].sent[-1] == 'PING'
     sockets[1].closed = True
     sockets[1].callbacks['on_error'](sockets[1], 'slow consumer: send buffer full')
-    sockets[1].callbacks['on_close'](sockets[1], None, None)
+    sockets[1].callbacks['on_close'](sockets[1], 1008, 'slow consumer: send buffer full')
     clock[0] += 5
     manager.tick()
     assert len(sockets) == 3
