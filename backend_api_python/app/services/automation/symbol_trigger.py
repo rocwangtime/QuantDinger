@@ -1,21 +1,37 @@
-"""Fresh HK continuous-session percentage edges and durable directional cooldowns."""
+"""Fresh market-session percentage edges and durable directional cooldowns."""
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from app.services.automation.domain import session_schedule
 
 
+def session_allowed(config, now):
+    p = config['symbol_params']
+    local = datetime.fromtimestamp(now, ZoneInfo('America/New_York' if config['market'] == 'USStock' else 'Asia/Hong_Kong'))
+    day = local.date().isoformat()
+    # Calendar handles holidays and half-days; lunch/auction never authorize execution.
+    schedule = session_schedule(config, local.replace(hour=0, minute=0, second=0).astimezone(timezone.utc))
+    minute = local.hour * 60 + local.minute
+    opening, closing = schedule['open_at'].timestamp(), schedule['close_at'].timestamp()
+    regular = opening <= now < closing
+    extended = (config['market'] == 'USStock' and p.get('extended_hours', False)
+                and day == schedule['session'] and 240 <= minute < 1200)
+    if (not regular and not extended) or (regular and (
+            now < opening + p.get('blackout_open_minutes', 0)*60
+            or now >= closing - p['blackout_close_minutes']*60)) or (
+            config['market'] == 'HKStock' and 720 <= minute < 780):
+        return False
+    return True
+
+
 def evaluate(config, quote, previous, now):
     p = config['symbol_params']
     state = dict(previous)
-    local = datetime.fromtimestamp(now, ZoneInfo('Asia/Hong_Kong'))
+    local = datetime.fromtimestamp(now, ZoneInfo('America/New_York' if config['market'] == 'USStock' else 'Asia/Hong_Kong'))
     day = local.date().isoformat()
     if state.get('day') != day:
         state = {'day': day, 'count': 0, 'samples': [], 'cooldowns': {}}
-    # Calendar handles holidays and half-days; lunch/auction never authorize execution.
-    schedule = session_schedule(config, datetime.fromtimestamp(now, timezone.utc))
-    minute = local.hour * 60 + local.minute
-    if now < schedule['open_at'].timestamp() or now >= schedule['close_at'].timestamp() - p['blackout_close_minutes']*60 or 720 <= minute < 780:
+    if not session_allowed(config, now):
         return False, state
     samples = [s for s in state.get('samples', []) if 0 <= now-s[0] <= p['window_minutes']*60+10]
     price = float(quote['price'])

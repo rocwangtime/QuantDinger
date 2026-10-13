@@ -28,9 +28,14 @@ def settings(raw):
     return p
 
 
-def round_tick(price, side):
+def round_tick(price, side, market='HKStock'):
     """Directional rounding reselects the band after crossing its upper edge."""
     p = Decimal(str(price))
+    if market == 'USStock':
+        if not p.is_finite() or p < Decimal('.0001') or side not in {'buy', 'sell'}:
+            raise ValueError('US_PRICE_UNSUPPORTED')
+        tick = Decimal('.01') if p >= 1 else Decimal('.0001')
+        return (p / tick).to_integral_value(rounding=ROUND_FLOOR if side == 'buy' else ROUND_CEILING) * tick
     if not p.is_finite() or not Decimal('.01') <= p <= BANDS[-1][0] or side not in {'buy', 'sell'}:
         raise ValueError('HK_PRICE_UNSUPPORTED')
     rounding = ROUND_FLOOR if side == 'buy' else ROUND_CEILING
@@ -43,43 +48,45 @@ def round_tick(price, side):
     raise ValueError('HK_PRICE_UNSUPPORTED')
 
 
-def limit_price(quote, side, params=None, *, now=None):
+def limit_price(quote, side, params=None, *, now=None, market='HKStock'):
     """Return (price, reason code); unsafe data never falls back to last trade."""
+    prefix = 'US' if market == 'USStock' else 'HK'
+    low, high = (.0001, 1e9) if market == 'USStock' else (.01, 9995)
     if not isinstance(quote, dict):
-        return None, 'HK_QUOTE_MISSING'
+        return None, f'{prefix}_QUOTE_MISSING'
     if side not in {'buy', 'sell'}:
         raise ValueError('Invalid order side')
     now = time.time() if now is None else now
     try:
         stamp = number(quote.get('as_of'))
     except (ValueError, TypeError):
-        return None, 'HK_QUOTE_MISSING'
+        return None, f'{prefix}_QUOTE_MISSING'
     if quote.get('is_stale') or not 0 <= now-stamp <= 5:
-        return None, 'HK_QUOTE_STALE'
+        return None, f'{prefix}_QUOTE_STALE'
     try:
-        number(quote.get('price'), .01, 9995)
-        bid = Decimal(str(number(quote.get('bid'), .01, 9995)))
-        ask = Decimal(str(number(quote.get('ask'), .01, 9995)))
+        number(quote.get('price'), low, high)
+        bid = Decimal(str(number(quote.get('bid'), low, high)))
+        ask = Decimal(str(number(quote.get('ask'), low, high)))
     except (ValueError, TypeError):
-        return None, 'HK_QUOTE_MISSING'
+        return None, f'{prefix}_QUOTE_MISSING'
     if bid > ask:
-        return None, 'HK_QUOTE_INVALID'
+        return None, f'{prefix}_QUOTE_INVALID'
     if not quote.get('simulate_execution_eligible'):
-        return None, 'HK_QUOTE_INELIGIBLE'
+        return None, f'{prefix}_QUOTE_INELIGIBLE'
     p = settings(params or {})
     mid = (bid + ask) / 2
     if (ask-bid)/mid*100 > Decimal(str(p['spread_limit_pct'])):
-        return None, 'HK_SPREAD_TOO_WIDE'
+        return None, f'{prefix}_SPREAD_TOO_WIDE'
     slip = Decimal(str(p['max_slippage_pct']))/100
     cap = mid*(1+slip if side == 'buy' else 1-slip)
     target = ask if side == 'buy' else bid
     if p['limit_offset_ticks'] is not None:
-        tick = next(tick for upper, tick in BANDS if mid <= upper)
+        tick = (Decimal('.01') if mid >= 1 else Decimal('.0001')) if market == 'USStock' else next(tick for upper, tick in BANDS if mid <= upper)
         offset = tick*p['limit_offset_ticks']
         target = mid+offset if side == 'buy' else mid-offset
     target = min(target, cap) if side == 'buy' else max(target, cap)
     try:
-        result = round_tick(target, side)
+        result = round_tick(target, side, market)
     except ValueError:
-        return None, 'HK_PRICE_UNSUPPORTED'
+        return None, f'{prefix}_PRICE_UNSUPPORTED'
     return float(result), None

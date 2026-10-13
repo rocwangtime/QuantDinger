@@ -58,9 +58,12 @@ def task(user_id, task_id):
 def create(user_id, name, config):
     from app.services.agent_trade_intents import account_scope
     from app.utils.agent_auth import generate_token
-    from app.services.automation.symbol_config import DEFAULTS, materialize
+    from app.services.automation.symbol_config import DEFAULTS, US_DEFAULTS, materialize
     if config['market'] == 'HKStock' and config['kind'] == 'price_trigger' and config['symbols'] == ['01810.HK']:
         config = materialize(config, dict(DEFAULTS))
+    if config['market'] == 'USStock' and config['kind'] == 'price_trigger' and config['symbols'] == ['AAPL']:
+        config = materialize(config, dict(US_DEFAULTS))
+        config['execution_mode'] = 'plan_only'
     account_scope(user_id, {'broker': 'futu', 'credential_id': config['credential_id'], 'market': config['market']})
     ensure_schema()
     # No bearer credential is retained or returned. Internal actors cannot log in
