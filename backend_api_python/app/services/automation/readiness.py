@@ -109,7 +109,7 @@ def read(row):
         add('risk', 'pass' if healthy else 'wait', 'risk_healthy' if healthy else 'risk_waiting')
     return {'checked_at': now, 'task_revision': row['revision'], 'configuration_ready': configuration_ready,
             'model': model, 'checks': checks, 'decision_budget': quota, 'account_limits': account_limits,
-            'fast_latency': latency.read(row) if config['kind'] == 'price_trigger' and config['market'] == 'HKStock' else None,
+            'fast_latency': latency.read(row) if config['kind'] == 'price_trigger' and config['market'] in {'HKStock', 'USStock'} else None,
             'scheduler': scheduler, 'connection_check': probe if fresh else None}
 
 

@@ -1,4 +1,4 @@
-"""Persisted HK fast-path timings; incomplete stages never count as zero."""
+"""Persisted US/HK fast-path timings; incomplete stages never count as zero."""
 import math
 import time
 
@@ -8,7 +8,7 @@ STAGES = ('trigger_detected', 'context_built', 'model_call', 'decision', 'submit
 
 
 def enabled(row, run):
-    return row['config']['kind'] == 'price_trigger' and row['config'].get('market') == 'HKStock' and not run['preview']
+    return row['config']['kind'] == 'price_trigger' and row['config'].get('market') in {'HKStock', 'USStock'} and not run['preview']
 
 
 def mark(run, stage):

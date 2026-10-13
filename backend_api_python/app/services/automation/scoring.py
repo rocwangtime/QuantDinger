@@ -1,4 +1,4 @@
-"""Read-only HK decision outcomes. Hypothetical gross PnL is not account profit."""
+"""Read-only US/HK decision outcomes. Hypothetical gross PnL is not account profit."""
 import math
 import time
 from datetime import datetime, timedelta, timezone
@@ -7,13 +7,24 @@ from zoneinfo import ZoneInfo
 from app.services.automation import latency, store
 
 HK = ZoneInfo('Asia/Hong_Kong')
+US = ZoneInfo('America/New_York')
+
+
+def market_zone(market):
+    return US if market == 'USStock' else HK
+
+
+def pnl_key(market):
+    return 'would_be_pnl_usd' if market == 'USStock' else 'would_be_pnl_hkd'
+
+
 HORIZONS = ('5m', '30m', 'close', 'next_close')
 
 
-def horizons(at):
+def horizons(at, market='HKStock'):
     import exchange_calendars as xcals
-    cal = xcals.get_calendar('XHKG')
-    session = cal.date_to_session(at.astimezone(HK).date().isoformat(), direction='next')
+    cal = xcals.get_calendar('XNYS' if market == 'USStock' else 'XHKG')
+    session = cal.date_to_session(at.astimezone(market_zone(market)).date().isoformat(), direction='next')
     close = cal.session_close(session).to_pydatetime()
     if at >= close:
         session = cal.next_session(session)
@@ -29,7 +40,7 @@ def decision_timestamp(result):
 def register(run):
     evidence, result = run['evidence'] or {}, run['result'] or {}
     config = evidence.get('task_config') or {}
-    if run['preview'] or config.get('market') != 'HKStock' or result.get('source') == 'deterministic_protection':
+    if run['preview'] or config.get('market') not in {'HKStock', 'USStock'} or result.get('source') == 'deterministic_protection':
         return
     stamp = decision_timestamp(result)
     if not stamp:
@@ -41,12 +52,13 @@ def register(run):
         if not price or not math.isfinite(float(price)) or price <= 0:
             continue
         lot = instrument.get('lot_size') or (config.get('symbol_params') or {}).get('lot_size')
+        lot = lot or (1 if config['market'] == 'USStock' else None)
         qty = hypothetical_quantity(item, config, evidence, price, lot)
-        inputs = {'action': item['action'], 'price': price, 'quote_as_of': instrument.get('quote_as_of'),
+        inputs = {'market': config['market'], 'currency': 'USD' if config['market'] == 'USStock' else 'HKD', 'action': item['action'], 'price': price, 'quote_as_of': instrument.get('quote_as_of'),
                   'quantity': qty, 'lot_size': lot, 'execution_mode': config['execution_mode'],
                   'credential_id': config['credential_id'], 'trigger': run['event_key'],
                   'quantity_basis': 'Frozen snapshot budget, cash, exposure and whole lots; not broker executable permission'}
-        for horizon, due in horizons(at).items():
+        for horizon, due in horizons(at, config['market']).items():
             store.query('''INSERT INTO qd_agent_decision_scores
                 (run_id,task_id,symbol,horizon,decision_at,due_at,inputs) VALUES(%s,%s,%s,%s,%s,%s,%s::jsonb)
                 ON CONFLICT DO NOTHING RETURNING run_id''',
@@ -71,7 +83,7 @@ def hypothetical_quantity(item, config, evidence, price, lot):
     exposure = sum(max(0, float(p.get('marketValue') or 0)) for p in positions)
     reserved = sum(max(0, float(o.get('qty') or 0)-float(o.get('filled') or 0))*float(o.get('price') or 0)
                    for o in orders if o.get('side') == 'buy')
-    cash = available_buy_cash(funds, 'HKStock')
+    cash = available_buy_cash(funds, config['market'])
     if config.get('symbol_params'):
         cash -= config['budget'] * config['reserve_ratio'] + reserved
     power = min(max(0, cash), max(0, config['budget']*(1-config['reserve_ratio'])-exposure-reserved),
@@ -99,7 +111,7 @@ def outcome(score, bars, receipts):
     return {'price': price, 'bar_at': bar['time'], 'source': 'futu_unadjusted_K_1M',
             'return_pct': change * 100, 'directional_return_pct': change * direction * 100 if direction else None,
             'direction_hit': change * direction > 0 if direction else None,
-            'would_be_pnl_hkd': (price-inputs['price']) * direction * inputs['quantity'] if inputs['quantity'] is not None else None,
+            pnl_key(inputs.get('market')): (price-inputs['price']) * direction * inputs['quantity'] if inputs['quantity'] is not None else None,
             **metrics}
 
 
@@ -123,8 +135,9 @@ def fetch_bars(row, score):
     try:
         if not client.connect():
             return []
-        day = score['due_at'].astimezone(HK).date().isoformat()
-        return client.get_history_kline(score['symbol'], market_type='HKStock', ktype='K_1M',
+        market = score['inputs'].get('market', row['config']['market'])
+        day = score['due_at'].astimezone(market_zone(market)).date().isoformat()
+        return client.get_history_kline(score['symbol'], market_type=market, ktype='K_1M',
                                         start=day, end=day, max_count=1000, autype='NONE')
     finally:
         client.close()
@@ -152,7 +165,7 @@ def _tick(now=None):
     runs = store.query("""SELECT r.* FROM qd_agent_automation_runs r
         WHERE preview=FALSE AND (jsonb_exists(result,'decision_at')
             OR result->'fast_latency'->'timestamps'->>'decision' IS NOT NULL)
-        AND evidence->'task_config'->>'market'='HKStock'
+        AND evidence->'task_config'->>'market' IN ('HKStock','USStock')
         AND (SELECT COUNT(*) FROM qd_agent_decision_scores s WHERE s.run_id=r.id) <
             4*jsonb_array_length(COALESCE(r.result->'items','[]'::jsonb))
         ORDER BY id LIMIT 100""")
@@ -168,7 +181,7 @@ def _tick(now=None):
             break
         try:
             row = store.query('SELECT * FROM qd_agent_automations WHERE id=%s', (score['task_id'],), one=True)
-            key = (row['user_id'], score['inputs']['credential_id'], score['symbol'], score['due_at'].astimezone(HK).date())
+            key = (row['user_id'], score['inputs']['credential_id'], score['symbol'], score['due_at'].astimezone(market_zone(score['inputs'].get('market', row['config']['market']))).date())
             if key not in bars_cache:
                 bars_cache[key] = fetch_bars(row, score)
             value = outcome(score, bars_cache[key], store.receipts(row, score['run_id']))
@@ -203,30 +216,37 @@ def read_report(row, day):
 
 
 def generate_reports(now):
-    local = now.astimezone(HK)
+    for market in ('HKStock', 'USStock'):
+        _generate_market_reports(now, market)
+
+
+def _generate_market_reports(now, market):
+    zone = market_zone(market)
+    close_hour = 16 if market == 'USStock' else 17
+    local = now.astimezone(zone)
     # Rebuild recent completed days so next-close outcomes and late fills arrive.
-    recent = store.query("SELECT DISTINCT (r.created_at AT TIME ZONE 'Asia/Hong_Kong')::date AS day FROM qd_agent_decision_scores s JOIN qd_agent_automation_runs r ON r.id=s.run_id WHERE s.checked_at>=%s", (now-timedelta(minutes=2),))
-    unreported = store.query("""SELECT DISTINCT (r.created_at AT TIME ZONE 'Asia/Hong_Kong')::date AS day
+    recent = store.query(f"SELECT DISTINCT (r.created_at AT TIME ZONE '{zone}')::date AS day FROM qd_agent_decision_scores s JOIN qd_agent_automation_runs r ON r.id=s.run_id WHERE r.evidence->'task_config'->>'market'='{market}' AND s.checked_at>=%s", (now-timedelta(minutes=2),))
+    unreported = store.query(f"""SELECT DISTINCT (r.created_at AT TIME ZONE '{zone}')::date AS day
         FROM qd_agent_automation_runs r JOIN qd_agent_automations t ON t.id=r.task_id
         LEFT JOIN qd_agent_daily_reports d ON d.task_id=r.task_id
-            AND d.day=(r.created_at AT TIME ZONE 'Asia/Hong_Kong')::date
-        WHERE r.preview=FALSE AND COALESCE(r.evidence->'task_config'->>'market',t.config->>'market')='HKStock'
+            AND d.day=(r.created_at AT TIME ZONE '{zone}')::date
+        WHERE r.preview=FALSE AND COALESCE(r.evidence->'task_config'->>'market',t.config->>'market')='{market}'
         AND (d.task_id IS NULL OR r.finished_at>d.generated_at)
         AND r.created_at<%s""", (now,))
-    risk_days = store.query("SELECT DISTINCT (occurred_at AT TIME ZONE 'Asia/Hong_Kong')::date AS day FROM qd_agent_risk_events WHERE occurred_at>=%s", (now-timedelta(minutes=2),))
+    risk_days = store.query(f"SELECT DISTINCT (occurred_at AT TIME ZONE '{zone}')::date AS day FROM qd_agent_risk_events e JOIN qd_agent_automations t ON t.id=e.task_id WHERE t.config->>'market'='{market}' AND occurred_at>=%s", (now-timedelta(minutes=2),))
     days = {r['day'] for r in recent+unreported+risk_days}
-    if local.hour >= 17 and store.query("SELECT t.id FROM qd_agent_automations t WHERE t.config->>'market'='HKStock' AND NOT EXISTS (SELECT 1 FROM qd_agent_daily_reports d WHERE d.task_id=t.id AND d.day=%s) LIMIT 1", (local.date(),)):
+    if local.hour >= close_hour and store.query(f"SELECT t.id FROM qd_agent_automations t WHERE t.config->>'market'='{market}' AND NOT EXISTS (SELECT 1 FROM qd_agent_daily_reports d WHERE d.task_id=t.id AND d.day=%s) LIMIT 1", (local.date(),)):
         days.add(local.date())
     for day in sorted(days):
-        if day == local.date() and local.hour < 17:
+        if day > local.date() or (day == local.date() and local.hour < close_hour):
             continue
-        start = datetime.combine(day, datetime.min.time(), HK)
+        start = datetime.combine(day, datetime.min.time(), zone)
         end = start + timedelta(days=1)
-        tasks = store.query('''SELECT t.* FROM qd_agent_automations t
-            WHERE (t.config->>'market'='HKStock' AND t.created_at<%s) OR EXISTS (
+        tasks = store.query(f'''SELECT t.* FROM qd_agent_automations t
+            WHERE (t.config->>'market'='{market}' AND t.created_at<%s) OR EXISTS (
                 SELECT 1 FROM qd_agent_automation_runs r WHERE r.task_id=t.id AND r.preview=FALSE
                 AND r.created_at>=%s AND r.created_at<%s
-                AND COALESCE(r.evidence->'task_config'->>'market',t.config->>'market')='HKStock')''', (end, start, end))
+                AND COALESCE(r.evidence->'task_config'->>'market',t.config->>'market')='{market}')''', (end, start, end))
         for row in tasks:
             report = daily(row, start, end)
             store.query('''INSERT INTO qd_agent_daily_reports(task_id,day,generated_at,report) VALUES(%s,%s,%s,%s::jsonb)
@@ -249,7 +269,7 @@ def daily(row, start, end):
         selected = [s for s in scores if s['symbol'] == symbol]
         related = [r for r in runs if symbol in (((r['evidence'] or {}).get('task_config') or row['config']).get('symbols', []))
                    or any(i['symbol'] == symbol for i in (r['result'] or {}).get('items', []))]
-        symbols[symbol] = {'decisions': len({s['run_id'] for s in selected}), 'horizons': summarize(selected),
+        symbols[symbol] = {'decisions': len({s['run_id'] for s in selected}), 'horizons': summarize(selected, row['config']['market']),
             'triggers': {kind: sum(r['event_key'].split(':')[0] == kind for r in related)
                          for kind in {r['event_key'].split(':')[0] for r in related}},
             'risk_events': [e for e in events if e['event'].get('reasons') or symbol in e['event'].get('stop_loss_symbols', [])],
@@ -261,31 +281,32 @@ def daily(row, start, end):
     samples = store.query('SELECT sampled_at,report FROM qd_agent_automation_samples WHERE task_id=%s AND sampled_at>=%s AND sampled_at<%s ORDER BY sampled_at', (row['id'], start, end))
     observed = [s for s in samples if s['report'].get('equity') is not None]
     observed_pnl = float(observed[-1]['report']['equity'])-float(observed[0]['report']['equity']) if len(observed)>1 else None
-    return {'day': start.date().isoformat(), 'timezone': str(HK), 'task_id': row['id'],
+    return {'day': start.date().isoformat(), 'timezone': str(start.tzinfo), 'currency': 'USD' if row['config']['market'] == 'USStock' else 'HKD', 'task_id': row['id'],
         'decisions': sum('items' in (r['result'] or {}) for r in runs),
         'decisions_without_reliable_timestamp': sum('items' in (r['result'] or {}) and not decision_timestamp(r['result']) for r in runs),
         'triggers': triggers, 'triggered_runs': len(runs), 'symbols': symbols, 'risk_events': events,
-        'horizons': summarize(scores),
+        'horizons': summarize(scores, row['config']['market']),
         'latency': latency.summarize(runs),
-        'observed_equity_change_hkd': observed_pnl,
+        ('observed_equity_change_usd' if row['config']['market'] == 'USStock' else 'observed_equity_change_hkd'): observed_pnl,
         'observed_equity_window': [observed[0]['sampled_at'], observed[-1]['sampled_at']] if observed else [],
         'coverage': 'Gross hypothetical per-decision PnL; overlapping decisions are not portfolio profit. Fees/taxes excluded. Equity change spans recorded samples, not necessarily the full session. 5m/30m round up by less than one minute. WAIT has no direction hit. Missing lot size means unknown PnL. Missing bars remain pending.'}
 
 
-def summarize(scores):
+def summarize(scores, market='HKStock'):
+    key = pnl_key(market)
     result = {}
     for horizon in HORIZONS:
         group = [s for s in scores if s['horizon'] == horizon]
         values = [s['outcome'] for s in group if s['outcome']]
         hits = [v['direction_hit'] for v in values if v['direction_hit'] is not None]
-        pnls = [v['would_be_pnl_hkd'] for v in values if v['would_be_pnl_hkd'] is not None]
+        pnls = [v.get(key) for v in values if v.get(key) is not None]
         slippages = [v['slippage_bps'] for v in values if v['slippage_bps'] is not None]
         directional = [v['directional_return_pct'] for v in values if v['directional_return_pct'] is not None]
         result[horizon] = {'scored': len(values), 'pending_or_missing': len(group)-len(values),
             'hit_samples': len(hits), 'hit_rate': sum(hits)/len(hits) if hits else None,
             'avg_return_pct': sum(v['return_pct'] for v in values)/len(values) if values else None,
             'avg_directional_return_pct': sum(directional)/len(directional) if directional else None,
-            'would_be_pnl_hkd': sum(pnls) if pnls else None, 'pnl_samples': len(pnls),
+            key: sum(pnls) if pnls else None, 'pnl_samples': len(pnls),
             'avg_slippage_bps': sum(slippages)/len(slippages) if slippages else None,
             'fill_samples': len(slippages)}
     return result

@@ -169,7 +169,8 @@ def test_pause_cancel_and_protection_cancel_pending_orders_before_expiry(monkeyp
     assert reconcile.call_count == 1 + cancels
 
 
-def test_multi_symbol_run_cannot_reuse_cash_when_broker_snapshot_lags(monkeypatch):
+@pytest.mark.parametrize('maximum,lot,allowed,expected', [(None, 1, True, [4, 1]), (2, 1, True, [2, 2]), (0, 1, True, []), ('unavailable', 1, True, [4, 1]), (None, 2, True, [4]), (None, 1, False, [])])
+def test_multi_symbol_run_cannot_reuse_cash_when_broker_snapshot_lags(monkeypatch, maximum, lot, allowed, expected):
     from app.services.automation import runner
     cfg=config(symbols=['AAPL','TSLA'],execution_mode='paper_auto',max_weight=.5)
     row={'id':1,'token_id':4,'user_id':1,'config':cfg,'revision':1,'state':{}}
@@ -186,6 +187,11 @@ def test_multi_symbol_run_cannot_reuse_cash_when_broker_snapshot_lags(monkeypatc
     monkeypatch.setattr(runner,'account_snapshot',lambda *_:{'funds':{'cash':1000,'power':1000},
         'positions':[{'symbol':'QQQ','side':'long','quantity':4,'marketValue':400}], 'open_orders':[]})
     client=MagicMock()
+    client.get_lot_size.return_value=lot
+    client.get_max_cash_buy.return_value=maximum
+    if maximum == 'unavailable':
+        client.get_max_cash_buy.side_effect = RuntimeError('unsupported')
+    monkeypatch.setattr('app.services.automation.symbol_trigger.session_allowed', lambda *_: allowed)
     client.get_simulate_execution_quote.return_value={'simulate_execution_eligible':True,'price':100,'bid':100,'ask':100,
         'as_of':datetime.now(timezone.utc).timestamp()}
     monkeypatch.setattr('app.services.futu_agent_execution._load_client',lambda *_:client)
@@ -196,9 +202,9 @@ def test_multi_symbol_run_cannot_reuse_cash_when_broker_snapshot_lags(monkeypatc
     monkeypatch.setattr('app.services.agent_trade_intents.submit_intent',submit)
     monkeypatch.setattr('app.services.futu_agent_execution.execute_simulate_intent',lambda *_a,**_k:{'status':'FILLED'})
     runner.execute(row,run)
-    assert [o['qty'] for o in orders]==[4,1]
+    assert [o['qty'] for o in orders]==expected
     assert sum(o['qty']*o['limit_price'] for o in orders)+400 <= 900
-    assert updates[-1]['status']=='completed'
+    assert updates[-1]['status']==('completed' if allowed else 'blocked')
 
 
 @pytest.mark.parametrize('cash,power,maximum,expected', [

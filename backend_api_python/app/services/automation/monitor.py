@@ -73,7 +73,7 @@ def observe(row):
                 set(risk.get('stopped_symbols', [])) - set(previous_risk.get('stopped_symbols', [])))
             new_reasons = set(risk.get('reasons', [])) - set(previous_risk.get('reasons', []))
             new_stops = set(risk.get('stopped_symbols', [])) - set(previous_risk.get('stopped_symbols', []))
-            if current['config']['market'] == 'HKStock' and (new_reasons or new_stops):
+            if current['config']['market'] in {'HKStock', 'USStock'} and (new_reasons or new_stops):
                 cur.execute('INSERT INTO qd_agent_risk_events(task_id,occurred_at,event) VALUES(%s,%s,%s::jsonb)',
                             (current['id'], datetime.fromtimestamp(now, timezone.utc),
                              store.dumps({'reasons': sorted(new_reasons), 'stop_loss_symbols': sorted(new_stops),
