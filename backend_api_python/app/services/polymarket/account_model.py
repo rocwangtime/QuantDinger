@@ -6,8 +6,9 @@ from decimal import ROUND_DOWN
 
 from .engine import EPS, IMPLEMENTATION_HASH, ONE, ZERO, digest, fee, number, public, sweep
 
-VERSION = 'paper-account-1'
-SOURCE_HASH = hashlib.sha256(Path(__file__).read_bytes() + IMPLEMENTATION_HASH.encode()).hexdigest()
+VERSION = 'paper-account-2'
+SOURCE_HASH = hashlib.sha256(Path(__file__).read_bytes() + Path(__file__).with_name('account_history.py').read_bytes()
+                             + IMPLEMENTATION_HASH.encode()).hexdigest()
 DEFAULTS = dict(initial_capital='5000', trade_cap='1000', free_fraction='0.20', locked_fraction='0.60',
                 loss_fraction='0.02', min_edge_bps='10', full_edge_bps='100', min_ticket='10',
                 size_step='0.01', slippage='0', competitor_top='0.50', competitor_other='0',

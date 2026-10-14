@@ -385,6 +385,18 @@ worker reconstructs the last book observed at or before the planned arrival
 instant. Missing, crossed, too-old or evicted observations cannot fill; future
 books cannot replace the required observation. Signal books use this same
 historical lookup rather than attributing a new timestamp to cached depth.
+Book history retains exchange timestamps on snapshots, deltas and pruned bases,
+including REST snapshots. Both receipt age and planned-arrival-minus-exchange
+age must be within `MAX_BOOK_AGE_MS` (2,000 ms by default). Unknown or future
+exchange timestamps fail closed. Returned evidence books include `exchangeMs`
+alongside `observedMs`.
+
+The WS observer also requires both tokens' latest exchange timestamps to be no
+more than two seconds old at evaluation. Dirty stale markets end active episodes
+without research capture or account submission. This gate works with recording
+disabled because receive metadata remains in memory. It does not expire episodes
+on halted feeds without a dirty event, gate direct REST research capture, or prove
+snapshot/delta completeness after a reconnect.
 
 RTT is measured with unauthenticated `GET https://clob.polymarket.com/time`,
 every five minutes by default, retaining 60 samples. Status exposes median, p90,
@@ -431,7 +443,10 @@ component `20261011_polymarket_paper_account`. Tables are
 `qd_polymarket_paper_daily`. Account/transition/trade/leg/report writes commit as
 one transaction. Leg details include requested/filled shares, average prices,
 fees and planned arrival / latency timestamps. Trade evidence is zlib-compressed
-canonical JSON with SHA-256, model version and model/fee-engine source hash.
+canonical JSON with SHA-256, model version and model/history/fee-engine source hash.
+`paper-account-2` identifies exchange-freshness semantics. Older evidence is
+incompatible with this engine; audit it with the original implementation pinned
+to its recorded source revision (the pre-fix implementation remains in Git).
 Evidence contains signal and per-step top 50 books for both sides of both tokens,
 market metadata, sizing inputs, configuration, RTT observations and decision.
 Replay verifies its digest and model compatibility, recomputes sizing and fills,

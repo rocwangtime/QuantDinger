@@ -380,8 +380,8 @@ def _market_loop():
                             if _PIPELINE and _PIPELINE.paper_account:
                                 at = frame['observedMs']
                                 with _PIPELINE.lock:
-                                    for asset, book in mapped.items():
-                                        _PIPELINE.paper_account.history.record(dict(event_type='book', asset_id=asset, **{side: [{'price': p, 'size': z} for p, z in book[side].items()] for side in ('asks', 'bids')}), at)
+                                    for asset in mapped:
+                                        _PIPELINE.paper_account.history.record_rest(asset, frame['books'][asset], at)
                                 _PIPELINE.paper_account.submit(market, mapped, at)
                             if _PIPELINE and _PIPELINE.recording.enabled:
                                 with _PIPELINE.evaluation_lock:
@@ -727,6 +727,13 @@ class Pipeline:
         for key, kind, records in pending + self.recording.books(recorded_books, markets, asset_markets, metadata, now):
             self.queue.put(key, kind, records)
         for market, books in frames:
+            evaluated_at = datetime.now(timezone.utc)
+            if any(a not in metadata or metadata[a][0] is None or
+                   not 0 <= (evaluated_at - metadata[a][0]).total_seconds() <= 2
+                   for a in subscription_assets([market])):
+                self.capture(market['id'], 'observation',
+                             lambda: _end_episode(market['id'], evaluated_at))
+                continue
             if self.paper_account:
                 self.paper_account.submit(market, books, int(time.time() * 1000))
             quote = opportunity(market, books, os.getenv('POLYMARKET_OBSERVER_SIZE_SHARES', '100'),
