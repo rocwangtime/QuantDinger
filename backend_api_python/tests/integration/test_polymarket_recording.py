@@ -30,7 +30,8 @@ def database(monkeypatch):
         cur.execute(f'CREATE SCHEMA {schema}')
         cur.execute(f'SET search_path TO {schema}')
         for file in ('20261011_polymarket_observer.sql', '20261011_polymarket_updown.sql',
-                     '20261014_polymarket_recording.sql', '20261014_polymarket_recording.sql'):
+                     '20261014_polymarket_recording.sql', '20261014_polymarket_recording.sql',
+                     '20261014_polymarket_backtest.sql'):
             cur.execute((migrations / file).read_text())
         db.commit()
         @contextmanager
@@ -75,7 +76,7 @@ def test_repeatable_migration_preserves_legacy_sample_and_indexes(database):
     cur.execute("SELECT market_id,chainlink_price,chainlink_observed_at FROM qd_polymarket_observer_samples")
     assert list(cur.fetchone().values()) == ['legacy', None, None]
     cur.execute("SELECT count(*) count FROM pg_indexes WHERE schemaname=current_schema() AND indexname LIKE 'qd_pm_%'")
-    assert cur.fetchone()['count'] == 10
+    assert cur.fetchone()['count'] == 11
     db.commit()
 
 

@@ -664,7 +664,8 @@ class Pipeline:
                         and recording.scoped(market)):
                     self.queue.put(market['id'], 'window', [(recording.WINDOW_SQL, (
                         market['id'], market['conditionId'], market['asset'], market['interval'],
-                        market['eventStartTime'], market['endDate'], market.get('price_to_beat')))])
+                        market['eventStartTime'], market['endDate'], market.get('price_to_beat'),
+                        market['yesAssetId'], market['noAssetId']))])
         for identity in previous - self.markets.keys():
             self.capture(identity, 'observation', lambda: _end_episode(identity, datetime.now(timezone.utc)))
 

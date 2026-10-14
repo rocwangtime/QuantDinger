@@ -8157,6 +8157,26 @@ paths:
       - Portfolio
       operationId: getApiPolymarketPaperAccountExport
       x-visibility: internal
+  /api/polymarket/backtests/report:
+    get:
+      responses:
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      summary: Latest twenty bounded offline late-window paper research results.
+      tags:
+      - Portfolio
+      operationId: getApiPolymarketBacktestsReport
+      x-visibility: internal
   /api/agent-automations:
     get:
       responses:

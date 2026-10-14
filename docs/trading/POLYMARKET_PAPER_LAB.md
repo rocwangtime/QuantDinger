@@ -822,3 +822,81 @@ registration/reapplication. Global Ruff, backend quality, requirements-lock,
 documentation and whitespace checks passed; OpenAPI was regenerated and the
 registered migration bootstrap ran on the same local DB. No sustained public-feed
 soak, production capacity benchmark or server deployment was performed.
+
+## Offline late-window backtest (2026-10-14)
+
+Apply registered, repeatable `20261014_polymarket_backtest.sql` through the normal
+bootstrap. It adds `qd_polymarket_backtests` and Up/Down token IDs to recorded
+windows. The observer stores the validated token mapping when discovering a
+window; historical missing mappings remain unknown and cannot supply fills.
+
+From `backend_api_python`, using its `.venv`:
+
+```bash
+python -m app.commands.polymarket_backtest \
+  --start 2026-10-13T00:00:00Z --end 2026-10-14T00:00:00Z \
+  --grid --output /tmp/polymarket-late-window.md
+```
+
+Without `--grid`, defaults are `--seconds 60 --threshold-bps 3`; the grid is
+T=30/60/120 seconds and D=3/10/20 bps. Only BTC/ETH 5m/15m windows are studied.
+The first qualifying recorded update in `[end-T,end)` buys the favoured side's
+best recorded ask once per window per parameter pair. Only depth at that ask
+is consumed; shares round down, fees round up, and acquisition including
+`0.07*p*(1-p)` per-share fees stays within `--cap` (default and hard maximum
+$1,000). No order, wallet, signing, HTTP, or funded paper-account operation occurs.
+
+`--max-book-age-seconds` defaults to one second. Both receive-minus-exchange
+latency and replay-time-minus-book-receive age must be nonnegative and at most
+that limit; missing/future exchange timestamps reject. Replay uses receive-time
+availability for books and reference ticks and does not forward-fill stale data.
+Filtered counts are candidate **events**, while missing evidence/token/duration
+and no-entry counts are **windows**. A filtered event can precede a later valid
+entry in the same window.
+
+Chainlink price-to-beat and estimated settlement require exact recorded window
+boundary timestamps, with Up on equality. The signal uses a received Chainlink
+TWAP tick no more than five seconds old. Official resolution always overrides
+estimated settlement. Unknown evidence remains unknown. The anonymous stream
+currently reports `auth_required`; null production TWAPs can therefore produce
+zero eligible windows, which is a valid result.
+
+Only explicit `--allow-proxy` permits recorded Binance reference observations
+from either public host. Proxy boundary and signal observations must be received
+at or before the replay time and no more than ten seconds old. No kline fetch,
+nearest future sample, or invented boundary is used. USD Chainlink signals and
+USDT Binance baselines are never mixed. Every entry labels price-to-beat,
+reference, and settlement separately (`chainlink_twap`, `binance_proxy`, or
+`official_resolution`); each group includes their combined evidence mix.
+
+Each group includes trades, win rate, average ask, fee-inclusive net PnL and
+return on acquisition cost, realized settlement-order USD max drawdown,
+filtered counts, and a seeded 95% percentile bootstrap CI for return. Bootstrap
+resamples independent window trades; correlated markets and sparse recordings
+limit its interpretation. Zero-trade rates and confidence bounds are null.
+This is a capacity-limited observational study, not a funded portfolio simulation.
+
+The CLI persists config, summary and individual recorded fill IDs/evidence
+labels, then prints Markdown. Authenticated
+`GET /api/polymarket/backtests/report` exposes the latest twenty saved runs.
+The optional on-demand Celery task `quantdinger.tasks.polymarket_backtest` accepts
+the same config (`seconds`/`thresholds` lists), uses the `jobs` queue, and has
+240-second soft / 300-second hard limits; no recurring task is scheduled.
+
+All runs require explicit past timezone-aware bounds of at most seven days,
+at most 1,000 windows and 100,000 total input rows. Overflow fails instead of
+silently truncating the study. Individual SQL queries have a 30-second timeout;
+all reads share one repeatable-read snapshot. Bootstrap is bounded to
+100–2,000 repetitions and 18 million total resampled trade slots. Narrow the
+range if recordings exceed these bounds. Saved runs are independent research
+artifacts; retention is manual and they never modify the paper account ledger.
+
+Validation used the backend `.venv` and local PG18 with all three test DSNs set
+to the approved localhost `qd_automation_test` database. Final full pytest:
+**4,142 passed, 24 skipped**, with 59 existing warnings. Backend-wide Ruff,
+backend quality, documentation checks and `git diff --check` passed. A separate
+repository-root Ruff invocation reports 107 findings in unchanged files and
+zero findings in files changed here. Local CLI grid smoke persisted an empty
+recording-range result and wrote Markdown; synthetic PG18 evidence verifies
+actual fee/depth trades and report persistence. No production profitability
+measurement, push, merge or deployment was performed.

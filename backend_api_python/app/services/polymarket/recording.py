@@ -23,7 +23,7 @@ TABLES = ('books', 'trades', 'twap', 'windows', 'samples')
 BOOK_SQL = f"INSERT INTO {PREFIX}books(recording_id,market_id,token_id,exchange_at,received_at,source,bids,asks) VALUES (%s,%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb) ON CONFLICT DO NOTHING"
 TRADE_SQL = f"INSERT INTO {PREFIX}trades(recording_id,market_id,token_id,price,size,side,exchange_at,received_at,transaction_hash) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING"
 TWAP_SQL = f"INSERT INTO {PREFIX}twap(asset,window_seconds,exchange_at,received_at,price,source) VALUES (%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING"
-WINDOW_SQL = f"INSERT INTO {PREFIX}windows(market_id,condition_id,asset,interval,start_time,end_time,price_to_beat) VALUES (%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (market_id) DO NOTHING"
+WINDOW_SQL = f"INSERT INTO {PREFIX}windows(market_id,condition_id,asset,interval,start_time,end_time,price_to_beat,up_token_id,down_token_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (market_id) DO UPDATE SET up_token_id=EXCLUDED.up_token_id,down_token_id=EXCLUDED.down_token_id WHERE (qd_polymarket_observer_windows.up_token_id,qd_polymarket_observer_windows.down_token_id) IS DISTINCT FROM (EXCLUDED.up_token_id,EXCLUDED.down_token_id)"
 
 
 def flag(name, default=False):

@@ -252,3 +252,11 @@ def account_export(query):
         content, mimetype = json.dumps(rows), 'application/json'
     return Response(content, mimetype=mimetype, headers={
         'Content-Disposition': 'attachment; filename="polymarket-paper-report.' + query['format'] + '"'})
+
+
+@blp.route('/backtests/report', methods=['GET'])
+@login_required
+def backtest_report():
+    """Latest twenty bounded offline late-window paper research results."""
+    from app.services.polymarket.backtest import reports
+    return reply(reports)
