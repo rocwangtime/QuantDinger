@@ -203,6 +203,9 @@ def test_buy_sell_replay_uses_owned_fills_and_does_not_repeat(db,monkeypatch):
     row=store.set_active(900001,create(execution_mode='paper_auto')['id'],True)
     holdings=[]
     client=MagicMock()
+    client.get_lot_size.return_value=1
+    client.get_max_cash_buy.return_value=None
+    monkeypatch.setattr('app.services.automation.symbol_trigger.session_allowed', lambda *_: True)
     client.get_simulate_execution_quote.return_value={'simulate_execution_eligible':True,'price':100}
     monkeypatch.setattr('app.services.futu_agent_execution._load_client',lambda *_:client)
     monkeypatch.setattr(runner,'account_snapshot',lambda *_:{'positions':holdings,'open_orders':[],
@@ -697,12 +700,13 @@ def test_old_queued_callbacks_cannot_claim_durable_work_after_restart(db, monkey
     health.stopped()
 
 
-def test_fast_admission_not_hidden_by_bulk_backlog(db):
+@pytest.mark.parametrize('market,symbol', [('HKStock', '01810'), ('USStock', 'AAPL')])
+def test_fast_admission_not_hidden_by_bulk_backlog(db, market, symbol):
     bulk_ids = []
     for _ in range(10):
         row = create()
         bulk_ids.append(run_for(row)['id'])
-    fast_row = create(kind='price_trigger', market='HKStock', symbols=['01810'], trigger={'type': 'price_above', 'price': 10})
+    fast_row = create(kind='price_trigger', market=market, symbols=[symbol], trigger={'type': 'price_above', 'price': 10})
     store.query('UPDATE qd_agent_automations SET active=TRUE WHERE id=%s RETURNING id', (fast_row['id'],))
     fast_row = store.task(900001, fast_row['id'])
     fast_run = run_for(fast_row, preview=False)
@@ -793,16 +797,17 @@ def test_hk_fast_latency_concurrent_triggers_not_starved(db, monkeypatch):
             release.set()
 
 
-def test_hk_latency_failed_model_has_no_submission(db, monkeypatch):
+@pytest.mark.parametrize('market,symbol', [('HKStock', '01810.HK'), ('USStock', 'AAPL')])
+def test_hk_latency_failed_model_has_no_submission(db, monkeypatch, market, symbol):
     from app.services.automation import latency
-    row = create(market='HKStock', symbols=['01810.HK'], kind='price_trigger',
+    row = create(market=market, symbols=[symbol], kind='price_trigger',
                  trigger={'type': 'price_above', 'price': 20})
     row = store.set_active(900001, row['id'], True)
     run = run_for(row, preview=False)
     latency.mark(run, 'trigger_detected')
     latency.persist(run)
     evidence = {'as_of': time.time(), 'account': {'as_of': time.time()},
-                'instruments': {'01810.HK': {'price': 21}}}
+                'instruments': {symbol: {'price': 21}}}
     class Model:
         provider = SimpleNamespace(value='openai')
         def __init__(self, **_): pass

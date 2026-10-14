@@ -111,3 +111,53 @@ def test_finite_job_is_on_maintenance_schedule():
 def test_existing_fast_path_decisions_use_reliable_persisted_timestamp():
     assert scoring.decision_timestamp({'fast_latency': {'timestamps': {'decision': AT.timestamp()}}}) == AT.timestamp()
     assert scoring.decision_timestamp({'items': [], 'finished_at': AT.timestamp()}) is None
+
+
+@pytest.mark.parametrize('at,close,next_close', [
+    (datetime(2026, 10, 30, 19, tzinfo=timezone.utc), datetime(2026, 10, 30, 20, tzinfo=timezone.utc), datetime(2026, 11, 2, 21, tzinfo=timezone.utc)),
+    (datetime(2026, 11, 26, 12, tzinfo=timezone.utc), datetime(2026, 11, 27, 18, tzinfo=timezone.utc), datetime(2026, 11, 30, 21, tzinfo=timezone.utc)),
+])
+def test_us_horizons_dst_holiday_and_half_day(at, close, next_close):
+    times = scoring.horizons(at, 'USStock')
+    assert times['close'] == close
+    assert times['next_close'] == next_close
+
+
+def test_us_quantity_and_outcome_use_cash_and_usd():
+    from tests.test_agent_automations import config, decision
+    cfg = config(budget=10000, max_order_notional=5000, max_daily_notional=5000, max_weight=.5)
+    evidence = {'account': {'funds': {'cash': 250, 'power': 500}, 'positions': [], 'open_orders': []}}
+    qty = scoring.hypothetical_quantity(decision(target_weight=.5), cfg, evidence, 100, 1)
+    assert qty == 2
+    due = AT + timedelta(minutes=5)
+    score = {'symbol': 'AAPL', 'horizon': '5m', 'due_at': due,
+             'inputs': {'market': 'USStock', 'action': 'BUY', 'price': 100, 'quantity': qty}}
+    value = scoring.outcome(score, [{'time': due.timestamp()-60, 'close': 102}], [])
+    assert value['would_be_pnl_usd'] == 4
+    assert 'would_be_pnl_hkd' not in value
+    assert scoring.summarize([{'horizon': '5m', 'outcome': value}], 'USStock')['5m']['would_be_pnl_usd'] == 4
+
+
+@pytest.mark.parametrize('market', ['HKStock', 'USStock'])
+def test_fast_latency_is_enabled_only_for_nonpreview_price_tasks(market):
+    from app.services.automation import latency
+    row = {'config': {'kind': 'price_trigger', 'market': market}}
+    assert latency.enabled(row, {'preview': False})
+    assert not latency.enabled(row, {'preview': True})
+    row['config']['kind'] = 'daily_portfolio'
+    assert not latency.enabled(row, {'preview': False})
+
+
+def test_us_history_uses_frozen_market_and_et_date(monkeypatch):
+    from unittest.mock import MagicMock
+    client = MagicMock()
+    client.get_history_kline.return_value = []
+    monkeypatch.setattr('app.services.exchange_execution.resolve_exchange_config', lambda *_a, **_k: {})
+    monkeypatch.setattr('app.services.futu_trading.config.config_from_exchange_config', lambda _: {})
+    monkeypatch.setattr('app.services.futu_trading.quote_client.FutuQuoteClient', lambda _: client)
+    score = {'symbol': 'AAPL', 'due_at': datetime(2026, 10, 14, 0, 30, tzinfo=timezone.utc),
+             'inputs': {'market': 'USStock', 'credential_id': 7}}
+    scoring.fetch_bars({'user_id': 1, 'config': {'market': 'HKStock'}}, score)
+    client.get_history_kline.assert_called_once_with('AAPL', market_type='USStock', ktype='K_1M',
+        start='2026-10-13', end='2026-10-13', max_count=1000, autype='NONE')
+    client.close.assert_called_once()

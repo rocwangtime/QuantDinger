@@ -148,6 +148,7 @@ def test_us_runner_uses_broker_lot_and_final_tick(db, monkeypatch):
     client.get_simulate_execution_quote.return_value = dict(simulate_execution_eligible=True,
         price=250, bid=249.99, ask=250.019, as_of=now.timestamp())
     client.get_lot_size.return_value = 1
+    client.get_max_cash_buy.return_value = None
     monkeypatch.setattr(runner, 'utcnow', lambda: now)
     monkeypatch.setattr('app.services.futu_agent_execution._load_client', lambda *_: client)
     monkeypatch.setattr(runner, 'account_snapshot', lambda *_: dict(

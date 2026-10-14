@@ -7,8 +7,9 @@ import pytest
 from app.services.automation import worker
 
 
+@pytest.mark.parametrize('market', ['HKStock', 'USStock'])
 @pytest.mark.parametrize('status', ['queued', 'planned'])
-def test_fast_analysis_and_order_do_not_wait_for_bulk(monkeypatch, status):
+def test_fast_analysis_and_order_do_not_wait_for_bulk(monkeypatch, status, market):
     release = threading.Event()
     started = threading.Barrier(3)
     called = threading.Event()
@@ -20,7 +21,7 @@ def test_fast_analysis_and_order_do_not_wait_for_bulk(monkeypatch, status):
     def decision(*args):
         called.set()
 
-    monkeypatch.setattr(worker.store, 'task', lambda *_: {'config': {'kind': 'price_trigger', 'market': 'HKStock'}})
+    monkeypatch.setattr(worker.store, 'task', lambda *_: {'config': {'kind': 'price_trigger', 'market': market}})
     monkeypatch.setattr(worker, 'analyze', decision)
     monkeypatch.setattr(worker, 'execute', decision)
     run = {'id': 3, 'user_id': 1, 'task_id': 3, 'status': status, 'preview': False}

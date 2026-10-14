@@ -240,9 +240,9 @@ def execute(row, run):
                     continue
             if not quote.get('simulate_execution_eligible'):
                 raise ValueError('Fresh regular-session SIMULATE quote is unavailable')
-            if config['market'] == 'USStock' and config.get('symbol_params'):
+            if config['market'] == 'USStock':
                 from app.services.automation.symbol_trigger import session_allowed
-                if not session_allowed(config, utcnow().timestamp()):
+                if not session_allowed({**config, 'symbol_params': config.get('symbol_params') or {'blackout_close_minutes': 0}}, utcnow().timestamp()):
                     raise ValueError('Symbol session blackout prevents submission')
             price = float(quote['price'])
             if config.get('symbol_params') and item['action'] == 'BUY':
@@ -258,10 +258,18 @@ def execute(row, run):
                     still_met = condition(config['symbol_params'], price, (row['state'].get('trigger') or {}).get('reference') or {})
                 if not still_met:
                     raise ValueError('Trigger condition no longer holds')
-            lot = (client.get_lot_size(item['symbol']) or 1) if config.get('symbol_params') or config['market'] == 'HKStock' else 1
+            lot = client.get_lot_size(item['symbol']) or 1
             if config['market'] == 'HKStock' or config.get('symbol_params'):
                 price = limit
-            maximum = client.get_max_cash_buy(item['symbol'], price) if config['market']=='HKStock' and item['action']=='BUY' else None
+            maximum = None
+            if item['action'] == 'BUY':
+                try:
+                    maximum = client.get_max_cash_buy(item['symbol'], price)
+                except (AttributeError, NotImplementedError, RuntimeError):
+                    if config['market'] == 'HKStock':
+                        raise
+                    # US sizing still uses unleveraged min(cash, power).
+                    maximum = None
             if config.get('symbol_params') and lot != config['symbol_params']['lot_size']:
                 raise ValueError('Configured lot size differs from broker; update symbol settings')
             rejection = {}
@@ -284,9 +292,9 @@ def execute(row, run):
                     FROM qd_agent_automations t JOIN qd_agent_automation_runs r ON r.task_id=t.id
                     WHERE t.id=%s AND r.id=%s FOR UPDATE OF t,r''',(row['id'],run['id']))
                 live = cur.fetchone()
-                if config['market'] == 'USStock' and config.get('symbol_params'):
+                if config['market'] == 'USStock':
                     from app.services.automation.symbol_trigger import session_allowed
-                    if not session_allowed(config, utcnow().timestamp()):
+                    if not session_allowed({**config, 'symbol_params': config.get('symbol_params') or {'blackout_close_minutes': 0}}, utcnow().timestamp()):
                         raise ValueError('Symbol session blackout prevents submission')
                 validate_order(order, config, lot=lot, broker_qty=broker_qty, cash=cash)
                 if config.get('symbol_params') and order['side'] == 'buy':

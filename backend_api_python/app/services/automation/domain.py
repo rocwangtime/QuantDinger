@@ -226,7 +226,7 @@ def size_order(item, config, *, price, lot, owned_qty, broker_qty, power, open_s
         # Existing external positions contribute to exposure, but are never sold.
         delta = max(0, target - broker_qty)
         cap = min(config['max_order_notional'], max(0, power), delta * price)
-        if config['market'] == 'HKStock' and max_cash_buy is not None:
+        if max_cash_buy is not None:
             # Futu max_cash_buy is a quantity, not a monetary balance.
             cap = min(cap, number(max_cash_buy) * price)
         qty, side = math.floor(cap / price / lot) * lot, 'buy'

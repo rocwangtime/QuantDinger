@@ -77,7 +77,7 @@ def reconcile_orders():
 
 
 # SQL admission is split before LIMIT so a bulk backlog cannot hide fast work.
-FAST_RUN_PREDICATE = "(t.config->>'kind'='price_trigger' AND t.config->>'market'='HKStock' AND r.preview=FALSE)"
+FAST_RUN_PREDICATE = "(t.config->>'kind'='price_trigger' AND t.config->>'market' IN ('HKStock','USStock') AND r.preview=FALSE)"
 
 
 def ready_runs(fast):
