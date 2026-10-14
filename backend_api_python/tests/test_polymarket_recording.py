@@ -192,3 +192,38 @@ def test_recording_flag_disables_all_staging(monkeypatch):
     p.evaluate(10)
     assert not p.recording.metadata
     assert all(item[1] not in {'book', 'trade', 'twap', 'window'} for item in p.queue.items)
+
+
+@pytest.mark.parametrize(('books', 'trades', 'expected'), [
+    (None, None, (7, 7)), ('', '', (7, 7)),
+    ('3', None, (3, 3)), ('3', '', (3, 3)), ('3', '14', (3, 14)),
+    (None, '14', (7, 14)), ('0', None, (1, 1)), ('366', '', (365, 365)),
+    ('3', '0', (3, 1)), ('3', '366', (3, 365)),
+    ('1', '365', (1, 365)),
+])
+def test_recording_retention_fallback_override_and_bounds(monkeypatch, books, trades, expected):
+    for suffix, value in [('RECORDING', books), ('TRADES', trades)]:
+        name = f'POLYMARKET_OBSERVER_{suffix}_RETENTION_DAYS'
+        if value is None:
+            monkeypatch.delenv(name, raising=False)
+        else:
+            monkeypatch.setenv(name, value)
+    days = recording.retention_days()
+    assert (days['books'], days['trades']) == expected
+    assert recording.Recorder().metrics({})['recording_retention_days'] == days
+
+
+def test_cleanup_uses_distinct_retention_per_table(monkeypatch):
+    for suffix, value in [('RECORDING', '3'), ('TRADES', '14'), ('TWAP', '5'), ('WINDOW', '30')]:
+        monkeypatch.setenv(f'POLYMARKET_OBSERVER_{suffix}_RETENTION_DAYS', value)
+    monkeypatch.setenv('POLYMARKET_OBSERVER_RECORDING_CLEANUP_BATCH', '1000')
+    cur = Mock()
+    recording.cleanup(cur)
+    assert cur.execute.call_count == 4
+    for call, table, column, days in zip(cur.execute.call_args_list,
+            ['books', 'trades', 'twap', 'windows'],
+            ['received_at', 'received_at', 'exchange_at', 'end_time'], [3, 14, 5, 30]):
+        sql, params = call.args
+        assert sql.startswith(f'DELETE FROM qd_polymarket_observer_{table} ')
+        assert f'WHERE {column} < NOW()' in sql
+        assert params == (days, 1000)

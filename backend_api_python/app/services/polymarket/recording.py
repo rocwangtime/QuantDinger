@@ -265,22 +265,32 @@ class Recorder:
         def percentile(q):
             return ages[min(len(ages) - 1, math.ceil(len(ages) * q) - 1)] if ages else None
         return dict(recording_enabled=self.enabled, recording_rows_per_minute=rates,
+                    recording_retention_days=retention_days(),
                     recording_buffer_depth=len(self.pending), recording_dropped=self.dropped,
                     recording_invalid=self.invalid, book_age_p50_ms=percentile(.5),
                     book_age_p95_ms=percentile(.95), book_age_tokens=len(ages))
 
 
+def retention_days():
+    books = max(1, min(365, int(os.getenv('POLYMARKET_OBSERVER_RECORDING_RETENTION_DAYS') or 7)))
+    trades = max(1, min(365, int(os.getenv('POLYMARKET_OBSERVER_TRADES_RETENTION_DAYS') or books)))
+    return dict(books=books, trades=trades,
+                twap=setting('TWAP_RETENTION_DAYS', 7, 1, 365),
+                windows=setting('WINDOW_RETENTION_DAYS', 30, 1, 365))
+
+
 def cleanup(cur):
     # Chunk indexed deletes, keeping cleanup transactions bounded. Repeated
     # ten-minute passes remove a backlog without holding a huge transaction.
-    for table, column, suffix, default in (
-        ('books', 'received_at', 'RECORDING_RETENTION_DAYS', 7),
-        ('trades', 'received_at', 'RECORDING_RETENTION_DAYS', 7),
-        ('twap', 'exchange_at', 'TWAP_RETENTION_DAYS', 7),
-        ('windows', 'end_time', 'WINDOW_RETENTION_DAYS', 30),
+    days = retention_days()
+    for table, column in (
+        ('books', 'received_at'),
+        ('trades', 'received_at'),
+        ('twap', 'exchange_at'),
+        ('windows', 'end_time'),
     ):
         cur.execute(f"DELETE FROM {PREFIX}{table} WHERE ctid IN (SELECT ctid FROM {PREFIX}{table} WHERE {column} < NOW() - (%s * INTERVAL '1 day') ORDER BY {column} LIMIT %s)",
-                    (setting(suffix, default, 1, 365), setting('RECORDING_CLEANUP_BATCH', 100000, 100, 1000000)))
+                    (days[table], setting('RECORDING_CLEANUP_BATCH', 100000, 100, 1000000)))
 
 
 class References:

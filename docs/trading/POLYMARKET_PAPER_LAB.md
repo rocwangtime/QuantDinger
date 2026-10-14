@@ -665,7 +665,8 @@ Existing Binance reference columns remain separate observations.
 | `RECORDING_ENABLED` | true (observer itself remains disabled by default) |
 | `BOOK_MIN_INTERVAL_MS` | 1000 / 100–60000 |
 | `RECORDING_BUFFER_MAX` | 10000 / 1–100000 staging records, additional to existing writer queue |
-| `RECORDING_RETENTION_DAYS` | 7 / 1–365, books and trades |
+| `RECORDING_RETENTION_DAYS` | 7 / 1–365, depth/book snapshots |
+| `TRADES_RETENTION_DAYS` | Unset/empty inherits `RECORDING_RETENTION_DAYS` (then 7) / 1–365, public trades |
 | `RECORDING_CLEANUP_BATCH` | 100000 / 100–1000000 rows per table per ten-minute pass |
 | `TWAP_ENABLED` | false, anonymous probe only |
 | `TWAP_MIN_INTERVAL_MS` | 1000 / 100–60000 (exact boundary exception) |
@@ -673,12 +674,16 @@ Existing Binance reference columns remain separate observations.
 | `WINDOW_RETENTION_DAYS` | 30 / 1–365 |
 | `RESOLUTION_POLL_SECONDS` | 60 / 10–3600 |
 
+The `env.example` target is depth/book snapshots for 3 days and public trades
+for 14 days. Books and trades use independent effective retention values.
+
 Cleanup uses indexed, oldest-first chunked deletes. A backlog may take several
 passes; monitor table growth and increase batch size or recording interval for
 larger scopes. PostgreSQL autovacuum must reclaim dead tuples; retention is not
 an immediate disk-space release.
 
-Observer status exposes `recording_rows_per_minute` for actual committed inserts
+Observer status exposes `recording_retention_days` with effective days for
+books, trades, TWAP and windows, and `recording_rows_per_minute` for actual committed inserts
 into books/trades/TWAP/windows/samples over the trailing 60 seconds (process-local,
 zero after restart), staging depth/loss/invalid counts, existing queue drops and
 coalesces, and `book_age_p50_ms` / `book_age_p95_ms` over current timestamped token
