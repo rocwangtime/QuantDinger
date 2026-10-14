@@ -218,7 +218,12 @@ def account_replay(trade_id):
 @login_required
 @blp.arguments(AccountReportQuery, location='query')
 def account_report(query):
-    """UTC daily account activity, fees, equity risk and utilization."""
+    """UTC daily paper activity and observer WS health.
+
+    Each row includes ws_stats: reconnect_count, slow_consumer_count,
+    rebalance_count and shard_msg_totals (shard ID to received frame count).
+    Days with WS activity only have day and ws_stats; paper fields are absent.
+    """
     from app.services.polymarket import account_api
     return reply(lambda: account_api.reports(**query))
 
@@ -237,10 +242,10 @@ def account_export(query):
     if query['format'] == 'csv':
         output = io.StringIO()
         keys = ['day', 'attempted', 'filled', 'fill_rate', 'single_leg_failures', 'unwinds', 'net_pnl',
-                'fees', 'max_drawdown', 'capital_utilization_avg', 'capital_utilization_max', 'opportunities']
+                'fees', 'max_drawdown', 'capital_utilization_avg', 'capital_utilization_max', 'opportunities', 'ws_stats']
         writer = csv.DictWriter(output, fieldnames=keys, extrasaction='ignore')
         writer.writeheader()
-        writer.writerows(rows)
+        writer.writerows({**row, 'ws_stats': json.dumps(row['ws_stats'])} if 'ws_stats' in row else row for row in rows)
         content, mimetype = output.getvalue(), 'text/csv'
     else:
         content, mimetype = json.dumps(rows), 'application/json'

@@ -28,6 +28,7 @@ def isolated(monkeypatch):
         sql = (Path(__file__).parents[2] / 'migrations/20261011_polymarket_paper_account.sql').read_text()
         cur.execute(sql)
         cur.execute(sql)
+        cur.execute((Path(__file__).parents[2] / 'migrations/20261013_polymarket_ws_daily.sql').read_text())
         db.commit()
         cur.close()
     @contextmanager

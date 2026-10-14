@@ -156,6 +156,7 @@ def test_loop_updates_subscription_without_reconnect_at_rediscovery(monkeypatch)
     """Refresh updates the open public socket without clearing retained books."""
     import sys
     from types import SimpleNamespace
+    monkeypatch.setenv('POLYMARKET_OBSERVER_WS_SHARDS', '1')
     mono = [100.0]
     sockets, subscriptions, heartbeats = [], [], []
     base = {'id': 'old', 'asset': 'BTC', 'interval': '15m', 'endDate': (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat(), 'yesAssetId': '1', 'noAssetId': '2'}
@@ -237,9 +238,9 @@ def test_loop_updates_subscription_without_reconnect_at_rediscovery(monkeypatch)
     monkeypatch.setattr(updown, 'discover', discovery)
     monkeypatch.setitem(sys.modules, 'websocket', SimpleNamespace(WebSocketApp=Socket))
     observer._market_loop()
-    assert [s['assets_ids'] for s in subscriptions] == [['1', '2'], ['1', '2'], ['3', '4']]
+    assert [s['assets_ids'] for s in subscriptions] == [['1', '2'], ['3', '4'], ['1', '2']]
     assert subscriptions[0]['type'] == 'market'
-    assert [s['operation'] for s in subscriptions[1:]] == ['unsubscribe', 'subscribe']
+    assert [s['operation'] for s in subscriptions[1:]] == ['subscribe', 'unsubscribe']
     assert len(sockets) == 1
     assert len(heartbeats) == 2
     assert all(sock.closed for sock in sockets)

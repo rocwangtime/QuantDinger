@@ -355,6 +355,10 @@ def _apply_init_sql(logger, *, strict: bool = False):
                 path=Path(__file__).resolve().parent.parent.parent / "migrations" / "20261011_polymarket_observer.sql",
             )
             _apply_migration_component(
+                conn, logger, name="20261013_polymarket_ws_daily",
+                path=Path(__file__).resolve().parent.parent.parent / "migrations" / "20261013_polymarket_ws_daily.sql",
+            )
+            _apply_migration_component(
                 conn, logger, name="20261011_polymarket_paper_account",
                 path=Path(__file__).resolve().parent.parent.parent / "migrations" / "20261011_polymarket_paper_account.sql",
             )

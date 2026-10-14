@@ -197,3 +197,54 @@ def test_batched_pipeline_preserves_start_end_start_and_near_max(monkeypatch):
             cur.execute('DELETE FROM qd_polymarket_observer_near_misses WHERE market_id=%s', (identity,))
             db.commit()
             cur.close()
+
+
+@pytest.mark.integration
+def test_ws_daily_migration_and_incremental_idempotent_upsert(monkeypatch):
+    from pathlib import Path
+    from app.services.polymarket import ws_balance, account_api
+    _test_dsn(monkeypatch)
+    schema = 'ws_daily_' + uuid4().hex
+    sql = (Path(__file__).parents[2] / 'migrations' / '20261013_polymarket_ws_daily.sql').read_text()
+    with get_db_connection() as db:
+        cur = db.cursor()
+        cur.execute('SHOW server_version_num')
+        assert int(next(iter(cur.fetchone().values()))) // 10000 == 18
+        cur.execute(f'CREATE SCHEMA {schema}')
+        cur.execute(f'SET search_path TO {schema}')
+        cur.execute(sql)
+        cur.execute(sql)
+        cur.execute('CREATE TABLE qd_polymarket_paper_daily(account_id text, day date, stats jsonb)')
+        db.commit()
+        class Connection:
+            def __enter__(self):
+                return db
+            def __exit__(self, *args):
+                if args[0]:
+                    db.rollback()
+        monkeypatch.setattr(ws_balance, 'get_db_connection', Connection)
+        monkeypatch.setattr(account_api, 'get_db_connection', Connection)
+        first, second = ws_balance.DailyStats(), ws_balance.DailyStats()
+        day = '2026-10-13'
+        try:
+            first.increment('reconnect_count', day=day)
+            first.increment('message', shard=0, day=day)
+            first.persist()
+            first.dirty.add(day)  # Simulate retry after an ambiguous commit.
+            first.persist()
+            first.increment('message', shard=0, day=day)
+            first.increment('slow_consumer_count', day=day)
+            first.persist()
+            second.increment('rebalance_count', day=day)
+            second.increment('message', shard=1, day=day)
+            second.persist()
+            report = account_api.reports(day=day)[0]
+            assert report['ws_stats'] == dict(reconnect_count=1, slow_consumer_count=1,
+                                             rebalance_count=1, shard_msg_totals={'0': 2, '1': 1})
+            assert not first.dirty
+        finally:
+            db.rollback()
+            cur.execute('SET search_path TO public')
+            cur.execute(f'DROP SCHEMA {schema} CASCADE')
+            db.commit()
+            cur.close()

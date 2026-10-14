@@ -285,12 +285,13 @@ limit except when a single indivisible transition group exceeds that limit.
 Current [Polymarket real-time documentation](https://docs.polymarket.com/market-data/realtime-data)
 explicitly supports `{"assets_ids":[...],"operation":"subscribe"}` and
 `unsubscribe` on an existing market connection. Unchanged subscriptions cause
-no wire update; removals and additions are sent in two bounded frames. Two connections are the default: YES/NO and Up/Down have separate receive
-threads, subscription sets and ten-second application `PING` keepalives. A local
+no wire update; removals and additions are sent in two bounded frames. Four connections are now the default, with independent receive threads,
+subscription sets and ten-second application `PING` keepalives. A local
 single-socket smoke still hit one slow-consumer close after receive isolation,
-so two shards were selected from that evidence. Unused custom-feature events
-are no longer requested. `WS_SHARDS=1` uses one connection; 3–8 use stable CRC32
-market-ID assignment, keeping both outcomes together. Reconnects affect only
+so sharding was selected from that evidence. Unused custom-feature events
+are no longer requested. `WS_SHARDS=1` uses one connection; initial placement at 2 separates YES/NO and
+Up/Down, while 3–8 use stable CRC32 market-ID assignment. Measured token rates
+subsequently determine placement as described below. Reconnects affect only
 the failed shard and clear that shard's depth. REST fallback remains available.
 
 Status uses the existing JSON status row and `polymarket-observer` heartbeat, with cumulative
@@ -310,7 +311,7 @@ durable transitions. Inspect flush/error metrics before terminating the worker.
 
 | New environment variable | Default | Bounds / meaning |
 | --- | --- | --- |
-| `POLYMARKET_OBSERVER_WS_SHARDS` | 2 | 1–8; separate YES/NO and Up/Down at 2, stable market hashing above 2 |
+| `POLYMARKET_OBSERVER_WS_SHARDS` | 4 | 1–8; initial market assignment, then measured token-rate balancing |
 | `POLYMARKET_OBSERVER_EVALUATE_MS` | 250 | 50–5000; evaluator cadence |
 | `POLYMARKET_OBSERVER_WRITE_QUEUE_MAX` | 10000 | 1–100000; atomic queued groups |
 | `POLYMARKET_OBSERVER_WRITE_BATCH_SIZE` | 500 | 1–5000; SQL operations per transaction |
@@ -502,3 +503,79 @@ local PG/public-feed smoke observed 83,387 messages, RTT median 107.1 ms / p90
 one remote-close reconnect and no slow-consumer closes. All smoke rows were
 removed. Full commands, file manifest, assumptions and logs are recorded in
 `deploy/polymarket_paper_account_notes.md` in the development workspace.
+
+
+## Measured WS shard balancing and daily health (2026-10-13)
+
+The observer remains public, read-only and paper-only. Each valid incoming frame
+counts once for each distinct token named in it, including price-change frames
+before a book exists. Only the current owner contributes to that token's EWMA;
+brief handover overlap does not inflate its rate. Physical per-shard frame totals
+exclude `PONG` and include overlap traffic. Receive callbacks update only memory.
+
+Every `POLYMARKET_OBSERVER_WS_REBALANCE_SECONDS` (default 60), measured counts are
+converted to rates using elapsed monotonic time and an EWMA with
+`POLYMARKET_OBSERVER_WS_RATE_HALF_LIFE_SECONDS` (default 30). Idle tokens decay.
+Largest-first greedy bins balance individual asset/token subscriptions; YES/NO
+outcomes may use different shards after a rebalance. The total discovered token
+set is preserved. Equivalent bins are matched to existing shard owners to
+maximize retained subscriptions, then only a prefix of moves needed to enter
+the hysteresis band is applied. This is a churn-reducing heuristic, not a global
+minimum-move optimizer.
+
+Imbalance is `(max shard rate - min shard rate) / mean rate`, or zero for an idle
+feed. A move requires both current imbalance and its reduction to exceed
+`POLYMARKET_OBSERVER_WS_REBALANCE_HYSTERESIS` (default 0.25). Successful rebalances
+must be at least `POLYMARKET_OBSERVER_WS_REBALANCE_MIN_SECONDS` apart (default
+120). Reconnects request a fresh check as soon as all shards are connected,
+bypassing the periodic check deadline but preserving hysteresis and cooldown.
+A single indivisibly hot token can leave residual imbalance without causing
+repeated reshuffles. Status exposes `ws_shard_loads` (EWMA token frames/sec),
+`ws_load_imbalance`, `ws_rebalance_hysteresis` and
+`ws_last_rebalance_monotonic` (process-local clock; null before the first move).
+
+All destination subscribe frames are sent before source unsubscribe frames.
+A destination send failure aborts source removals. Healthy moves preserve book
+and paper history caches; reconnects still invalidate the failed shard's books.
+The public stream has no subscription acknowledgement barrier here: send order
+reduces gaps where feasible, but cannot guarantee gap-free delivery after a
+remote/network failure. Brief duplicate events remain possible during handover.
+
+Migration `20261013_polymarket_ws_daily.sql` is additive, repeatable and registered
+in the bootstrap invoked by `python -m app.commands.migrate`. It stores cumulative
+UTC-day checkpoints by process session in `qd_polymarket_ws_daily`. The ten-second
+status persistence and final shutdown status upsert reconnect, slow-consumer,
+rebalance counts and `shard_msg_totals`. Retries overwrite a session checkpoint,
+so an ambiguous commit cannot double count; restarted processes use new session
+IDs and reports sum their counts. Failed writes retain dirty days for retry.
+A hard kill can lose counters since the latest checkpoint; this is not a durable
+per-message log. WS daily rows currently have no automatic retention policy.
+
+The existing authenticated `/api/polymarket/paper-account/daily-report` and JSON
+or CSV export include `ws_stats` with those four fields, aggregated across
+sessions. Days with WS activity but no paper-account row are returned with `day`
+and `ws_stats` only; economic/account fields remain absent. CSV serializes
+`ws_stats` as JSON. No account enablement is required to collect WS health stats.
+
+Deploy notes: run migrations before updating API/observer, set the shard count
+and optional four tuning variables in the observer environment, then restart the
+dedicated observer using the existing lease/drain lifecycle. Keep scheduler
+hosting disabled. Inspect per-shard load, imbalance, slow-consumer counts and
+writer health after restart. No wallet, credentials, signing or orders are added.
+
+Local validation: PostgreSQL 18.6, existing `backend_api_python/.venv`, with
+`DATABASE_URL`, `AUTOMATION_TEST_DATABASE_URL` and `QD_TEST_POSTGRES_DSN` all set
+to the approved localhost `qd_automation_test` database. From the backend root:
+
+```bash
+.venv/bin/python -m pytest tests/test_polymarket*.py tests/integration/test_polymarket*.py tests/test_process_roles.py tests/test_scheduler_sql.py -q
+.venv/bin/python -m pytest tests/test_db_bootstrap.py -q
+```
+
+Results: 211 and 10 passed respectively; 15 existing `datetime.utcnow()`
+deprecation warnings. Changed Python modules/tests passed Ruff; whitespace checks,
+OpenAPI export and local migration bootstrap passed. Coverage includes EWMA decay,
+LPT load reduction, subscription preservation, hysteresis/cooldown, reconnect
+checks, destination failure, subscribe-before-unsubscribe ordering, UTC rollover,
+retry retention and idempotent PG upsert/report aggregation across sessions.
+No public-feed soak or server deployment was performed for this change.

@@ -73,4 +73,20 @@ def reports(days=30, day=None):
         result.append(dict(day=str(row['day']), **s, fill_rate=s['filled'] / s['attempted'] if s['attempted'] else 0,
             capital_utilization_avg=float(s['utilization_sum']) / s['utilization_count'] if s['utilization_count'] else 0,
             capital_utilization_max=s['utilization_max']))
-    return result
+    ws_rows = query('SELECT day,reconnect_count,slow_consumer_count,rebalance_count,shard_msg_totals FROM qd_polymarket_ws_daily WHERE ' +
+        ('day=%s::date' if day else "day >= (NOW() AT TIME ZONE 'UTC')::date - %s"),
+        (str(day) if day else days - 1,))
+    by_day = {row['day']: row for row in result}
+    for row in ws_rows:
+        key = str(row['day'])
+        report = by_day.setdefault(key, dict(day=key))
+        stats = report.setdefault('ws_stats', dict(reconnect_count=0, slow_consumer_count=0,
+                                                 rebalance_count=0, shard_msg_totals={}))
+        for name in ('reconnect_count', 'slow_consumer_count', 'rebalance_count'):
+            stats[name] += row[name]
+        for shard, total in row['shard_msg_totals'].items():
+            stats['shard_msg_totals'][shard] = stats['shard_msg_totals'].get(shard, 0) + total
+    for report in by_day.values():
+        report.setdefault('ws_stats', dict(reconnect_count=0, slow_consumer_count=0,
+                                          rebalance_count=0, shard_msg_totals={}))
+    return sorted(by_day.values(), key=lambda row: row['day'], reverse=True)

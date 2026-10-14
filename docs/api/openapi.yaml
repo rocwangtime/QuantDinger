@@ -8098,7 +8098,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HumanSuccessEnvelope'
-      summary: UTC daily account activity, fees, equity risk and utilization.
+      summary: UTC daily paper activity and observer WS health.
+      description: 'Each row includes ws_stats: reconnect_count, slow_consumer_count,
+
+        rebalance_count and shard_msg_totals (shard ID to received frame count).
+
+        Days with WS activity only have day and ws_stats; paper fields are absent.'
       tags:
       - Portfolio
       operationId: getApiPolymarketPaperAccountDailyReport
