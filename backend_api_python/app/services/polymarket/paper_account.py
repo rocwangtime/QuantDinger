@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 
 from app.utils.db import get_db_connection
 from . import account_model as model
-from .account_history import BookHistory
+from .account_history import BookHistory, coherent_pair, max_pair_skew_ms
 from .client import CLOB, PublicClient
 from .engine import ZERO, _array, digest, number, public
 from .updown import timestamp
@@ -400,6 +400,19 @@ class Runtime:
             states = self.history.copy_assets(assets)
         return [BookHistory.lookup(states, a, at, self.config['max_book_age_ms']) for a in assets]
 
+    def admit(self, account, market, observed, now):
+        """Pair coherence applies only to new signals, never delayed leg lookup."""
+        if now - observed > self.config['max_book_age_ms']:
+            return
+        signal_books = self.lookup(market, observed)
+        if any(book is None for book in signal_books) or not coherent_pair(
+                [book.get('exchangeMs') for book in signal_books], observed,
+                self.config['max_book_age_ms'], max_pair_skew_ms()):
+            return
+        if not self.config['merge_enabled'] and not market.get('endDate'):
+            return
+        account.signal(market, signal_books, observed, self.latency.status(now))
+
     def run(self):
         store = Store()
         from app.utils.db import get_db_connection_sync
@@ -440,14 +453,7 @@ class Runtime:
                         market, books, observed = self.inbox.get_nowait()
                     except queue.Empty:
                         break
-                    if now - observed > self.config['max_book_age_ms']:
-                        continue
-                    signal_books = self.lookup(market, observed)
-                    if any(book is None for book in signal_books):
-                        continue
-                    if not self.config['merge_enabled'] and not market.get('endDate'):
-                        continue
-                    account.signal(market, signal_books, observed, self.latency.status(now))
+                    self.admit(account, market, observed, now)
                 if account.changed or now - last_save >= 10000:
                     while not self.stop_event.is_set():
                         try:

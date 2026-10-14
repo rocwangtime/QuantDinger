@@ -151,3 +151,97 @@ def test_missing_token_metadata_fails_closed(monkeypatch):
     monkeypatch.setattr(observer, 'opportunity', Mock(side_effect=AssertionError('missing metadata quote')))
     p.evaluate(10)
     end.assert_called_once()
+
+
+@pytest.mark.parametrize('times,expected', [
+    ([1000, 1250], True), ([1000, 1251], False),
+    ([None, 1250], False), ([1000, 3001], False),
+    ([999, 1250], False), ([1000], False), ([], False),
+])
+def test_pair_boundary_and_individual_age(times, expected):
+    from app.services.polymarket.account_history import coherent_pair
+    assert coherent_pair(times, 3000) is expected
+
+
+@pytest.mark.parametrize('enabled', [True, False])
+@pytest.mark.parametrize('skew,accepted', [(250, True), (251, False)])
+def test_observer_pair_admission_and_counters(monkeypatch, enabled, skew, accepted):
+    monkeypatch.setenv('POLYMARKET_OBSERVER_RECORDING_ENABLED', str(enabled))
+    monkeypatch.setenv('POLYMARKET_OBSERVER_MAX_PAIR_SKEW_MS', '250')
+    p = observer.Pipeline()
+    p.set_markets([dict(id='pair', yesAssetId='u', noAssetId='d')])
+    at = int(datetime.now(timezone.utc).timestamp() * 1000) - 100
+    for token, timestamp in [('u', at), ('d', at - skew)]:
+        p.receive(json.dumps(snapshot(timestamp, token)))
+    p.paper_account = Mock()
+    monkeypatch.setattr(observer, 'opportunity', Mock(return_value=None))
+    monkeypatch.setattr(observer, 'record_research', Mock())
+    monkeypatch.setattr(observer, '_end_episode', Mock())
+    p.evaluate(10)
+    assert p.paper_account.submit.called is accepted
+    # Remove the mock runtime before asking for real status metrics.
+    p.paper_account = None
+    assert p.metrics()['pair_rejections'] == dict(stale=0, skew=int(not accepted))
+    p.recording.metadata.pop('d')
+    p.dirty.add('pair')
+    p.evaluate(12)
+    assert p.metrics()['pair_rejections'] == dict(stale=1, skew=int(not accepted))
+
+
+@pytest.mark.parametrize('skew,limit,accepted', [(250, 250, True), (251, 250, False), (251, 300, True)])
+def test_taker_independent_admission_and_delayed_lookup(monkeypatch, skew, limit, accepted):
+    import threading
+    from types import SimpleNamespace
+    from app.services.polymarket.paper_account import Runtime
+    monkeypatch.setenv('POLYMARKET_OBSERVER_MAX_PAIR_SKEW_MS', str(limit))
+    runtime = Runtime(SimpleNamespace(lock=threading.Lock()))
+    market = dict(id='pair', yesAssetId='u', noAssetId='d')
+    for token, timestamp in [('u', 2000), ('d', 2000 - skew)]:
+        runtime.history.record(snapshot(timestamp, token), 2000)
+    account = Mock()
+    runtime.admit(account, market, 2000, 2000)
+    assert account.signal.called is accepted
+    # A delayed leg uses its own fresh historical book even if the pair is incoherent.
+    assert all(runtime.lookup(market, 2100))
+    runtime.history.record(snapshot(2200, 'u'), 2200)
+    assert runtime.lookup(market, 2100)[0]['exchangeMs'] == 2000
+
+
+def test_unwind_uses_fresh_held_leg_when_complement_is_missing():
+    from tests.test_polymarket_paper_account import market, books
+    from app.services.polymarket.paper_account import Account
+    a = Account(dict(merge_cost='0', competitor_top='0'))
+    trade = a.signal(market(), books(), 1000, dict(one_way_ms=100))
+    def lookup(market, at):
+        pair = books(bid='.3')
+        return [pair[0], None] if at >= 1200 else pair
+    for at in (1100, 1200, 1300):
+        a.tick(at, lookup)
+    assert trade['status'] == 'single_leg_unwound'
+
+
+@pytest.mark.parametrize('value,expected', [(None, 'unspecified'), (' Unverified ', 'unverified'), ('verified', 'unspecified')])
+def test_api_annotation_on_status_and_ws_only_reports(monkeypatch, value, expected):
+    from app.services.polymarket import account_api
+    if value is None:
+        monkeypatch.delenv('POLYMARKET_PAPER_ACCOUNT_TAKER_STATUS', raising=False)
+    else:
+        monkeypatch.setenv('POLYMARKET_PAPER_ACCOUNT_TAKER_STATUS', value)
+    monkeypatch.setattr(account_api, 'query', lambda sql, params: [dict(day='2026-10-15', reconnect_count=1,
+        slow_consumer_count=0, rebalance_count=0, shard_msg_totals={})] if 'ws_daily' in sql else [])
+    assert account_api.status()['taker_verification_status'] == expected
+    assert account_api.reports()[0]['taker_verification_status'] == expected
+
+
+@pytest.mark.parametrize('timestamp', [None, 2001, -1])
+def test_taker_rejects_missing_future_old_signal_timestamp(timestamp):
+    import threading
+    from types import SimpleNamespace
+    from app.services.polymarket.paper_account import Runtime
+    runtime = Runtime(SimpleNamespace(lock=threading.Lock()))
+    market = dict(id='pair', yesAssetId='u', noAssetId='d')
+    runtime.history.record(snapshot(2000, 'u'), 2000)
+    runtime.history.record(snapshot(timestamp, 'd'), 2000)
+    account = Mock()
+    runtime.admit(account, market, 2000, 2000)
+    account.signal.assert_not_called()

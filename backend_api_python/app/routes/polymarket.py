@@ -242,7 +242,7 @@ def account_export(query):
     rows = account_api.reports(**{k: v for k, v in query.items() if k != 'format'})
     if query['format'] == 'csv':
         output = io.StringIO()
-        keys = ['day', 'attempted', 'filled', 'fill_rate', 'single_leg_failures', 'unwinds', 'net_pnl',
+        keys = ['day', 'taker_verification_status', 'attempted', 'filled', 'fill_rate', 'single_leg_failures', 'unwinds', 'net_pnl',
                 'fees', 'max_drawdown', 'capital_utilization_avg', 'capital_utilization_max', 'opportunities', 'ws_stats', 'maker']
         writer = csv.DictWriter(output, fieldnames=keys, extrasaction='ignore')
         writer.writeheader()

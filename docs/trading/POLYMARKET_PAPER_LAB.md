@@ -920,3 +920,26 @@ zero findings in files changed here. Local CLI grid smoke persisted an empty
 recording-range result and wrote Markdown; synthetic PG18 evidence verifies
 actual fee/depth trades and report persistence. No production profitability
 measurement, push, merge or deployment was performed.
+
+
+### Pair admission and taker verification annotation
+
+Observer evaluation and taker signal admission require two exchange timestamps within
+individual age limits (observer 2s; taker existing max_book_age_ms) and at most
+`POLYMARKET_OBSERVER_MAX_PAIR_SKEW_MS` apart (default 250ms, inclusive).
+Missing/future/old timestamps fail closed. Observer status `pair_rejections` counts
+`stale` (including missing/future) and `skew`, with stale taking precedence.
+Recordings are preserved. Delayed leg execution and emergency unwind retain individual
+historical book checks, without requiring complementary pair coherence.
+
+`POLYMARKET_PAPER_ACCOUNT_TAKER_STATUS=unverified` adds the current account-wide
+`taker_verification_status` annotation to status, every daily row (including WS-only
+rows), and CSV/JSON exports. Unset/invalid values return `unspecified`. This is a
+presentation annotation covering displayed history, not a persisted per-trade finding
+or a claim that maker results are verified. No state/evidence/hash migration is needed.
+
+The October 15 ETH incident combined individually fresh books 504ms apart during rapid
+repricing; no reconnect preceded that signal. The 250ms policy rejects that pair but
+cannot prove depth completeness or exchange executability. Connection/ownership
+generation, snapshot integrity, timestamp regression and feed throughput remain separate
+investigation work; sampled recordings cannot establish missing-frame causality.
