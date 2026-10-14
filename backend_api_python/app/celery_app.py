@@ -44,6 +44,7 @@ celery_app.conf.update(
     },
     imports=(
         "app.tasks.agent_jobs",
+        "app.tasks.polymarket_backtest",
         "app.tasks.fast_analysis",
         "app.tasks.maintenance",
         "app.tasks.fundamental_sync",
@@ -52,6 +53,7 @@ celery_app.conf.update(
         "quantdinger.tasks.hk_decision_scoring": {"queue": "maintenance"},
         "quantdinger.tasks.fast_analysis": {"queue": "ai"},
         "quantdinger.tasks.agent_job": {"queue": "jobs"},
+        "quantdinger.tasks.polymarket_backtest": {"queue": "jobs"},
         "quantdinger.tasks.expire_agent_jobs": {"queue": "maintenance"},
         "quantdinger.tasks.reflection": {"queue": "maintenance"},
         "quantdinger.tasks.ai_calibration": {"queue": "maintenance"},

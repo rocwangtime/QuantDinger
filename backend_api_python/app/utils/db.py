@@ -376,6 +376,10 @@ def _apply_init_sql(logger, *, strict: bool = False):
                 path=Path(__file__).resolve().parent.parent.parent / "migrations" / "20261014_polymarket_maker.sql",
             )
             _apply_migration_component(
+                conn, logger, name="20261014_polymarket_backtest",
+                path=Path(__file__).resolve().parent.parent.parent / "migrations" / "20261014_polymarket_backtest.sql",
+            )
+            _apply_migration_component(
                 conn, logger, name="hk-agent-symbol-config-20261012",
                 path=Path(__file__).resolve().parent.parent.parent / "migrations" / "20261012_agent_symbol_config.sql",
             )
