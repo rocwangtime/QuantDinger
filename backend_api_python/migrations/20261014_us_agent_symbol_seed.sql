@@ -1,5 +1,7 @@
 -- Seed one inactive, plan-only AAPL task per existing US automation account.
 -- No account discovery, activation, PAPER_AUTO authorization, or broker calls.
+-- Match store.create's paper-only internal actor. No bearer secret is retained
+-- or returned; Agent Gateway authenticates only status='active' tokens.
 DO $seed$
 DECLARE source RECORD; actor INTEGER; task BIGINT; params JSONB := '{"budget": 15000, "per_order_cap": 3000, "daily_buy_cap": 6000, "cash_reserve_pct": 20, "max_position": 9000, "prev_close_pct": 2, "short_move_pct": 1, "window_minutes": 5, "cooldown_minutes": 30, "max_triggers_day": 8, "blackout_auction": true, "blackout_lunch": false, "blackout_close_minutes": 5, "stop_loss_pct": 5, "daily_loss_pct": 2, "max_drawdown_pct": 8, "model": "deepseek-v4-1-flash", "mode": "plan_only", "lot_size": 1, "reference_price": null, "max_slippage_pct": 0.5, "spread_limit_pct": 1, "limit_offset_ticks": null, "blackout_open_minutes": 5, "extended_hours": false}'::jsonb;
 BEGIN

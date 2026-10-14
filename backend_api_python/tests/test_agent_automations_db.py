@@ -72,6 +72,55 @@ def run_for(row, preview=True):
     return store.create_run(row,'test-event',datetime.now(timezone.utc)+timedelta(seconds=180),preview=preview)
 
 
+def test_migrate_bootstrap_seeds_inactive_aapl_once(db, monkeypatch):
+    from app.commands.migrate import main
+    from app.services.automation.symbol_config import US_DEFAULTS
+    from app.utils import db as db_module
+
+    # Two existing tasks on one US account must still produce just one seed.
+    existing = [create(symbols=['MSFT']), create(symbols=['TSLA'])]
+    monkeypatch.setattr(db_module, 'get_db_connection', store.get_db_connection)
+    monkeypatch.setenv('SKIP_AUTO_MIGRATE', 'false')
+    policies = store.query('SELECT * FROM qd_agent_trading_policies')
+
+    def snapshot():
+        tasks = store.query("""SELECT * FROM qd_agent_automations
+            WHERE user_id=900001 AND config->>'market'='USStock'
+              AND config->>'kind'='price_trigger' AND config->'symbols'='["AAPL"]'::jsonb""")
+        assert len(tasks) == 1
+        row = tasks[0]
+        assert row['active'] is False
+        assert row['config']['execution_mode'] == 'plan_only'
+        assert row['config']['credential_id'] == 7
+        assert row['config']['symbol_params'] == US_DEFAULTS
+        saved = store.query('SELECT * FROM qd_agent_symbol_configs WHERE task_id=%s', (row['id'],))
+        assert len(saved) == 1 and saved[0]['symbol'] == 'AAPL'
+        assert saved[0]['params'] == US_DEFAULTS
+        audit = store.query('SELECT * FROM qd_agent_symbol_config_audit WHERE task_id=%s ORDER BY id', (row['id'],))
+        assert {a['field']: a['new_value'] for a in audit} == US_DEFAULTS
+        assert len(audit) == len(US_DEFAULTS)
+        actor = store.query('SELECT * FROM qd_agent_tokens WHERE id=%s', (row['token_id'],), one=True)
+        assert actor['status'] == 'internal' and actor['paper_only'] is True
+        assert (actor['scopes'], actor['markets'], actor['instruments']) == ('T', 'USStock', 'AAPL')
+        assert actor['max_order_notional'] == 3000 and actor['max_daily_notional'] == 6000
+        assert store.query('SELECT * FROM qd_agent_trading_policies') == policies
+        assert [store.task(900001, r['id']) for r in existing] == existing
+        assert len(store.query('SELECT id FROM qd_agent_tokens WHERE user_id=900001')) == 3
+        return tasks, saved, audit, actor
+
+    main()
+    first = snapshot()
+    assert store.query("SELECT name FROM qd_bootstrap_migrations WHERE name='us-agent-symbol-seed-20261014'")
+    main()
+    assert snapshot() == first
+    # Also exercise the SQL guard independently of the bootstrap ledger.
+    with store.get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute((Path(__file__).parents[1] / 'migrations/20261014_us_agent_symbol_seed.sql').read_text())
+        conn.commit()
+    assert snapshot() == first
+
+
 def test_durable_event_dedup_revision_and_user_isolation(db):
     row=create()
     assert row['active'] is False
