@@ -26,6 +26,9 @@ def status():
     result.update(enabled=enabled(), running=enabled() and fresh, updated_at=rows[0]['updated_at'] if rows else None,
                   holdings=[dict(id=k, kind=v['kind'], cost_basis=v['cost'], payout=v['payout'],
                                  due_ms=v['due_ms']) for k, v in account.state['holdings'].items()])
+    if 'maker' in account.state:
+        from .maker import Maker
+        result['maker'] = Maker(account).report(int(time.time() * 1000))
     return result
 
 

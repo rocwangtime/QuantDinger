@@ -715,3 +715,110 @@ scheduler checks: **254 passed**. Final unfiltered backend `python -m pytest -q`
 A credential-free public PolyBolt subscription smoke returned `auth_required`,
 recorded no TWAP ticks and closed its receive thread cleanly. No sustained market
 feed soak, disk-capacity benchmark, server access or deployment was performed.
+
+## Paper maker simulator (2026-10-14)
+
+`POLYMARKET_PAPER_MAKER_ENABLED=false` gates a BTC/ETH 5m/15m Up/Down maker
+strategy (`maker_complete_set_v1`). Enable it only alongside the existing paper
+account, observer, Up/Down discovery and recording gates. It runs in the account's
+single worker inside `polymarket-observer`, sharing its $5,000 virtual ledger;
+it creates no second account. Each quote pair reserves cash, bounded by remaining
+cash, the existing account trade cap and a hard $1,000 maximum. Taker attempts,
+fills and P&L retain their existing counters; maker metrics are nested under
+`maker` in status, daily-report and JSON/CSV export. No execution SDKs, wallet,
+signing, credentials or real orders are involved.
+
+Each leg bids at the recorded best bid, rounded down to the market tick. If the
+sum exceeds `COMBINED_BID` (default 0.99), the larger bid is lowered by whole ticks.
+Quotes never cross the recorded ask. `QUOTE_SHARES` defaults to 10. Inventory
+caps are **unpaired shares**, per market (`MARKET_CAP=100`) and globally
+(`GLOBAL_CAP=500`). Admission includes the worst-case one-sided fill of every
+outstanding quote. Paired quantities are immediately redeemed for $1 per set
+in the virtual ledger, at zero assumed merge cost. Residual positions retain
+cost basis in the ledger until resolution; they are not spendable cash.
+
+A bid fills only on a persisted SELL print, received and exchange-timestamped
+strictly after joining. A print below the bid can fill at our bid, up to its
+recorded size and remaining quote size. Partial fills round down to eight share
+decimals; allocated partial cost basis rounds down to eighteen USD decimals,
+with exact remaining cost released on final pairing or settlement. This prevents
+rounding residue from stranding ledger inventory. An equal-price print first consumes
+recorded queue ahead, then fills only the excess. Missing size, missing exchange
+time, pre-join prints and BUY prints cannot fill. If a lowered bid lies below
+all recorded top-five levels, queue ahead is unknown: only through-price prints
+can fill that bid. Book changes alone never fill. Recording IDs are remembered
+per quote so SQL retries cannot consume a print twice.
+
+Top bid/ask price changes or a reference move of `SPOT_BPS=3` cancel and requote
+both legs, losing queue priority. Depleted quotes are replenished with new
+priority. Missing/stale books or reference data and the account loss stop cancel
+quotes; new entries require book exchange age within `MAX_AGE_MS=2000` and a
+Binance reference observation within five seconds. Quotes stop `STOP_SECONDS=30`
+before expiry. The worker checks current cancellation conditions **before**
+consuming queued prints, which can miss legitimate earlier fills and intentionally
+underestimate fills during moves. Sampled depth, missing prints and feed replay
+remain observation limitations, not evidence of live fill quality.
+
+The worker polls committed recordings at most once per 250 ms, with at most 100
+tracked markets and 501 queried prints per leg. Overfull print histories cancel
+that quote; each quote remembers at most 500 prints. At most 2,000 pending mark
+samples per market are admitted. SQL and calculations run outside WS reader
+locks. Unknown residual outcomes retain inventory and count toward the bounded
+market limit, so prolonged missing settlement evidence can stop new admissions.
+Restart and graceful stop cancel virtual bids and release their reservations;
+persisted inventory survives. With the maker flag off, the enabled paper-account
+worker continues settling existing maker inventory but admits no maker quotes.
+
+Residual settlement uses the recorded official outcome when present. Otherwise
+it compares recorded Binance reference observations at or within ten seconds
+before each window boundary and flags the result as estimated. This proxy is
+**not Chainlink TWAP**. Missing boundary evidence leaves inventory unresolved;
+computed Chainlink outcomes are not relabelled as official. Estimated settlements
+are final simulated results and are not retrospectively revised. Zero-inventory
+expired markets can close without an outcome.
+
+Maker fees are zero. Estimated rebate is
+`shares × 0.07 × p × (1-p) × 20%`, using our fill price. It is reported separately
+and never credited to spendable cash. `net_pnl` excludes the estimate;
+`net_pnl_including_estimated_rebate` includes it explicitly. Daily metrics include
+quote counts and quoted shares, filled shares and fill events per leg,
+filled/quoted share ratios, paired-set quantity, realized net P&L per completed
+set, estimated rebate, peak unpaired inventory, adverse-selection loss and
+unpaired settlement loss. Set P&L uses average inventory cost and excludes
+unpaired settlement results.
+
+Adverse selection uses the first fresh recorded mid at or after
+`MARK_SECONDS=5` after each print, at most `MAX_AGE_MS` late. It reports
+`max(fill_price-mid, 0) × shares`; this is a diagnostic and is not deducted again
+from ledger P&L. `mark_samples` reports coverage; missing mids remain unknown
+and increment `mark_missing` after one minute. Unpaired settlement loss is
+`max(residual_cost-payout, 0)`. These diagnostics can overlap and should not be
+summed as independent economic losses.
+
+Apply registered, repeatable migration `20261014_polymarket_maker.sql` before
+updating API/observer. It adds `qd_polymarket_maker_events`, with stable UUIDs for
+quote/fill/cancel/settlement evidence and account/time and market/time indexes.
+Account state, maker evidence, ledger snapshots and daily metrics commit in the
+same transaction. Retention follows the account's existing 90-day setting;
+open inventory remains in account state. Saves use the existing ten-second
+cadence, so hard termination can lose the uncommitted interval. Observer status
+retains the existing worker health/error reporting.
+
+All maker settings use `POLYMARKET_PAPER_MAKER_`; defaults are listed above and
+in `backend_api_python/env.example`. Keep scheduler hosting disabled. Migrate
+first, restart the dedicated observer with matching API code, then explicitly
+enable the maker flag only when ready for paper observation. No push, merge or
+deployment is part of this change; no sustained-feed profitability or latency
+claim is made.
+
+Validation used the existing backend `.venv` and PostgreSQL 18.6 with all three
+DSN variables explicitly set to the approved localhost `qd_automation_test` DB.
+Final unfiltered `python -m pytest -q`: **4,120 passed, 24 skipped**, with 59
+existing deprecation warnings. Coverage includes through/queue fills, duplicate
+and invalid prints, budget/caps, cancellation, precision under repeated partial
+pairing, marks/coverage cleanup, official/proxy settlement, restart, rollback,
+idempotent evidence, shared-ledger accounting, reports/exports and migration
+registration/reapplication. Global Ruff, backend quality, requirements-lock,
+documentation and whitespace checks passed; OpenAPI was regenerated and the
+registered migration bootstrap ran on the same local DB. No sustained public-feed
+soak, production capacity benchmark or server deployment was performed.

@@ -220,6 +220,7 @@ def account_replay(trade_id):
 def account_report(query):
     """UTC daily paper activity and observer WS health.
 
+    Each paper row may include maker metrics under its separate strategy tag.
     Each row includes ws_stats: reconnect_count, slow_consumer_count,
     rebalance_count and shard_msg_totals (shard ID to received frame count).
     Days with WS activity only have day and ws_stats; paper fields are absent.
@@ -242,10 +243,10 @@ def account_export(query):
     if query['format'] == 'csv':
         output = io.StringIO()
         keys = ['day', 'attempted', 'filled', 'fill_rate', 'single_leg_failures', 'unwinds', 'net_pnl',
-                'fees', 'max_drawdown', 'capital_utilization_avg', 'capital_utilization_max', 'opportunities', 'ws_stats']
+                'fees', 'max_drawdown', 'capital_utilization_avg', 'capital_utilization_max', 'opportunities', 'ws_stats', 'maker']
         writer = csv.DictWriter(output, fieldnames=keys, extrasaction='ignore')
         writer.writeheader()
-        writer.writerows({**row, 'ws_stats': json.dumps(row['ws_stats'])} if 'ws_stats' in row else row for row in rows)
+        writer.writerows({k: json.dumps(v) if k in {'maker', 'ws_stats'} else v for k, v in row.items()} for row in rows)
         content, mimetype = output.getvalue(), 'text/csv'
     else:
         content, mimetype = json.dumps(rows), 'application/json'

@@ -333,3 +333,24 @@ def test_recording_migration_registered_in_deployment_bootstrap(monkeypatch):
     assert index > names.index('20261011_polymarket_updown')
     assert calls[index]['path'].name == '20261014_polymarket_recording.sql'
     assert calls[index]['path'].is_file()
+
+
+def test_maker_migration_registered_in_deployment_bootstrap(monkeypatch):
+    from contextlib import contextmanager
+    from app.commands import migrate
+    connection = MagicMock()
+    @contextmanager
+    def connect():
+        yield connection
+    calls = []
+    monkeypatch.setattr(db_module, 'get_db_connection', connect)
+    monkeypatch.setattr(db_module, 'is_postgres_available', lambda: True)
+    monkeypatch.setattr(db_module, '_verify_table_access', lambda logger: None)
+    monkeypatch.setattr(db_module, '_apply_migration_component', lambda conn, logger, **kw: calls.append(kw))
+    monkeypatch.delenv('SKIP_AUTO_MIGRATE', raising=False)
+    migrate.main()
+    names = [item['name'] for item in calls]
+    index = names.index('20261014_polymarket_maker')
+    assert index > names.index('20261014_polymarket_recording')
+    assert calls[index]['path'].name == '20261014_polymarket_maker.sql'
+    assert calls[index]['path'].is_file()
