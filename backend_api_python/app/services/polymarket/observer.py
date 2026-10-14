@@ -1,4 +1,4 @@
-"""Scheduler-owned public market observer; it never places or signs orders."""
+"""Dedicated public market observer; it never places or signs orders."""
 import json
 import os
 import threading
@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from app.utils.db import get_db_connection
 from .client import PublicClient
 from .engine import number, sweep
-from . import updown
+from . import updown, recording
 from .ws_balance import RateBalancer, DailyStats
 
 STATUS = {"enabled": False, "running": False, "mode": "stopped", "connected": False, "markets_subscribed": 0,
@@ -199,11 +199,17 @@ def record_research(market, books, source, quote=None, now=None):
         prices.extend((ask, (ask + bid) / 2 if bid is not None else None))
     provider = _REFERENCE
     reference = provider.get(market['asset']) if provider else {'price': None, 'source': 'unavailable', 'observed_at': None}
+    chainlink = None
+    if _PIPELINE:
+        with _PIPELINE.lock:
+            tick = _PIPELINE.recording.twap_cache.get(market['asset'])
+        if tick and 0 <= (now - tick[2]).total_seconds() <= 5:
+            chainlink = tick
     tags = sample_tags(market, now)
     with _observation_connection() as db:
         cur = db.cursor()
         try:
-            cur.execute("INSERT INTO qd_polymarket_observer_samples(market_id,observed_at,market_type,asset,interval,expiry_bucket,end_time,up_ask,up_mid,down_ask,down_mid,price_to_beat,reference_price,reference_source,reference_observed_at,source,net_edge_bps) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", (market['id'], now, *tags, market['endDate'], *prices, market.get('price_to_beat'), reference['price'], reference['source'], reference['observed_at'], source, quote.get('net_edge_bps') if quote else None))
+            cur.execute("INSERT INTO qd_polymarket_observer_samples(market_id,observed_at,market_type,asset,interval,expiry_bucket,end_time,up_ask,up_mid,down_ask,down_mid,price_to_beat,reference_price,reference_source,reference_observed_at,source,net_edge_bps,chainlink_price,chainlink_observed_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", (market['id'], now, *tags, market['endDate'], *prices, market.get('price_to_beat'), reference['price'], reference['source'], reference['observed_at'], source, quote.get('net_edge_bps') if quote else None, chainlink[4] if chainlink else None, chainlink[2] if chainlink else None))
             db.commit()
             _LAST_RESEARCH[market['id']] = mono
         finally:
@@ -268,6 +274,7 @@ def _run_retention(now_mono):
         try:
             cur.execute("DELETE FROM qd_polymarket_observer_episodes WHERE started_at < NOW() - (%s * INTERVAL '1 day')", (max(1, min(365, int(os.getenv("POLYMARKET_OBSERVER_RETENTION_DAYS", "30")))),))
             cur.execute("DELETE FROM qd_polymarket_observer_near_misses WHERE hour_bucket < NOW() - (%s * INTERVAL '1 day')", (max(1, min(365, int(os.getenv("POLYMARKET_OBSERVER_NEAR_MISS_RETENTION_DAYS", "7")))),))
+            recording.cleanup(cur)
             if updown.enabled():
                 cur.execute("DELETE FROM qd_polymarket_observer_samples WHERE observed_at < NOW() - (%s * INTERVAL '1 day')", (updown.setting('UPDOWN_SAMPLE_RETENTION_DAYS', 7, 1, 365),))
             db.commit()
@@ -376,6 +383,17 @@ def _market_loop():
                                     for asset, book in mapped.items():
                                         _PIPELINE.paper_account.history.record(dict(event_type='book', asset_id=asset, **{side: [{'price': p, 'size': z} for p, z in book[side].items()] for side in ('asks', 'bids')}), at)
                                 _PIPELINE.paper_account.submit(market, mapped, at)
+                            if _PIPELINE and _PIPELINE.recording.enabled:
+                                with _PIPELINE.evaluation_lock:
+                                    metadata = {a: (recording.exchange_time(frame['books'][a].get('exchangeTimestamp')),
+                                                   datetime.fromtimestamp(frame['observedMs'] / 1000, timezone.utc), 'rest')
+                                                for a in mapped}
+                                    with _PIPELINE.lock:
+                                        _PIPELINE.books.update(mapped)
+                                        _PIPELINE.recording.metadata.update(metadata)
+                                    for key, kind, records in _PIPELINE.recording.books(
+                                            mapped, {market['id']: market}, {a: market['id'] for a in mapped}, metadata, time.monotonic()):
+                                        _PIPELINE.queue.put(key, kind, records)
                             quote = opportunity(market, mapped, os.getenv("POLYMARKET_OBSERVER_SIZE_SHARES", "100"), os.getenv("POLYMARKET_OBSERVER_MERGE_COST", "0.02"))
                             if _PIPELINE:
                                 with _PIPELINE.evaluation_lock:
@@ -434,7 +452,9 @@ def start():
     with _LOCK:
         if _THREAD and _THREAD.is_alive():
             return True
-        if _PIPELINE and (_PIPELINE.writer.is_alive() or _PIPELINE.evaluator.is_alive()):
+        if _PIPELINE and (_PIPELINE.writer.is_alive() or _PIPELINE.evaluator.is_alive()
+                          or _PIPELINE.references.thread.is_alive()
+                          or (_PIPELINE.references.socket_thread and _PIPELINE.references.socket_thread.is_alive())):
             return False
         _STOP.clear()
         _LAST_RESEARCH.clear()
@@ -467,7 +487,9 @@ def stop(timeout=15):
         _PIPELINE.close(max(0, deadline - time.monotonic()))
     with _LOCK:
         pending = bool(thread and thread.is_alive()) or bool(_PIPELINE and (
-            _PIPELINE.writer.is_alive() or _PIPELINE.evaluator.is_alive()))
+            _PIPELINE.writer.is_alive() or _PIPELINE.evaluator.is_alive()
+            or _PIPELINE.references.thread.is_alive()
+            or (_PIPELINE.references.socket_thread and _PIPELINE.references.socket_thread.is_alive())))
         pending = pending or bool(receivers and any(
             state['thread'] and state['thread'].is_alive() for state in receivers.states.values()))
         STATUS.update(running=pending, connected=False, mode="stopping" if pending else "stopped")
@@ -544,18 +566,18 @@ class WriteQueue:
         if not records:
             return
         with self.condition:
-            if kind == 'research':
+            if kind in {'research', 'book'}:
                 for item in self.items:
                     if item[0:2] == (market, kind):
                         item[2][:] = records
                         self.metrics['coalesced'] += 1
                         return
             while len(self.items) >= self.maximum:
-                disposable = next((i for i, item in enumerate(self.items) if item[1] == 'research'), None)
+                disposable = next((i for i, item in enumerate(self.items) if item[1] in {'research', 'book', 'trade', 'twap', 'reference', 'resolution'}), None)
                 if disposable is not None:
                     del self.items[disposable]
                     self.metrics['dropped'] += 1
-                elif kind == 'research':
+                elif kind in {'research', 'book', 'trade', 'twap', 'reference', 'resolution'}:
                     self.metrics['dropped'] += 1
                     return
                 else:
@@ -589,6 +611,8 @@ class Pipeline:
         self.lock = threading.Lock()
         self.evaluation_lock = threading.Lock()
         self.books = {}
+        self.recording = recording.Recorder()
+        self.references = recording.References(self)
         from .paper_account import Runtime, enabled as account_enabled
         self.paper_account = Runtime(self) if account_enabled() else None
         self.markets = {}
@@ -611,6 +635,8 @@ class Pipeline:
 
     def start(self):
         self.writer.start()
+        if self.recording.enabled:
+            self.references.thread.start()
         if self.paper_account:
             self.paper_account.thread.start()
         self.evaluator.start()
@@ -627,20 +653,31 @@ class Pipeline:
             self.markets = {m['id']: m for m in markets}
             self.asset_markets = {a: m['id'] for m in markets for a in subscription_assets([m])}
             self.books = {a: b for a, b in self.books.items() if a in self.asset_markets}
+            self.recording.prune(self.asset_markets)
             if self.paper_account:
                 self.paper_account.history.assets = {a: b for a, b in self.paper_account.history.assets.items() if a in self.asset_markets}
             self.dirty.intersection_update(self.markets)
             self.last_eval = {k: v for k, v in self.last_eval.items() if k in self.markets}
+        if self.recording.enabled:
+            for market in markets:
+                if (market['id'] not in previous and market.get('market_type') == 'up_down'
+                        and recording.scoped(market)):
+                    self.queue.put(market['id'], 'window', [(recording.WINDOW_SQL, (
+                        market['id'], market['conditionId'], market['asset'], market['interval'],
+                        market['eventStartTime'], market['endDate'], market.get('price_to_beat')))])
         for identity in previous - self.markets.keys():
             self.capture(identity, 'observation', lambda: _end_episode(identity, datetime.now(timezone.utc)))
 
-    def receive(self, raw):
+    def receive(self, raw, owned=None):
         if raw == 'PONG':
             return
         try:
+            received = datetime.now(timezone.utc)
             event = json.loads(raw)
             with self.lock:
+                event = recording.owned_events(event, owned)
                 changed = ws_apply_event(event, self.books)
+                self.recording.receive(event, changed, self.markets, self.asset_markets, received, owned)
                 if self.paper_account:
                     self.paper_account.history.record(event, int(time.time() * 1000))
                 self.dirty.update(self.asset_markets[a] for a in changed if a in self.asset_markets)
@@ -668,6 +705,13 @@ class Pipeline:
         began = time.monotonic()
         now = began if now is None else now
         with self.lock:
+            pending = list(self.recording.pending)
+            self.recording.pending.clear()
+            # Copy while locked; sorting/throttling and queue work occur outside.
+            recorded_books = {a: {side: dict(levels) for side, levels in book.items()}
+                              for a, book in self.books.items()} if self.recording.enabled else {}
+            metadata = dict(self.recording.metadata)
+            markets, asset_markets = dict(self.markets), dict(self.asset_markets)
             ready = [identity for identity in self.dirty if now - self.last_eval.get(identity, float('-inf')) >= 1]
             frames = []
             for identity in ready:
@@ -679,6 +723,8 @@ class Pipeline:
                 frames.append((market, books))
                 self.dirty.discard(identity)
                 self.last_eval[identity] = now
+        for key, kind, records in pending + self.recording.books(recorded_books, markets, asset_markets, metadata, now):
+            self.queue.put(key, kind, records)
         for market, books in frames:
             if self.paper_account:
                 self.paper_account.submit(market, books, int(time.time() * 1000))
@@ -700,16 +746,31 @@ class Pipeline:
     def write_batch(self, batch):
         began = time.monotonic()
         records = [record for item in batch for record in item[2]]
+        counts = {}
         with get_db_connection() as db:
             cur = db.cursor()
             try:
                 # Group adjacent identical statements only: grouping across end/start
                 # boundaries would reorder episode transitions for the same market.
                 for sql, group in groupby(records, key=lambda row: row[0]):
-                    cur.executemany(sql, [params for _, params in group])
+                    params = [params for _, params in group]
+                    table = next((table for table in recording.TABLES
+                                  if sql.startswith('INSERT INTO ' + recording.PREFIX + table + '(')), None)
+                    if table:
+                        # execute_batch exposes only its last statement rowcount.
+                        # One multi-VALUES insert counts actual rows, even on retry.
+                        header, values = sql.split(' VALUES ', 1)
+                        placeholders, _, tail = values.partition(')')
+                        statement = header + ' VALUES ' + ','.join([placeholders + ')'] * len(params)) + tail
+                        cur.execute('WITH recorded AS (' + statement + ' RETURNING 1) SELECT count(*) count FROM recorded',
+                                    tuple(value for row in params for value in row))
+                        counts[table] = counts.get(table, 0) + cur.fetchone()['count']
+                    else:
+                        cur.executemany(sql, params)
                 db.commit()
             finally:
                 cur.close()
+        self.recording.committed(counts)
         with self.queue.condition:
             self.queue.metrics['written'] += len(records)
             self.queue.metrics['batch_latency_ms'] = (time.monotonic() - began) * 1000
@@ -736,7 +797,7 @@ class Pipeline:
                         self.queue.condition.wait(interval)
                     continue
             if (self.writer_stop.is_set() and not self.evaluator.is_alive()
-                    and self.market_done.is_set() and not self.queue.snapshot()['queue_depth']):
+                    and self.market_done.is_set() and not self.references.thread.is_alive() and not self.queue.snapshot()['queue_depth']):
                 return
             with self.queue.condition:
                 self.queue.condition.wait(interval)
@@ -747,7 +808,8 @@ class Pipeline:
                       'last_message_at': self.last_message_at,
                       'messages_per_second': self.messages / max(.001, time.monotonic() - self.started),
                       'last_message_age_seconds': time.monotonic() - self.last_message if self.last_message else None,
-                      'evaluator_cycle_ms': self.cycle_ms}
+                      'evaluator_cycle_ms': self.cycle_ms,
+                      **self.recording.metrics(self.books), **self.references.metrics()}
         metrics = self.queue.snapshot()
         if self.inflight:
             metrics['writer_lag_seconds'] = max(metrics['writer_lag_seconds'], time.monotonic() - self.inflight[0][3])
@@ -757,8 +819,11 @@ class Pipeline:
 
     def close(self, timeout):
         deadline = time.monotonic() + timeout
+        self.references.close(max(0, deadline - time.monotonic()))
         self.evaluator_stop.set()
         self.evaluator.join(max(0, deadline - time.monotonic()))
+        if not self.evaluator.is_alive():
+            self.evaluate()
         if self.paper_account:
             self.paper_account.close(max(0, deadline - time.monotonic()))
         self.writer_stop.set()
@@ -766,7 +831,9 @@ class Pipeline:
             self.queue.condition.notify_all()
         self.writer.join(max(0, deadline - time.monotonic()))
         with _LOCK:
-            STATUS['flush_complete'] = not self.writer.is_alive() and not self.evaluator.is_alive()
+            STATUS['flush_complete'] = (not self.writer.is_alive() and not self.evaluator.is_alive()
+                                        and not self.references.thread.is_alive()
+                                        and not (self.references.socket_thread and self.references.socket_thread.is_alive()))
 
 
 def shard_markets(markets, count):
@@ -875,7 +942,9 @@ class MarketConnections:
                 self.stats.message(index)
                 self.balancer.receive(raw, index)
             if _PIPELINE:
-                _PIPELINE.receive(raw)
+                with self.balancer.lock:
+                    owned = {asset for asset, owner in self.balancer.assignment.items() if owner == index}
+                _PIPELINE.receive(raw, owned)
 
         def failed(_sock, error):
             state['connected'] = False

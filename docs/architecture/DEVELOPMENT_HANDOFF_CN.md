@@ -249,3 +249,18 @@ python -m pytest tests/test_agent_automations_db.py \
 每个工作包给出具体改动、对应测试、实际部署版本、验收证据与剩余边界。
 把持续收益证据和流程正确性分别报告，缺失证据不能补造。
 ```
+
+## 2026-10-14 Polymarket observer 录制升级
+
+独立 `polymarket-observer` 增加 top-5 盘口（交易所时间与接收时间）、
+`last_trade_price` 成交、Chainlink TWAP tick 与 BTC/ETH 5m/15m 窗口结算证据表。
+读线程只更新有界内存，评估器限频并通过原 writer 批量写入；保留期、丢失计数、
+每分钟新增行数与盘口年龄 P50/P95 在 status 中可见。新增迁移
+`20261014_polymarket_recording.sql` 已注册到部署 bootstrap，并有注册回归测试。
+
+当前官方文档更正研究前提：8 月 14 日起 5m 也使用 **60 秒** TWAP；PolyBolt
+`price.crypto.twap` 要求认证。因此 `TWAP_ENABLED` 默认 false，启用只尝试匿名订阅；
+拒绝后报告 `auth_required`，不读取凭证、不认证、不推算或填造参考价。
+窗口只匹配精确边界 tick 和 Gamma 最终 0/1 结算，缺失保持 null。
+`POLYMARKET_OBSERVER_IN_SCHEDULER=false` 语义不变，无钱包、签名、认证或下单。
+配置、容量估算与迁移后重启步骤见 [纸面实验文档](../trading/POLYMARKET_PAPER_LAB.md#observer-evidence-recording-2026-10-14)。
