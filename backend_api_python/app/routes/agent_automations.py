@@ -266,7 +266,7 @@ def run_stream(run_id):
 
 
 @blp.route('/<int:task_id>/symbol-config', methods=['GET'])
-@blp.doc(summary='Read effective HK SIMULATE symbol parameters and task revision')
+@blp.doc(summary='Read effective US/HK SIMULATE symbol parameters and task revision')
 @login_required
 @envelope
 def symbol_settings(task_id):
@@ -275,8 +275,8 @@ def symbol_settings(task_id):
 
 
 @blp.route('/<int:task_id>/symbol-config', methods=['PUT'])
-@blp.doc(summary='Validate and audit paused HK symbol settings; never grant trading authorization',
-         description='Symbol settings require a positive reference_price (HKD). Each cap must cover lot_size × reference_price and fit the budget after cash reserve. Execution revalidates fresh broker price and lot size. Optional max_slippage_pct (0–5, default 0.5) and spread_limit_pct (0–10, default 1) use percentage points relative to bid/ask midpoint. Optional limit_offset_ticks (integer 0–100, default null) selects midpoint plus/minus ticks; null buys at ask and sells at bid. Prices round inward on HKEX equities spread table 01 (Phase 2); quotes older than 5 seconds are skipped.')
+@blp.doc(summary='Validate paused US/HK symbol settings without trading authorization',
+         description='Symbol settings require a positive reference_price (USD for USStock, HKD for HKStock). Each cap must cover lot_size × reference_price and fit the budget after cash reserve. Execution revalidates fresh broker price and lot size. Optional max_slippage_pct (0–5, default 0.5) and spread_limit_pct (0–10, default 1) use percentage points relative to bid/ask midpoint. Optional limit_offset_ticks (integer 0–100, default null) selects midpoint plus/minus ticks; null buys at ask and sells at bid. Prices round inward on the selected market tick table: US $0.01 at or above $1 and $0.0001 below $1; HKEX equities spread table 01 (Phase 2) is unchanged. Optional blackout_open_minutes (integer 0–60, US default 5, HK legacy default 0) and blackout_close_minutes (integer 0–60, default 5) exclude session edges. extended_hours defaults false; US opt-in permits 04:00–20:00 ET on XNYS session days for observation only, without overriding broker execution eligibility. US has no lunch break and only whole broker lots are allowed. Daily caps use the market-local day. Quotes older than 5 seconds are skipped.')
 @login_required
 @envelope
 def update_symbol_settings(task_id):
