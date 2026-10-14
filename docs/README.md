@@ -98,6 +98,8 @@ ownership or shared state.
 
 ### Trading and research
 
+- [US daily research screener](research/US_DAILY_SCREENER.md)
+
 - [Strategy API V2 development](trading/STRATEGY_DEV_GUIDE.md)
 - [Reproducible research, AI shadow evaluation, portfolio risk, and virtual order groups](trading/RESEARCH_EXECUTION_P0_P1.md)
 - [Chart indicator development](trading/INDICATOR_DEV_GUIDE.md)
