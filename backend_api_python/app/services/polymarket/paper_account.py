@@ -310,6 +310,15 @@ class Store:
                 cur.close()
 
     def save(self, account, now):
+        if 'maker' in account.state:
+            from .maker import Maker
+            maker = Maker(account)
+            for day in list(maker.state['days']):
+                if day < day_key(now - account.config['retention_days'] * 86400000):
+                    del maker.state['days'][day]
+                    continue
+                at = int(timestamp(day + 'T12:00:00Z').timestamp() * 1000)
+                account.daily(at)['maker'] = maker.report(at)
         state = public(account.state)
         with get_db_connection() as db:
             cur = db.cursor()
@@ -326,6 +335,11 @@ class Store:
                         detail.pop('books', None)
                         detail.pop('book', None)
                         cur.execute('INSERT INTO qd_polymarket_paper_legs(trade_id,role,detail) VALUES (%s,%s,%s::jsonb) ON CONFLICT(trade_id,role) DO UPDATE SET detail=EXCLUDED.detail', (trade['id'], leg['role'], json.dumps(detail)))
+                for event in getattr(account, 'maker_changed', []):
+                    cur.execute('INSERT INTO qd_polymarket_maker_events(id,account_id,strategy,market_id,observed_at,event,detail) VALUES (%s,%s,%s,%s,%s,%s,%s::jsonb) ON CONFLICT(id) DO NOTHING',
+                        (event['id'], self.account_id, 'maker_complete_set_v1', event['market_id'], utc(event['at']), event['event'], json.dumps(public(event['detail']), default=str)))
+                if 'maker' in state:
+                    cur.execute('DELETE FROM qd_polymarket_maker_events WHERE account_id=%s AND observed_at<%s', (self.account_id, utc(now - account.config['retention_days'] * 86400000)))
                 for day, stats in state['days'].items():
                     cur.execute('INSERT INTO qd_polymarket_paper_daily(account_id,day,stats) VALUES (%s,%s,%s::jsonb) ON CONFLICT(account_id,day) DO UPDATE SET stats=EXCLUDED.stats', (self.account_id, day, json.dumps(stats)))
                 cur.execute('INSERT INTO qd_polymarket_paper_ledger(account_id,observed_at,event,free,locked,positions,equity,detail) VALUES (%s,%s,%s,%s,%s,%s,%s,%s::jsonb)',
@@ -334,6 +348,8 @@ class Store:
                     cur.execute(f'DELETE FROM qd_polymarket_paper_{table} WHERE account_id=%s AND {column}<%s' + (" AND id NOT IN (SELECT jsonb_object_keys(state->'holdings') FROM qd_polymarket_paper_accounts WHERE account_id=%s UNION SELECT jsonb_object_keys(state->'pending') FROM qd_polymarket_paper_accounts WHERE account_id=%s)" if table == 'trades' else ''), (self.account_id, utc(now - account.config['retention_days'] * 86400000), *((self.account_id, self.account_id) if table == 'trades' else ())))
                 db.commit()
                 account.changed.clear()
+                if hasattr(account, 'maker_changed'):
+                    account.maker_changed.clear()
             finally:
                 cur.close()
 
@@ -401,9 +417,12 @@ class Runtime:
                     trade['evidence']['decision']['reason'] = 'restart_cancelled'
                     trade['evidence']['restart_cancelled'] = True
                 account.finish(trade, int(time.time() * 1000))
+            from .maker import RecordedFeed, enabled as maker_enabled
+            maker_feed = RecordedFeed(account) if maker_enabled() or 'maker' in account.state else None
             self.ready = True
             self.public_thread.start()
             last_save = 0
+            last_maker = 0
             while not self.stop_event.is_set():
                 now = int(time.time() * 1000)
                 account.state['latency'] = self.latency.status(now)
@@ -413,6 +432,9 @@ class Runtime:
                     account.resolve(identity, price, now, response)
                 # Prior failed saves are retried before accepting more signals.
                 account.tick(now, self.lookup)
+                if maker_feed and now - last_maker >= 250:
+                    maker_feed.poll(self.pipeline, now, quoting=maker_enabled())
+                    last_maker = now
                 for _ in range(32):
                     try:
                         market, books, observed = self.inbox.get_nowait()
@@ -438,6 +460,9 @@ class Runtime:
                             self.stop_event.wait(1)
                     last_save = now
                 self.stop_event.wait(.025)
+            if maker_feed:
+                for row in maker_feed.maker.state['markets'].values():
+                    maker_feed.maker.cancel(row, int(time.time() * 1000))
             store.save(account, int(time.time() * 1000))
         except Exception as exc:
             self.error = str(exc)[:160]

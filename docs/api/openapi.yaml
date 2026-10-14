@@ -8099,7 +8099,10 @@ paths:
               schema:
                 $ref: '#/components/schemas/HumanSuccessEnvelope'
       summary: UTC daily paper activity and observer WS health.
-      description: 'Each row includes ws_stats: reconnect_count, slow_consumer_count,
+      description: 'Each paper row may include maker metrics under its separate strategy
+        tag.
+
+        Each row includes ws_stats: reconnect_count, slow_consumer_count,
 
         rebalance_count and shard_msg_totals (shard ID to received frame count).
 

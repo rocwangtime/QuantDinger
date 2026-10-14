@@ -281,7 +281,7 @@ def test_authenticated_account_lists_reports_replay_and_download_shapes(client, 
         captured.update(kw)
         return dict(items=[dict(id='test', status='not_filled')], total=1, limit=kw['limit'], offset=kw['offset'])
     monkeypatch.setattr(account_api, 'trades', trades)
-    monkeypatch.setattr(account_api, 'reports', lambda **kw: [dict(day='2026-10-11', attempted=1, filled=0, opportunities=2)])
+    monkeypatch.setattr(account_api, 'reports', lambda **kw: [dict(day='2026-10-11', attempted=1, filled=0, opportunities=2, maker=dict(strategy='maker_complete_set_v1', paired_sets='2'))])
     monkeypatch.setattr(account_api, 'replay', lambda identity: dict(replayMatches=True, evidenceHash='f' * 64))
     headers = {'Authorization': 'Bearer test'}
     base = '/api/polymarket/paper-account/'
@@ -292,8 +292,14 @@ def test_authenticated_account_lists_reports_replay_and_download_shapes(client, 
     response = client.get(base + 'export?format=csv', headers=headers)
     assert response.status_code == 200 and 'attachment' in response.headers['Content-Disposition']
     assert 'day,attempted,filled' in response.get_data(as_text=True)
+    import csv
+    import io
+    import json
+    csv_row = next(csv.DictReader(io.StringIO(response.get_data(as_text=True))))
+    assert json.loads(csv_row['maker'])['paired_sets'] == '2'
     response = client.get(base + 'export?format=json', headers=headers)
     assert response.get_json()[0]['day'] == '2026-10-11'
+    assert response.get_json()[0]['maker']['strategy'] == 'maker_complete_set_v1'
 
 
 def test_account_history_lookup_copies_events_without_mutating_receive_state():
