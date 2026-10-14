@@ -48,8 +48,11 @@ celery_app.conf.update(
         "app.tasks.fast_analysis",
         "app.tasks.maintenance",
         "app.tasks.fundamental_sync",
+        "app.tasks.us_screener",
     ),
     task_routes={
+        "quantdinger.tasks.us_screener": {"queue": "maintenance"},
+        "quantdinger.tasks.us_screener_tick": {"queue": "maintenance"},
         "quantdinger.tasks.hk_decision_scoring": {"queue": "maintenance"},
         "quantdinger.tasks.fast_analysis": {"queue": "ai"},
         "quantdinger.tasks.agent_job": {"queue": "jobs"},
@@ -63,6 +66,7 @@ celery_app.conf.update(
         "quantdinger.tasks.cleanup_runtime_metadata": {"queue": "maintenance"},
     },
     beat_schedule={
+        "us-screener": {"task": "quantdinger.tasks.us_screener_tick", "schedule": 60.0},
         "hk-decision-scoring": {"task": "quantdinger.tasks.hk_decision_scoring", "schedule": 60.0},
         "fundamental-sync": {
             "task": "quantdinger.tasks.fundamental_sync_tick",

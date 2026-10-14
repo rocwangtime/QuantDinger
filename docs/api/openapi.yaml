@@ -3423,6 +3423,112 @@ paths:
       schema:
         type: integer
         minimum: 0
+  /api/us-screener/latest:
+    get:
+      responses:
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      tags:
+      - us_screener
+      summary: Read latest independent US research screener run; no market or execution
+        calls
+      operationId: getApiUsScreenerLatest
+      x-visibility: internal
+  /api/us-screener/runs/{run_id}:
+    get:
+      responses:
+        '404':
+          description: Research run not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      tags:
+      - us_screener
+      summary: Read persisted US research features, scores and exclusions
+      operationId: getApiUsScreenerRunsRunId
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      x-visibility: internal
+    parameters:
+    - in: path
+      name: run_id
+      required: true
+      schema:
+        type: integer
+        minimum: 0
+  /api/us-screener/runs:
+    post:
+      responses:
+        '503':
+          description: Research queue unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '409':
+          description: Another screener run is pending
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '403':
+          description: Admin access required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '202':
+          description: Research run queued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      tags:
+      - us_screener
+      summary: 'Admin: enqueue an independent research-only US screener'
+      description: Queues read-only Futu market data work. Never changes Agent tasks
+        or creates orders/intents.
+      operationId: postApiUsScreenerRuns
+      x-visibility: internal
   /api/factors:
     get:
       responses:

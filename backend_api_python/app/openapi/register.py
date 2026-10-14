@@ -68,6 +68,7 @@ def register_human_blueprints(api: Api) -> None:
     from app.routes.strategy_evolution import strategy_evolution_blp
     from app.routes.market import market_blp
     from app.routes.universe import universe_blp
+    from app.routes.us_screener import blp as us_screener_blp
     from app.routes.factors import factors_blp
     import app.routes.fundamental_sync  # noqa: F401
     from app.routes.market_modules import market_modules_blp
@@ -102,6 +103,7 @@ def register_human_blueprints(api: Api) -> None:
         (strategy_evolution_blp, "/api/strategy-evolution"),
         (market_blp, "/api/market"),
         (universe_blp, "/api/universes"),
+        (us_screener_blp, "/api/us-screener"),
         (factors_blp, "/api/factors"),
         (market_modules_blp, "/api/market-modules"),
         (ai_chat_blp, "/api/ai"),

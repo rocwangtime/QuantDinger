@@ -526,6 +526,8 @@ class FundamentalDataService:
                 "metadata": {
                     "pointInTime": True,
                     "availabilitySource": availability_source,
+                    "earnings_dates": [item.isoformat() for item in earnings_dates],
+                    "earnings_dates_observed_at": datetime.now(timezone.utc).isoformat(),
                     "marketCapMethod": "close_on_or_before_available_at_x_reported_shares",
                     "quoteCurrency": quote_currency or None,
                     "financialCurrency": financial_currency or None,
@@ -745,3 +747,32 @@ def get_fundamental_data_service() -> FundamentalDataService:
     if _service is None:
         _service = FundamentalDataService()
     return _service
+
+
+def screener_earnings_dates(symbol: str, as_of: date) -> list[date]:
+    """Read known earnings dates from persisted fundamentals, without provider calls.
+
+    Past reporting/availability dates never imply a future earnings calendar.
+    Missing or older-than-seven-day calendars remain unknown to the screener.
+    """
+    with get_db_connection() as db:
+        cur = db.cursor()
+        cur.execute("SELECT metadata_json FROM qd_fundamental_snapshots WHERE market='USStock' AND symbol=%s AND ingested_at<=%s AND ingested_at>=%s ORDER BY ingested_at DESC LIMIT 1",
+                    (symbol, as_of + timedelta(days=1), as_of - timedelta(days=7)))
+        row = cur.fetchone()
+        cur.close()
+    if not row:
+        return []
+    metadata = _mapping_value(row.get('metadata_json'))
+    payload = metadata.get('analysisPayload') or {}
+    raw = metadata.get('earnings_dates') or payload.get('earnings_dates') or []
+    upcoming = ((payload.get('earnings') or {}).get('upcoming') or {}).get('next_earnings_date')
+    if upcoming:
+        raw = [*raw, upcoming]
+    dates = []
+    for value in raw:
+        try:
+            dates.append(date.fromisoformat(str(value)[:10]))
+        except ValueError:
+            continue
+    return sorted(set(dates))
