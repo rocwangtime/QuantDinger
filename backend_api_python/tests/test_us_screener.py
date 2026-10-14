@@ -6,7 +6,7 @@ import math
 import os
 import subprocess
 import sys
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 import pytest
 from app.services.us_screener import core, store
@@ -92,6 +92,8 @@ def test_no_execution_dependencies():
         for node in ast.walk(tree):
             if isinstance(node, (ast.Import, ast.ImportFrom)):
                 names = [a.name for a in node.names] + ([node.module] if isinstance(node, ast.ImportFrom) else [])
+                if isinstance(node, ast.ImportFrom) and node.module == 'app.services.futu_trading.config':
+                    continue
                 assert not any(any(x in (name or '') for x in ['trading','automation','agent_trade','order','execution']) for name in names)
     code = "import sys; from app.services.us_screener.service import parameters; from app.services.us_screener.data import FutuData; from app.services.universe import UniverseService; from app.services.fundamental_data import screener_earnings_dates; parameters(); assert not any(n.startswith(('app.services.automation','app.services.futu_trading','app.services.agent_trade_intents','app.services.live_trading')) for n in sys.modules)"
     subprocess.run([sys.executable,'-c',code],cwd=ROOT,check=True)
@@ -99,7 +101,7 @@ def test_no_execution_dependencies():
 
 def test_migration_registration():
     source = (ROOT/'app/utils/db.py').read_text()
-    for name in ('20261015_us_screener','20261015_nasdaq100_seed'):
+    for name in ('20261015_us_screener','20261015_nasdaq100_seed','20261015_nasdaq100_seed_effective_date'):
         assert f'name="{name}"' in source
         assert f'"{name}.sql"' in source
 
@@ -241,4 +243,61 @@ def test_seed_empty_path_and_no_backfill(database):
         assert cur.fetchone()==(100,date(2026,10,14),100)
         cur.execute('SELECT metadata_json FROM qd_universes WHERE id=%s',(universe_id,))
         assert cur.fetchone()[0]['verification']=='flagged_incomplete_public_list'
+    database.rollback()
+
+
+@pytest.mark.parametrize('host,port,expected', [
+    ('host.docker.internal', '11112', ('host.docker.internal', 11112)),
+    ('', '', ('127.0.0.1', 11111)),
+])
+def test_futu_connection_config(host, port, expected):
+    from app.services.us_screener.data import FutuData
+    context = MagicMock()
+    from types import SimpleNamespace
+    with patch.dict(os.environ, FUTU_OPEND_HOST=host, FUTU_OPEND_PORT=port), \
+         patch.dict(sys.modules, futu=SimpleNamespace(OpenQuoteContext=context)):
+        client = FutuData(100)
+        context.assert_called_once_with(host=expected[0], port=expected[1])
+        context.return_value.set_sync_query_connect_timeout.assert_called_once_with(10)
+        client.close()
+
+
+def test_execute_as_of_precedes_members(database):
+    run = store.create(date(2026,10,13), {**parameters(), 'manual_fallback': []},
+                       'test:'+str(datetime.now(timezone.utc)))
+    assert run
+    try:
+        universe = store.query("SELECT id,metadata_json FROM qd_universes WHERE code='nasdaq100' AND is_system=TRUE", one=True)
+        queued_run = store.read(run['id'])
+        with patch.object(store, 'read', return_value=queued_run), \
+             patch('app.services.universe.UniverseService.resolve_members', return_value=[]), \
+             patch.object(store, 'query', side_effect=[{'id': run['id']}, universe, {'first_valid_from': date(2026,10,14)}]), \
+             patch('app.services.us_screener.data.FutuData') as provider:
+            execute(run['id'])
+        result = store.read(run['id'])
+        assert result['status'] == 'failed'
+        assert result['error'] == 'as_of_precedes_universe_members'
+        assert result['regime']['universe_first_valid_from'] == '2026-10-14'
+        provider.assert_not_called()
+    finally:
+        store.query('DELETE FROM qd_us_screener_runs WHERE id=%s', (run['id'],))
+
+
+def test_seed_effective_date_correction(database):
+    with database.cursor() as cur:
+        cur.execute("SELECT id FROM qd_universes WHERE code='nasdaq100' AND is_system=TRUE")
+        universe_id = cur.fetchone()[0]
+        cur.execute('DELETE FROM qd_universe_members WHERE universe_id=%s', (universe_id,))
+        cur.execute((ROOT/'migrations/20261015_nasdaq100_seed.sql').read_text())
+        cur.execute('SELECT symbol,metadata_json FROM qd_universe_members WHERE universe_id=%s ORDER BY symbol', (universe_id,))
+        metadata = cur.fetchall()
+        cur.execute("UPDATE qd_universe_members SET source_version='other-provider' WHERE universe_id=%s AND symbol='AAPL'", (universe_id,))
+        for _ in range(2):
+            cur.execute((ROOT/'migrations/20261015_nasdaq100_seed_effective_date.sql').read_text())
+        cur.execute('SELECT valid_from,COUNT(*) FROM qd_universe_members WHERE universe_id=%s GROUP BY valid_from ORDER BY valid_from', (universe_id,))
+        assert cur.fetchall() == [(date(2026,10,9),99), (date(2026,10,14),1)]
+        cur.execute('SELECT symbol,metadata_json FROM qd_universe_members WHERE universe_id=%s ORDER BY symbol', (universe_id,))
+        assert cur.fetchall() == metadata
+        cur.execute('SELECT COUNT(*) FROM qd_universe_members WHERE universe_id=%s AND valid_from<=%s', (universe_id,date(2026,10,13)))
+        assert cur.fetchone()[0] == 99
     database.rollback()

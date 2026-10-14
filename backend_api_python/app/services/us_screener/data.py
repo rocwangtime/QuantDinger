@@ -10,10 +10,15 @@ from app.services.us_screener import store
 class FutuData:
     def __init__(self, deadline):
         from futu import OpenQuoteContext
+        from app.services.futu_trading.config import config_from_exchange_config, validate_opend_host
+        config = config_from_exchange_config({
+            "futu_host": os.getenv("FUTU_OPEND_HOST"),
+            "futu_port": os.getenv("FUTU_OPEND_PORT"),
+            "market_category": "USStock",
+        })
         self.deadline = deadline
         self.last_call = 0.0
-        self.context = OpenQuoteContext(host=os.getenv('FUTU_OPEND_HOST', '127.0.0.1'),
-                                        port=int(os.getenv('FUTU_OPEND_PORT', '11111')))
+        self.context = OpenQuoteContext(host=validate_opend_host(config.host), port=config.port)
 
         self.context.set_sync_query_connect_timeout(10)
 

@@ -68,6 +68,16 @@ def execute(run_id, provider_factory=None):
         members = UniverseService().resolve_members(0, universe['id'], as_of=as_of) if universe else []
         symbols = sorted(set(m['symbol'] for m in members))
         market_regime['universe_metadata'] = universe['metadata_json'] if universe else {}
+        if not symbols and universe:
+            coverage = store.query(
+                'SELECT MIN(valid_from) AS first_valid_from FROM qd_universe_members WHERE universe_id=%s',
+                (universe['id'],), one=True)
+            first_valid_from = coverage['first_valid_from'] if coverage else None
+            if first_valid_from and str(as_of) < str(first_valid_from):
+                market_regime['universe_first_valid_from'] = str(first_valid_from)
+                market_regime['universe_resolution_reason'] = 'as_of_precedes_universe_members'
+                if not params['manual_fallback']:
+                    raise ValueError('as_of_precedes_universe_members')
         if not symbols:
             symbols = params['manual_fallback']
             market_regime['universe_fallback'] = True
