@@ -1,11 +1,17 @@
 """Read-only authenticated account queries and deterministic frozen replay."""
 import json
+import os
 import time
 import zlib
 
 from app.utils.db import get_db_connection
 from . import account_model as model
 from .paper_account import Account, configuration, enabled
+
+
+def taker_verification_status():
+    value = os.getenv('POLYMARKET_PAPER_ACCOUNT_TAKER_STATUS', '').strip().lower()
+    return 'unverified' if value == 'unverified' else 'unspecified'
 
 
 def query(sql, params=()):
@@ -22,6 +28,7 @@ def status():
     rows = query('SELECT state,updated_at FROM qd_polymarket_paper_accounts WHERE account_id=%s', ('global',))
     account = Account(configuration(), rows[0]['state'] if rows else None)
     result = account.status(int(time.time() * 1000))
+    result['taker_verification_status'] = taker_verification_status()
     fresh = bool(rows) and time.time() - rows[0]['updated_at'].timestamp() < 30
     result.update(enabled=enabled(), running=enabled() and fresh, updated_at=rows[0]['updated_at'] if rows else None,
                   holdings=[dict(id=k, kind=v['kind'], cost_basis=v['cost'], payout=v['payout'],
@@ -90,6 +97,7 @@ def reports(days=30, day=None):
         for shard, total in row['shard_msg_totals'].items():
             stats['shard_msg_totals'][shard] = stats['shard_msg_totals'].get(shard, 0) + total
     for report in by_day.values():
+        report['taker_verification_status'] = taker_verification_status()
         report.setdefault('ws_stats', dict(reconnect_count=0, slow_consumer_count=0,
                                           rebalance_count=0, shard_msg_totals={}))
     return sorted(by_day.values(), key=lambda row: row['day'], reverse=True)

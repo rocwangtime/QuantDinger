@@ -247,3 +247,14 @@ def test_maker_evidence_failure_rolls_back_account_and_ledger(isolated):
         cur.execute('SELECT count(*) AS n FROM qd_polymarket_paper_ledger')
         assert cur.fetchone()['n'] == 1
         cur.close()
+
+
+def test_verification_annotation_survives_repeated_saves(isolated, monkeypatch):
+    monkeypatch.setenv('POLYMARKET_PAPER_ACCOUNT_TAKER_STATUS', 'unverified')
+    a = p.Account()
+    for at in (1000, 2000):
+        a.daily(at)
+        p.Store().save(a, at)
+        assert account_api.status()['taker_verification_status'] == 'unverified'
+        assert account_api.reports(day='1970-01-01')[0]['taker_verification_status'] == 'unverified'
+    assert 'taker_verification_status' not in a.state

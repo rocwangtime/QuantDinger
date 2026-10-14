@@ -11,6 +11,7 @@ from threading import RLock
 from datetime import datetime, timezone
 
 from app.utils.db import get_db_connection
+from .account_history import max_pair_skew_ms, pair_rejection
 from .client import PublicClient
 from .engine import number, sweep
 from . import updown, recording
@@ -630,6 +631,7 @@ class Pipeline:
         self.last_message_at = None
         self.inflight = []
         self.cycle_ms = 0
+        self.pair_rejections = dict(stale=0, skew=0)
         self.evaluator = threading.Thread(target=self.evaluate_loop, name='polymarket-evaluator', daemon=True)
         self.writer = threading.Thread(target=self.write_loop, name='polymarket-writer', daemon=True)
 
@@ -728,9 +730,14 @@ class Pipeline:
             self.queue.put(key, kind, records)
         for market, books in frames:
             evaluated_at = datetime.now(timezone.utc)
-            if any(a not in metadata or metadata[a][0] is None or
-                   not 0 <= (evaluated_at - metadata[a][0]).total_seconds() <= 2
-                   for a in subscription_assets([market])):
+            exchange_ms = [metadata[a][0].timestamp() * 1000
+                           if a in metadata and metadata[a][0] is not None else None
+                           for a in subscription_assets([market])]
+            reason = pair_rejection(exchange_ms, evaluated_at.timestamp() * 1000,
+                                    max_skew=max_pair_skew_ms())
+            if reason:
+                with self.lock:
+                    self.pair_rejections[reason] += 1
                 self.capture(market['id'], 'observation',
                              lambda: _end_episode(market['id'], evaluated_at))
                 continue
@@ -817,6 +824,7 @@ class Pipeline:
                       'messages_per_second': self.messages / max(.001, time.monotonic() - self.started),
                       'last_message_age_seconds': time.monotonic() - self.last_message if self.last_message else None,
                       'evaluator_cycle_ms': self.cycle_ms,
+                      'pair_rejections': dict(self.pair_rejections),
                       **self.recording.metrics(self.books), **self.references.metrics()}
         metrics = self.queue.snapshot()
         if self.inflight:

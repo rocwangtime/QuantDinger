@@ -1,6 +1,26 @@
 """Bounded timestamped book events. Receive work remains dictionary updates only."""
 import copy
+import os
 from collections import deque
+
+
+def max_pair_skew_ms():
+    value = int(os.getenv('POLYMARKET_OBSERVER_MAX_PAIR_SKEW_MS', '250'))
+    if value < 0:
+        raise ValueError('POLYMARKET_OBSERVER_MAX_PAIR_SKEW_MS must be nonnegative')
+    return value
+
+
+def pair_rejection(exchange_ms, at, max_age=2000, max_skew=250):
+    if len(exchange_ms) != 2 or any(x is None or not 0 <= at - x <= max_age for x in exchange_ms):
+        return 'stale'
+    if max(exchange_ms) - min(exchange_ms) > max_skew:
+        return 'skew'
+    return None
+
+
+def coherent_pair(exchange_ms, at, max_age=2000, max_skew=250):
+    return pair_rejection(exchange_ms, at, max_age, max_skew) is None
 
 
 def apply(book, event):
