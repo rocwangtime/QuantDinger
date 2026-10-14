@@ -214,11 +214,10 @@ including failed reads, and performs no HTTP in book callbacks. Stale or failed
 references are null and never replace order books or become a trading signal.
 These are USDT spot observations, not Chainlink USD/TWAP resolution prices.
 No numeric price-to-beat was observed; an explicit market `priceToBeat`, if
-supplied, is stored without inferring it from spot. Optional Chainlink collection
-is deferred: the [official RTDS migration guide](https://docs.polymarket.com/migrate/rtds-to-polybolt)
+supplied, is stored without inferring it from spot. The original release deferred Chainlink collection: the [official RTDS migration guide](https://docs.polymarket.com/migrate/rtds-to-polybolt)
 deprecates the public price topics and requires authentication for replacement
 PolyBolt reference-price channels. Under this task's no-credentials constraint,
-no price-stream subscription is enabled and `chainlink_price` remains null.
+the original release left `chainlink_price` null. The recording upgrade below adds a default-off anonymous probe and explicit unavailable status.
 Samples are event-driven, at most once per configured period per market, rather
 than guaranteed regular time-series observations. At the default 5-second rate,
 40-market cap allows at most 691,200 rows/day and 4,838,400 rows over seven days;
@@ -421,7 +420,7 @@ excludes unresolved cost basis until actual simulated release. `free + locked +
 positions_value == equity` always holds; residual zero marks have a separate
 `residual_cost_basis`. Restart cancels a pending first entry, or conservatively
 accounts for a previously observed first leg without inventing a missed hedge
-or unwind. Historical books are not persisted as a live feed.
+or unwind. Account replay retains its frozen trade evidence; the observer recording upgrade below separately persists sampled top-five books.
 
 ### Storage, replay, reports and UI
 
@@ -579,3 +578,140 @@ LPT load reduction, subscription preservation, hysteresis/cooldown, reconnect
 checks, destination failure, subscribe-before-unsubscribe ordering, UTC rollover,
 retry retention and idempotent PG upsert/report aggregation across sessions.
 No public-feed soak or server deployment was performed for this change.
+
+## Observer evidence recording (2026-10-14)
+
+Recording remains public and paper-only in the dedicated `polymarket-observer`
+process. `POLYMARKET_OBSERVER_IN_SCHEDULER=false` keeps its existing meaning.
+There are no wallets, signing, authentication frames, credentials or orders.
+Apply registered migration `20261014_polymarket_recording.sql` through
+`python -m app.commands.migrate` before restarting the observer/API. The bootstrap
+registration has a deployment-entrypoint regression test and follows the sample
+schema migration. Reapplication preserves existing rows.
+
+Current public documentation was rechecked on 2026-10-14:
+
+- The [August 14 changelog](https://docs.polymarket.com/changelog/predictions)
+  supersedes August 7: **5m and 15m now both use a 60-second Chainlink TWAP**.
+- [TWAP streaming](https://docs.polymarket.com/market-data/realtime-data) and
+  [PolyBolt authentication](https://docs.polymarket.com/api-reference/live-data/overview)
+  require credentials for `price.crypto.twap`. This implementation only offers
+  a default-off anonymous subscription probe; it cannot obtain gated data.
+- The [message contract](https://docs.polymarket.com/api-reference/wss/polybolt)
+  supplies source, exchange timestamp, window length and full-precision value.
+  Only BTC/USD and ETH/USD, `source=chainlink`, `window_seconds=60` are accepted.
+
+Tables (all prefixed `qd_polymarket_observer_`):
+
+| Table | Evidence / query indexes |
+| --- | --- |
+| `books` | Token/market, top-five bids descending and asks ascending (decimal strings for price/size), exchange and receive timestamps, WS/REST source. Indexes on receive time and token/market + receive time. |
+| `trades` | Each observed `last_trade_price`: token/market, price, nullable size, BUY/SELL, nullable exchange timestamp, receive timestamp and optional transaction hash. Same time indexes. |
+| `twap` | Asset, 60s lookback, exact exchange time, receive time, full-precision price, Chainlink provenance. Asset/lookback/exchange-time primary key and time index. |
+| `windows` | Market/condition, asset/interval, start/end, start TWAP (`price_to_beat`), settlement TWAP, their exact exchange times, computed/official outcome, nullable match, finality evidence and last check. End-time and pending-resolution indexes. |
+
+Books/trades/windows cover the existing YES/NO scope and BTC/ETH 5m/15m
+Up/Down scope (windows only apply to Up/Down). Discovery itself is unchanged;
+configure the existing Up/Down asset/interval allowlists for a narrow deployment.
+The default recording flag is on, but the observer and Up/Down observer retain
+separate default-off gates. Books are sampled on top-five price **or size** changes,
+at most once per token per configured interval. Multiple updates during the
+interval coalesce to the latest state, which is considered even without a new
+message or a valid complete-set quote. Empty sides remain empty; missing exchange
+timestamps remain null. The exchange time represents the latest applied book or
+price delta. REST recordings preserve the public response's exchange timestamp.
+Book age is `received_at - exchange_at` for recorded arrival latency, or query
+wall-clock time minus exchange time for quote staleness.
+
+WS readers only parse/apply events and append bounded memory records. Depth
+sorting, SQL construction and queue operations occur in the evaluator/discovery
+workers; the existing writer commits adjacent recording statements using batched
+multi-VALUES inserts. Stable UUIDs for books/trades and the TWAP primary key make
+writer retries idempotent. Only the applied shard owner contributes during
+handover, avoiding overlap prints. The public feed provides no durable trade
+cursor: remote replay, disconnections and missed events remain possible.
+
+Trades are not throttled or coalesced. Buffer/queue saturation evicts disposable
+recordings and increments loss counters; protected episode transitions/window
+registration retain their ordering. Queued books/research may be replaced with
+the latest value. Data collection is bounded, not lossless. A graceful stop stops
+reference producers, considers final staged records, and drains the writer;
+a timeout reports incomplete flushing. A hard kill loses uncommitted buffers.
+
+When enabled, TWAP makes a credential-free subscribe attempt for BTC and ETH.
+`auth_required` closes the socket and disables retries until process restart;
+connection failures retry at most every five minutes. No credential variables
+are read. A silent subscription times out after 30 seconds. Ticks are downsampled
+per asset; exact UTC five-minute boundary ticks bypass this throttle so starts
+and settlements are preserved. Snapshot history can fill exact boundaries.
+A boundary is matched only by **exact exchange time**, never by nearest tick,
+spot price, receive time or a locally recomputed average. Missing evidence stays
+null. Thus a gap, mid-window startup or currently gated stream may prevent a
+computed outcome even when the official winner is known.
+
+A separate public worker polls up to ten closed windows per interval, oldest
+unchecked/check-time first, using Gamma. Finality requires matching condition,
+`closed=true`, `umaResolutionStatus=resolved`, exact Up/Down labels and binary
+0/1 outcome prices. Closure/proposals alone are insufficient. Equal start/end
+TWAP computes Up; `outcome_matches` stays null until both exact TWAPs and an
+official outcome exist. Persisted ticks/windows survive restarts. Start TWAP
+backfills existing samples; new samples get `chainlink_price` and
+`chainlink_observed_at` from an observed tick no older than five seconds.
+Historical samples without contemporaneous ticks retain null Chainlink values.
+Existing Binance reference columns remain separate observations.
+
+| New observer suffix (`POLYMARKET_OBSERVER_`) | Default / bounds |
+| --- | --- |
+| `RECORDING_ENABLED` | true (observer itself remains disabled by default) |
+| `BOOK_MIN_INTERVAL_MS` | 1000 / 100–60000 |
+| `RECORDING_BUFFER_MAX` | 10000 / 1–100000 staging records, additional to existing writer queue |
+| `RECORDING_RETENTION_DAYS` | 7 / 1–365, books and trades |
+| `RECORDING_CLEANUP_BATCH` | 100000 / 100–1000000 rows per table per ten-minute pass |
+| `TWAP_ENABLED` | false, anonymous probe only |
+| `TWAP_MIN_INTERVAL_MS` | 1000 / 100–60000 (exact boundary exception) |
+| `TWAP_RETENTION_DAYS` | 7 / 1–365 |
+| `WINDOW_RETENTION_DAYS` | 30 / 1–365 |
+| `RESOLUTION_POLL_SECONDS` | 60 / 10–3600 |
+
+Cleanup uses indexed, oldest-first chunked deletes. A backlog may take several
+passes; monitor table growth and increase batch size or recording interval for
+larger scopes. PostgreSQL autovacuum must reclaim dead tuples; retention is not
+an immediate disk-space release.
+
+Observer status exposes `recording_rows_per_minute` for actual committed inserts
+into books/trades/TWAP/windows/samples over the trailing 60 seconds (process-local,
+zero after restart), staging depth/loss/invalid counts, existing queue drops and
+coalesces, and `book_age_p50_ms` / `book_age_p95_ms` over current timestamped token
+books. Missing/future exchange times are excluded from these percentiles;
+`book_age_tokens` reports coverage. TWAP state is disabled/connecting/subscribing/
+streaming/stale/auth_required/unavailable/stopped, with sanitized errors and last
+tick receive time. Public resolution failures are reported separately. Status is
+persisted on the existing ten-second cadence.
+
+Write-volume estimate (upper bounds, not measured feed rates): at one second,
+`N` continuously changing scoped tokens produce at most `86400 × N` book rows/day.
+Twenty YES/NO markets plus two windows per BTC/ETH × 5m/15m pair gives 56 tokens:
+**4,838,400 books/day**, or 33,868,800 over seven days. Actual changes may be fewer.
+Trade volume adds the observed prints (e.g. 10 total prints/sec adds 864,000/day).
+If an anonymous TWAP stream becomes available, the default adds about 172,800
+normal ticks/day plus boundary exceptions; currently it is expected to add zero.
+BTC/ETH 5m/15m windows add up to 768 rows/day. JSON depth + indexes + WAL require
+capacity measurement after deployment; these estimates are row counts, not disk
+or network predictions. Raise `BOOK_MIN_INTERVAL_MS` to reduce the book cap.
+
+Deploy: migrate first, restart the dedicated observer on the same backend image,
+keep scheduler hosting false, retain `TWAP_ENABLED=false` while the documented
+channel is gated, and inspect row rates, queue/staging loss, book-age coverage,
+writer lag/errors and retention backlog. No push, server migration or deployment
+is performed by this development task. No maker simulator is included here.
+
+Local validation for this upgrade used the existing backend `.venv` and PG18,
+with `DATABASE_URL`, `AUTOMATION_TEST_DATABASE_URL` and `QD_TEST_POSTGRES_DSN`
+all explicitly set to the approved localhost `qd_automation_test` database.
+Registered migration bootstrap passed. Polymarket + bootstrap/process-role/
+scheduler checks: **254 passed**. Final unfiltered backend `python -m pytest -q`:
+**4096 passed, 24 skipped**, with 59 existing deprecation warnings. Global
+`ruff check .`, documentation structure/link checks and `git diff --check` passed.
+A credential-free public PolyBolt subscription smoke returned `auth_required`,
+recorded no TWAP ticks and closed its receive thread cleanly. No sustained market
+feed soak, disk-capacity benchmark, server access or deployment was performed.

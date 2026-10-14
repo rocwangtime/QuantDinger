@@ -54,11 +54,14 @@ def test_retention_runs_at_most_every_ten_minutes_and_uses_near_miss_setting(mon
     observer._RETENTION_LAST[0] = 0
     observer._run_retention(1000)
     observer._run_retention(1599)
-    assert len(statements) == 2
+    assert len(statements) == 6
+    for sql, params in statements[2:]:
+        assert "ORDER BY" in sql and "LIMIT %s" in sql
+        assert params[1] == 100000
     assert "qd_polymarket_observer_near_misses" in statements[1][0]
     assert statements[1][1] == (12,)
     observer._run_retention(1600)
-    assert len(statements) == 4
+    assert len(statements) == 12
 
 
 def test_websocket_status_transitions_clear_error_and_preserve_mode(monkeypatch):

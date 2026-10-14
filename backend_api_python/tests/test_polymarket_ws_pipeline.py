@@ -36,7 +36,8 @@ def test_receive_has_no_database_http_or_evaluation(monkeypatch):
 
 
 def test_dirty_evaluator_throttle_and_research_cache(monkeypatch):
-    m = market(market_type='up_down', asset='BTC', interval='15m',
+    m = market(market_type='up_down', asset='BTC', interval='15m', conditionId='condition',
+               eventStartTime=datetime.now(timezone.utc).isoformat(),
                endDate=(datetime.now(timezone.utc)+timedelta(minutes=15)).isoformat())
     p = observer.Pipeline()
     p.set_markets([m])
@@ -239,7 +240,8 @@ def test_removal_waits_for_snapshot_evaluation_before_end(monkeypatch):
     evaluation.join(2)
     removal.join(2)
     assert removed.is_set()
-    statements = [sql for item in p.queue.items for sql, _ in item[2]]
+    statements = [sql for item in p.queue.items for sql, _ in item[2]
+                  if 'qd_polymarket_observer_episodes' in sql]
     assert 'INSERT INTO qd_polymarket_observer_episodes' in statements[0]
     assert statements[-1].startswith('UPDATE qd_polymarket_observer_episodes SET ended_at')
 
@@ -352,7 +354,7 @@ def test_rest_fallback_uses_same_ordered_writer_queue(monkeypatch):
         def discover(self, **kwargs):
             return [m], []
         def capture(self, markets):
-            return {'a': {'books': {a: {'asks': [dict(price='.4', size='100')], 'bids': []}
+            return {'a': {'observedMs': int(datetime.now(timezone.utc).timestamp() * 1000), 'books': {a: {'asks': [dict(price='.4', size='100')], 'bids': []}
                                     for a in observer.subscription_assets(markets)}}}
         def close(self):
             pass
@@ -363,7 +365,8 @@ def test_rest_fallback_uses_same_ordered_writer_queue(monkeypatch):
     monkeypatch.setattr(observer, '_close_stale_episodes', lambda *args: None)
     monkeypatch.setattr(observer, 'get_db_connection', lambda: (_ for _ in ()).throw(AssertionError('REST bypassed writer')))
     observer._market_loop()
-    assert len(p.queue.items) == 1
-    sql, params = p.queue.items[0][2][0]
+    assert len(p.queue.items) == 3
+    assert sum(item[1] == 'book' for item in p.queue.items) == 2
+    sql, params = p.queue.items[-1][2][0]
     assert sql.startswith('INSERT INTO qd_polymarket_observer_episodes')
     assert params[8] == 'rest'
