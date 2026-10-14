@@ -107,7 +107,15 @@ def report(user_id, task_id, days=14):
                 (user_id, row['token_id'], since, now, ORDER_LIMIT+1))
             orders = [dict(r) for r in cur.fetchall()]
             partial = {'runs': len(runs)>RUN_LIMIT, 'samples': len(samples)>SAMPLE_LIMIT, 'orders': len(orders)>ORDER_LIMIT}
-            return assemble(dict(row), runs[:RUN_LIMIT], samples[:SAMPLE_LIMIT], orders[:ORDER_LIMIT],
+            cur.execute('''SELECT day,report->'forward_scoring' AS forward_scoring
+                FROM qd_agent_daily_reports WHERE task_id=%s AND day>=%s
+                AND jsonb_array_length(COALESCE(report->'forward_scoring'->'screener_run_ids','[]'::jsonb))>0
+                ORDER BY day DESC LIMIT 91''',
+                (task_id, since.astimezone(ZoneInfo('America/New_York' if row['config']['market'] == 'USStock' else 'Asia/Hong_Kong')).date()))
+            daily_reports = [dict(r) for r in cur.fetchall()]
+            result = assemble(dict(row), runs[:RUN_LIMIT], samples[:SAMPLE_LIMIT], orders[:ORDER_LIMIT],
                             since.timestamp(), now.timestamp(), partial)
+            result['daily_forward_reports'] = daily_reports
+            return result
         finally:
             cur.close()

@@ -57,9 +57,11 @@ class FutuData:
                 errors.update({s: 'quote_batch_failed' for s in batch})
         return result, errors
 
-    def bars(self, symbol, as_of):
+    def bars(self, symbol, as_of, *, required_days=None):
         cached = store.query('SELECT bars FROM qd_us_screener_bar_cache WHERE symbol=%s AND as_of=%s', (symbol, as_of), one=True)
-        if cached:
+        # Forward scoring must retry caches written before the exact target
+        # bar arrived. Ordinary screening retains its existing cache behavior.
+        if cached and (not required_days or set(required_days) <= {str(b['time_key'])[:10] for b in cached['bars']}):
             return cached['bars']
         from futu import KLType, AuType
         raw = self.call('request_history_kline', 'US.'+symbol, start=str(as_of-timedelta(days=420)),
@@ -67,6 +69,7 @@ class FutuData:
         bars = completed_bars(raw.to_dict('records'), as_of)
         # Store only JSON-native fields needed by the engine.
         bars = [{k: b[k] for k in ('time_key', 'close', 'high', 'low', 'volume')} for b in bars]
-        store.query('INSERT INTO qd_us_screener_bar_cache(symbol,as_of,bars) VALUES (%s,%s,%s) ON CONFLICT DO NOTHING',
+        conflict = 'DO UPDATE SET bars=EXCLUDED.bars,created_at=NOW()' if required_days else 'DO NOTHING'
+        store.query('INSERT INTO qd_us_screener_bar_cache(symbol,as_of,bars) VALUES (%s,%s,%s) ON CONFLICT(symbol,as_of) '+conflict,
                     (symbol, as_of, json.dumps(bars)))
         return bars

@@ -44,9 +44,22 @@ def analyze(row, run, evidence=None, trigger_quote=None):
         return stopped
 
     try:
+        from app.services.automation.domain import validate_universe_source
+        validate_universe_source(config)
         claimed = store.query("UPDATE qd_agent_automation_runs SET status='researching',phase='准备账户与行情' WHERE id=%s AND status='queued' RETURNING id",(run['id'],),one=True)
         if not claimed:
             return
+        if config.get('universe_source'):
+            from app.services.automation.shortlist import resolve
+            resolved = resolve(config, utcnow())
+            if not resolved:
+                store.update_run(run['id'], status='completed', phase='Skipped: no fresh completed US screener shortlist',
+                                 result={'skip_reason': 'no_fresh_completed_us_screener_shortlist'}, finished_at=utcnow())
+                return
+            config = {**copy.deepcopy(config), 'symbols': resolved['symbols']}
+            row = {**row, 'config': config}
+            # Prepared evidence may describe the stored universe, so rebuild it.
+            evidence = None
         if evidence is None:
             evidence = build_evidence(row,news=(config.get('research') or {}).get('mode') != 'tool_loop',cancelled=cancelled)
         else:
@@ -62,6 +75,8 @@ def analyze(row, run, evidence=None, trigger_quote=None):
         evidence['managed_quantities'] = store.owned_quantities(row)
         previous = (row.get('state') or {}).get('last_plan') or {}
         evidence['previous_plan'] = {key: previous[key] for key in ('summary', 'items', 'task_revision', 'prompt_version') if key in previous}
+        if config.get('universe_source'):
+            evidence['screener'] = resolved
         evidence['task_config'] = config
         prompt_version = 'portfolio-tools-v1' if (config.get('research') or {}).get('mode') == 'tool_loop' else 'portfolio-json-v2'
         evidence['prompt_version'] = prompt_version
@@ -159,6 +174,12 @@ def analyze(row, run, evidence=None, trigger_quote=None):
 
 
 def execute(row, run):
+    from app.services.automation.domain import validate_universe_source
+    validate_universe_source(row['config'])
+    validate_universe_source((run.get('evidence') or {}).get('task_config') or {})
+    if (row['config'].get('universe_source') or (run.get('evidence') or {}).get('screener')
+            or ((run.get('evidence') or {}).get('task_config') or {}).get('universe_source')):
+        return
     from app.services.agent_trade_intents import submit_intent
     from app.services.futu_agent_execution import _load_client, execute_simulate_intent, reconcile_simulate_intent
     run = {**run, '_worker_generation': run.get('_worker_generation', health.generation())}

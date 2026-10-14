@@ -304,9 +304,9 @@ def task_latency(task_id):
 
 
 @blp.route('/<int:task_id>/daily-report', methods=['GET'])
-@blp.doc(summary='Read persisted HK daily decision scores and risk events; gross hypothetical PnL',
+@blp.doc(summary='Read persisted market-local daily decision scores and risk events; gross hypothetical PnL',
          parameters=[{'name': 'day', 'in': 'query', 'required': True,
-                      'schema': {'type': 'string', 'format': 'date'}, 'description': 'HK local date (YYYY-MM-DD)'}])
+                      'schema': {'type': 'string', 'format': 'date'}, 'description': 'Market-local date (YYYY-MM-DD)'}])
 @blp.response(200, AutomationDailyReportEnvelopeSchema)
 @login_required
 @envelope
@@ -316,7 +316,7 @@ def task_daily_report(task_id):
 
 
 @blp.route('/runs/<int:run_id>/scores', methods=['GET'])
-@blp.doc(summary='Read owner-scoped persisted HK decision horizon scores; missing outcomes remain null')
+@blp.doc(summary='Read owner-scoped persisted decision horizon scores; missing outcomes remain null')
 @blp.response(200, AutomationScoresEnvelopeSchema)
 @login_required
 @envelope
@@ -326,3 +326,12 @@ def run_scores(run_id):
     if not run:
         raise ValueError('Run not found')
     return store.query('SELECT * FROM qd_agent_decision_scores WHERE run_id=%s ORDER BY symbol,due_at', (run_id,))
+
+
+@blp.route('/runs/<int:run_id>/scores/rescore', methods=['POST'])
+@blp.doc(summary='Reset owner-scoped US plan forward observations for the read-only scoring tick')
+@login_required
+@envelope
+def rescore_run(run_id):
+    from app.services.automation.forward_scoring import rescore
+    return rescore(g.user_id, run_id)

@@ -42,6 +42,8 @@ def db(monkeypatch):
         cur.execute((Path(__file__).parents[1]/'migrations/20261006_agent_performance.sql').read_text())
         cur.execute((Path(__file__).parents[1]/'migrations/20261012_agent_symbol_config.sql').read_text())
         cur.execute((Path(__file__).parents[1]/'migrations/20261012_agent_scoring.sql').read_text())
+        cur.execute((Path(__file__).parents[1]/'migrations/20261015_us_screener.sql').read_text())
+        cur.execute((Path(__file__).parents[1]/'migrations/20261015_us_forward_scores.sql').read_text())
         cur.execute("INSERT INTO qd_users(id,username,password_hash) VALUES(900001,'automation-fixture','not-a-login')")
 
     @contextmanager

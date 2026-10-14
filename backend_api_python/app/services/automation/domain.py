@@ -26,9 +26,24 @@ def symbol(value, market):
     return display
 
 
+def validate_universe_source(config):
+    """Also called on untrusted stored configs before any runtime side effects."""
+    if 'universe_source' not in config:
+        return
+    if (config.get('universe_source') != 'screener:top_n'
+            or config.get('execution_mode', 'plan_only') != 'plan_only'
+            or config.get('market', 'USStock') != 'USStock'
+            or config.get('kind', 'daily_portfolio') != 'daily_portfolio'):
+        raise ValueError('Screener universe requires a US daily_portfolio in plan_only mode')
+    for key, default, low, high in [('top_n', 10, 1, 20), ('universe_max_age_days', 4, 0, 30)]:
+        if not number(config.get(key, default), low, high).is_integer():
+            raise ValueError(f'{key} must be an integer')
+
+
 def normalize_config(raw):
     if not isinstance(raw, dict):
         raise ValueError('Task config must be an object')
+    validate_universe_source(raw)
     market = raw.get('market', 'USStock')
     kind = raw.get('kind', 'daily_portfolio')
     if market not in {'USStock', 'HKStock'} or kind not in {'daily_portfolio', 'price_trigger', 'event_portfolio'}:
@@ -60,6 +75,10 @@ def normalize_config(raw):
         'manage_existing': raw.get('manage_existing') is True,
         'decision_timeout_seconds': 15 if kind == 'price_trigger' else 180,
     }
+    if raw.get('universe_source') is not None:
+        config.update(universe_source=raw['universe_source'],
+                      top_n=int(number(raw.get('top_n', 10), 1, 20)),
+                      universe_max_age_days=int(number(raw.get('universe_max_age_days', 4), 0, 30)))
     if config['max_daily_notional'] < config['max_order_notional']:
         raise ValueError('Daily limit must be at least the per-order limit')
     risk = raw.get('risk', {})
@@ -155,6 +174,7 @@ def trigger_state(config, quote, previous, now):
 
 def parse_decision(text, evidence, config):
     """Accept complete machine decisions; streamed partial text never executes."""
+    validate_universe_source(config)
     raw = text.strip()
     if raw.startswith('```'):
         raw = raw.split('\n', 1)[1].rsplit('```', 1)[0].strip()

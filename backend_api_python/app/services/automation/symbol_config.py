@@ -98,6 +98,8 @@ def materialize(config, p):
     c.update(budget=p['budget'], max_order_notional=p['per_order_cap'], max_daily_notional=p['daily_buy_cap'],
              reserve_ratio=p['cash_reserve_pct']/100, max_weight=p['max_position']/p['budget'],
              execution_mode=p['mode'], cooldown_seconds=p['cooldown_minutes']*60, symbol_params=p)
+    from app.services.automation.domain import validate_universe_source
+    validate_universe_source(c)
     c['risk'] = dict(enabled=True, stop_loss_pct=p['stop_loss_pct']/100,
                      max_daily_loss_pct=p['daily_loss_pct']/100, max_drawdown_pct=p['max_drawdown_pct']/100,
                      daily_loss_budget=True)

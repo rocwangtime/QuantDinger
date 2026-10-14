@@ -406,6 +406,10 @@ def _apply_init_sql(logger, *, strict: bool = False):
                 path=Path(__file__).resolve().parent.parent.parent / "migrations" / "20261012_agent_scoring.sql",
             )
             _apply_migration_component(
+                conn, logger, name="20261015_us_forward_scores",
+                path=Path(__file__).resolve().parent.parent.parent / "migrations" / "20261015_us_forward_scores.sql",
+            )
+            _apply_migration_component(
                 conn, logger, name="us-agent-symbol-seed-20261014",
                 path=Path(__file__).resolve().parent.parent.parent / "migrations" / "20261014_us_agent_symbol_seed.sql",
             )
