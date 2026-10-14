@@ -351,6 +351,10 @@ def _apply_init_sql(logger, *, strict: bool = False):
                 path=Path(__file__).resolve().parent.parent.parent / "migrations" / "20261015_nasdaq100_seed.sql",
             )
             _apply_migration_component(
+                conn, logger, name="20261015_nasdaq100_seed_effective_date",
+                path=Path(__file__).resolve().parent.parent.parent / "migrations" / "20261015_nasdaq100_seed_effective_date.sql",
+            )
+            _apply_migration_component(
                 conn, logger, name="research-execution-20261006",
                 path=Path(__file__).resolve().parent.parent.parent / "migrations" / "20261006_research_execution.sql",
             )
