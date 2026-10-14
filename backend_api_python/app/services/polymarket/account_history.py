@@ -26,6 +26,10 @@ class BookHistory:
             return
         if not isinstance(event, dict):
             return
+        from .recording import exchange_time
+        payload = event.get('payload') or event
+        exchange = exchange_time(payload.get('timestamp'))
+        exchange_ms = exchange.timestamp() * 1000 if exchange else None
         records = []
         kind = event.get('event_type') or event.get('type')
         if kind == 'book':
@@ -37,6 +41,7 @@ class BookHistory:
                 records.append((str(item.get('asset_id') or item.get('assetId') or ''), dict(kind='delta',
                     side='bids' if str(item.get('side', '')).upper() == 'BUY' else 'asks', price=str(item['price']), size=str(item['size']))))
         for asset, record in records:
+            record['exchange_ms'] = exchange_ms
             state = self.assets.setdefault(asset, {'base': {'asks': {}, 'bids': {}}, 'base_at': None, 'events': deque()})
             if record['kind'] == 'delta' and state['base_at'] is None and not state['events']:
                 continue
@@ -45,9 +50,17 @@ class BookHistory:
                 popped_at, popped = state['events'].popleft()
                 state['base'] = apply(state['base'], popped)
                 state['base_at'] = popped_at
+                state['base_exchange_ms'] = popped.get('exchange_ms')
+
+    def record_rest(self, asset, book, at):
+        """Adapt a public REST snapshot without replacing its exchange time."""
+        self.record(dict(event_type='book', asset_id=asset,
+                         timestamp=book.get('exchangeTimestamp'),
+                         asks=book['asks'], bids=book['bids']), at)
 
     def copy_assets(self, assets):
         return {a: {'base': copy.deepcopy(self.assets[a]['base']),
+                    'base_exchange_ms': self.assets[a].get('base_exchange_ms'),
                     'base_at': self.assets[a]['base_at'], 'events': list(self.assets[a]['events'])}
                 for a in assets if a in self.assets}
 
@@ -57,11 +70,15 @@ class BookHistory:
         if not state or state['base_at'] is not None and state['base_at'] > at:
             return None
         book, last = copy.deepcopy(state['base']), state['base_at']
+        exchange_ms = state.get('base_exchange_ms')
         for observed, event in state['events']:
             if observed > at:
                 break
             book, last = apply(book, event), observed
+            exchange_ms = event.get('exchange_ms')
         if last is None or at - last > max_age:
+            return None
+        if exchange_ms is None or not 0 <= at - exchange_ms <= max_age:
             return None
         from .engine import number
         sides = {}
@@ -80,4 +97,4 @@ class BookHistory:
                 return None
         except ValueError:
             return None
-        return dict(assetId=asset, observedMs=last, **sides)
+        return dict(assetId=asset, observedMs=last, exchangeMs=exchange_ms, **sides)

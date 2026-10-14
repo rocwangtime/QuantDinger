@@ -185,8 +185,7 @@ class Recorder:
         self.pending.append((key, kind, [(sql, params)]))
 
     def receive(self, event, changed, markets, asset_markets, received, owned=None):
-        if not self.enabled:
-            return
+        changed = set(changed)
         for kind, payload in events(event):
             if kind == 'book':
                 tokens = [str(payload.get('asset_id') or payload.get('assetId') or '')]
@@ -195,10 +194,11 @@ class Recorder:
                           for p in payload.get('price_changes', payload.get('priceChanges', []))]
             else:
                 tokens = []
-            for token in tokens:
+            at = exchange_time(payload.get('timestamp'))
+            for token in set(tokens):
                 if token in changed and (owned is None or token in owned):
-                    self.metadata[token] = (exchange_time(payload.get('timestamp')), received, 'ws')
-            if kind == 'last_trade_price':
+                    self.metadata[token] = (at, received, 'ws')
+            if self.enabled and kind == 'last_trade_price':
                 trade = parse_trade(payload, received)
                 if trade is None:
                     self.invalid += 1

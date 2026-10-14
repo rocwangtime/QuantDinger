@@ -13,7 +13,7 @@ def market(identity='a', **extra):
 
 def feed(pipeline, m):
     for token in observer.subscription_assets([m]):
-        pipeline.receive(json.dumps(dict(event_type='book', asset_id=token,
+        pipeline.receive(json.dumps(dict(event_type='book', asset_id=token, timestamp=int(datetime.now(timezone.utc).timestamp() * 1000),
                                         bids=[dict(price='.3', size='100')],
                                         asks=[dict(price='.4', size='100')])))
 

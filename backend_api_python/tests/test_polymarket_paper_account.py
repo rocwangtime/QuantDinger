@@ -1,6 +1,7 @@
 """Continuous paper sizing, fills, capital invariants, history and HTTP contracts."""
 import copy
 import inspect
+import time
 
 import pytest
 
@@ -76,15 +77,15 @@ def test_lock_free_loss_stop_and_cooldown_limits():
 
 def test_history_returns_book_at_arrival_not_later_and_is_bounded():
     h = BookHistory(seconds=10, maximum=3)
-    h.record(dict(event_type='book', asset_id='11', asks=[dict(price='.4', size='100')], bids=[]), 1000)
-    h.record(dict(event_type='price_change', price_changes=[dict(asset_id='11', side='SELL', price='.4', size='1')]), 1100)
+    h.record(dict(event_type='book', asset_id='11', timestamp=1000, asks=[dict(price='.4', size='100')], bids=[]), 1000)
+    h.record(dict(event_type='price_change', timestamp=1100, price_changes=[dict(asset_id='11', side='SELL', price='.4', size='1')]), 1100)
     states = h.copy_assets(['11'])
     assert h.lookup(states, '11', 1050, 2000)['asks'][0]['size'] == '100'
     assert h.lookup(states, '11', 1150, 2000)['asks'][0]['size'] == '1'
     assert h.lookup(states, '11', 900, 2000) is None
     assert h.lookup(states, '11', 5000, 2000) is None
     for at in (1200, 1300, 1400, 1500):
-        h.record(dict(event_type='price_change', price_changes=[dict(asset_id='11', side='SELL', price='.4', size='2')]), at)
+        h.record(dict(event_type='price_change', timestamp=1100, price_changes=[dict(asset_id='11', side='SELL', price='.4', size='2')]), at)
     assert len(h.assets['11']['events']) == 3
     assert h.lookup(h.copy_assets(['11']), '11', 1490, 2000)['asks'][0]['size'] == '2'
 
@@ -304,7 +305,7 @@ def test_authenticated_account_lists_reports_replay_and_download_shapes(client, 
 
 def test_account_history_lookup_copies_events_without_mutating_receive_state():
     h = BookHistory()
-    h.record(dict(event_type='book', asset_id='11', asks=[dict(price='.4', size='100')], bids=[]), 1000)
+    h.record(dict(event_type='book', asset_id='11', timestamp=1000, asks=[dict(price='.4', size='100')], bids=[]), 1000)
     snapshot = h.copy_assets(['11'])
     first = h.lookup(snapshot, '11', 1000, 2000)
     first['asks'][0]['size'] = '0'
@@ -319,7 +320,7 @@ def test_enabled_receive_history_stays_free_of_database_work(monkeypatch):
     pipeline = observer.Pipeline()
     pipeline.set_markets([market()])
     for asset in ('11', '22'):
-        pipeline.receive(json.dumps(dict(event_type='book', asset_id=asset, asks=[dict(price='.4', size='100')], bids=[])))
+        pipeline.receive(json.dumps(dict(event_type='book', asset_id=asset, timestamp=int(time.time() * 1000), asks=[dict(price='.4', size='100')], bids=[])))
     assert pipeline.messages == 2 and pipeline.dirty == {'42'}
     assert pipeline.paper_account.inbox.empty()
     assert not pipeline.paper_account.thread.is_alive()
@@ -341,8 +342,8 @@ def test_residual_resolution_requires_final_public_binary_outcomes(extra, expect
 
 def test_history_handles_zero_size_deltas_and_invalid_depth_fail_closed():
     h = BookHistory()
-    h.record(dict(type='book', payload=dict(assetId='11', asks=[dict(price='.4', size='100')], bids=[])), 1000)
-    h.record(dict(type='price_change', payload=dict(priceChanges=[dict(assetId='11', side='SELL', price='.4', size='0.0')])), 1100)
+    h.record(dict(type='book', payload=dict(assetId='11', timestamp=1000, asks=[dict(price='.4', size='100')], bids=[])), 1000)
+    h.record(dict(type='price_change', payload=dict(timestamp=1100, priceChanges=[dict(assetId='11', side='SELL', price='.4', size='0.0')])), 1100)
     assert h.lookup(h.copy_assets(['11']), '11', 1150, 2000)['asks'] == []
-    h.record(dict(type='book', payload=dict(assetId='11', asks=[dict(price='NaN', size='100')], bids=[])), 1200)
+    h.record(dict(type='book', payload=dict(assetId='11', timestamp=1000, asks=[dict(price='NaN', size='100')], bids=[])), 1200)
     assert h.lookup(h.copy_assets(['11']), '11', 1200, 2000) is None

@@ -190,7 +190,8 @@ def test_recording_flag_disables_all_staging(monkeypatch):
     p.set_markets([market()])
     p.receive(json.dumps(book()))
     p.evaluate(10)
-    assert not p.recording.metadata
+    assert p.recording.metadata['u'] == (None, p.recording.metadata['u'][1], 'ws')
+    assert not p.recording.pending
     assert all(item[1] not in {'book', 'trade', 'twap', 'window'} for item in p.queue.items)
 
 
