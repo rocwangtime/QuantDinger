@@ -674,15 +674,18 @@ class Pipeline:
         for identity in previous - self.markets.keys():
             self.capture(identity, 'observation', lambda: _end_episode(identity, datetime.now(timezone.utc)))
 
-    def receive(self, raw, owned=None, received_at=None, inbox=None):
+    def receive(self, raw, owned=None, received_at=None, inbox=None, epoch=None):
         if raw == 'PONG':
             return
         try:
             received = received_at or datetime.now(timezone.utc)
             event = json.loads(raw) if isinstance(raw, (str, bytes)) else raw
             with self.lock:
-                if inbox and inbox.invalid.is_set():
+                if inbox and (inbox.invalid.is_set() or inbox.resync.is_set() or
+                              (epoch is not None and epoch != inbox.epoch)):
                     return
+                if inbox:
+                    inbox.lag_seconds = (datetime.now(timezone.utc) - received).total_seconds()
                 event = recording.owned_events(event, owned)
                 changed = ws_apply_event(event, self.books)
                 self.recording.receive(event, changed, self.markets, self.asset_markets, received, owned)
@@ -857,35 +860,39 @@ class Pipeline:
                                         and not (self.references.socket_thread and self.references.socket_thread.is_alive()))
 
 
-def shard_markets(markets, count, previous=None):
-    """Balance whole markets by asset count, retaining owners when possible."""
+def shard_markets(markets, count, previous=None, rates=None):
+    """Balance whole markets by observed activity, retaining owners when possible."""
+    rates = rates or {}
+
+    def weight(market):
+        return sum(max(.01, rates.get(a, 0)) for a in subscription_assets([market]))
     result, loads = {}, [0] * count
     pending = []
     previous = previous or {}
-    for market in sorted(markets, key=lambda m: (-len(subscription_assets([m])), str(m['id']))):
+    for market in sorted(markets, key=lambda m: (-weight(m), str(m['id']))):
         assets = subscription_assets([market])
         owners = {previous.get(a) for a in assets}
         if len(owners) == 1 and None not in owners and next(iter(owners)) < count:
             index = next(iter(owners))
             result.setdefault(index, []).append(market)
-            loads[index] += len(assets)
+            loads[index] += weight(market)
         else:
             pending.append(market)
     for market in pending:
         index = min(range(count), key=lambda i: (loads[i], i))
         result.setdefault(index, []).append(market)
-        loads[index] += len(subscription_assets([market]))
-    # Only move a retained market when doing so reduces count imbalance.
+        loads[index] += weight(market)
+    # Only move a retained market when doing so reduces weighted imbalance.
     while markets:
         high = max(range(count), key=lambda i: (loads[i], -i))
         low = min(range(count), key=lambda i: (loads[i], i))
         candidates = [m for m in result.get(high, [])
-                      if len(subscription_assets([m])) < loads[high] - loads[low]]
+                      if weight(m) < loads[high] - loads[low] - 1e-9]
         if not candidates:
             break
         market = min(candidates, key=lambda m: (abs(loads[high] - loads[low] -
-                                                 2 * len(subscription_assets([m]))), str(m['id'])))
-        size = len(subscription_assets([market]))
+                                                 2 * weight(m)), str(m['id'])))
+        size = weight(market)
         result[high].remove(market)
         result.setdefault(low, []).append(market)
         loads[high] -= size
@@ -894,30 +901,44 @@ def shard_markets(markets, count, previous=None):
 
 
 class ReceiveQueue:
-    """Bounded raw frames. Overflow invalidates the generation, never skips a delta."""
-    def __init__(self, maximum):
+    """Elastic bounded FIFO; a gap requests snapshots on the existing socket."""
+    def __init__(self, maximum, ceiling=None):
         self.queue = Queue(maximum)
+        self.ceiling = max(maximum, ceiling or maximum)
+        self.lock = RLock()
+        self.resync = Event()
+        self.epoch = 0
+        self.resyncs = 0
+        self.lag_seconds = 0
         self.dropped = 0
         self.high_water = 0
         self.invalid = Event()
 
     def put(self, raw):
-        if self.invalid.is_set():
-            self.dropped += 1
-            return False
-        try:
-            self.queue.put_nowait((raw, datetime.now(timezone.utc)))
-            self.high_water = max(self.high_water, self.queue.qsize())
-            return True
-        except Full:
-            self.invalid.set()
-            self.dropped += 1
-            while True:
-                try:
-                    self.queue.get_nowait()
-                    self.dropped += 1
-                except Empty:
-                    return False
+        with self.lock:
+            if self.invalid.is_set() or self.resync.is_set():
+                self.dropped += 1
+                return False
+            if self.queue.full() and self.queue.maxsize < self.ceiling:
+                with self.queue.mutex:
+                    self.queue.maxsize = min(self.ceiling, self.queue.maxsize * 2)
+            try:
+                self.queue.put_nowait((raw, datetime.now(timezone.utc), self.epoch))
+                self.high_water = max(self.high_water, self.queue.qsize())
+                return True
+            except Full:
+                self.epoch += 1
+                self.resync.set()
+                self.dropped += 1
+                return False
+
+    def discard(self):
+        while True:
+            try:
+                self.queue.get_nowait()
+                self.dropped += 1
+            except Empty:
+                return
 
 
 class MarketConnections:
@@ -929,12 +950,17 @@ class MarketConnections:
         self.stats = _DAILY_STATS
         self.reconnect_pending = False
         self.closed = False
+        self.markets = []
 
     def sync(self, markets):
+        self.markets = list(markets)
         target = updown.setting('WS_ASSETS_PER_SHARD', 600, 1, 100000)
         self.count = max(self.count, min(8, (len(subscription_assets(markets)) + target - 1) // target))
         self.balancer.count = self.count
-        assignments = shard_markets(markets, self.count, self.balancer.assignment)
+        if set(subscription_assets(markets)) == set(self.balancer.assignment):
+            self.tick()
+            return
+        assignments = shard_markets(markets, self.count, self.balancer.assignment, self.balancer.rates)
         assignment = {a: i for i, group in assignments.items() for a in subscription_assets(group)}
         self.balancer.set_assets(assignment)
         self.apply_assignment(assignment)
@@ -999,7 +1025,8 @@ class MarketConnections:
                         if _PIPELINE.paper_account:
                             _PIPELINE.paper_account.history.assets.pop(asset, None)
         state['attempts'] += 1
-        inbox = ReceiveQueue(updown.setting('WS_RECEIVE_QUEUE_MAX', 256, 1, 10000))
+        inbox = ReceiveQueue(updown.setting('WS_RECEIVE_QUEUE_MAX', 2048, 1, 100000),
+                             updown.setting('WS_RECEIVE_QUEUE_CEILING', 16384, 1, 100000))
         state['receive_drops'] = state.get('receive_drops', 0) + (state['inbox'].dropped if state.get('inbox') else 0)
         state['inbox'] = inbox
         state['queue_logged'] = False
@@ -1020,13 +1047,29 @@ class MarketConnections:
 
         def process_frames():
             while not self.closed and state.get('inbox') is inbox and not inbox.invalid.is_set():
+                if inbox.resync.is_set():
+                    # Serialize gap recovery with publication. Never reuse a book
+                    # assembled across a missing delta; request fresh full books.
+                    pipeline_lock = _PIPELINE.lock if _PIPELINE else RLock()
+                    with pipeline_lock, inbox.lock:
+                        if inbox.invalid.is_set() or state.get('inbox') is not inbox:
+                            break
+                        inbox.discard()
+                        if _PIPELINE:
+                            for asset in state['assets']:
+                                _PIPELINE.books.pop(asset, None)
+                                _PIPELINE.recording.metadata.pop(asset, None)
+                                if _PIPELINE.paper_account:
+                                    _PIPELINE.paper_account.history.assets.pop(asset, None)
+                        inbox.resyncs += 1
+                    sock.send(json.dumps(dict(assets_ids=state['assets'], operation='unsubscribe')))
+                    with inbox.lock:
+                        inbox.resync.clear()
+                    sock.send(json.dumps(dict(assets_ids=state['assets'], operation='subscribe')))
+                    _LOG.warning('Polymarket WS snapshot recovery shard=%s drops=%s', index, inbox.dropped)
                 try:
-                    raw, received_at = inbox.queue.get(timeout=.2)
-                    if (datetime.now(timezone.utc) - received_at).total_seconds() > 2:
-                        inbox.invalid.set()
-                        inbox.dropped += 1
-                        state['socket'].close()
-                        continue
+                    raw, received_at, epoch = inbox.queue.get(timeout=.2)
+                    inbox.lag_seconds = (datetime.now(timezone.utc) - received_at).total_seconds()
                 except Empty:
                     continue
                 try:
@@ -1038,7 +1081,7 @@ class MarketConnections:
                         with _PIPELINE.lock:
                             valid = not inbox.invalid.is_set() and state.get('inbox') is inbox
                         if valid:
-                            _PIPELINE.receive(event, frozenset(state['assets']), received_at, inbox)
+                            _PIPELINE.receive(event, frozenset(state['assets']), received_at, inbox, epoch)
                 except (ValueError, TypeError, AttributeError):
                     continue
 
@@ -1107,8 +1150,19 @@ class MarketConnections:
         if self.closed or _STOP.is_set():
             return
         now = time.monotonic()
-        # Sample rates for diagnostics; placement stays in whole-market count bins.
+        # Sample token activity, but move whole markets only, with hysteresis
+        # and a cooldown to avoid turning load balancing into reconnect churn.
+        due = self.reconnect_pending or now - self.balancer.last_check >= self.balancer.interval
         self.balancer.propose(now, self.reconnect_pending)
+        if due and self.markets and now - self.balancer.last_rebalance >= self.balancer.minimum:
+            groups = shard_markets(self.markets, self.count, self.balancer.assignment, self.balancer.rates)
+            target = {a: i for i, group in groups.items() for a in subscription_assets(group)}
+            old = self.balancer.imbalance(self.balancer.loads(self.balancer.assignment))
+            new = self.balancer.imbalance(self.balancer.loads(target))
+            if old - new > self.balancer.threshold:
+                self.apply_assignment(target)
+                self.balancer.last_rebalance = now
+                self.stats.increment('rebalance_count')
         self.reconnect_pending = False
         for index, state in self.states.items():
             if state.get('inbox') and state['inbox'].invalid.is_set() and state['socket']:
@@ -1130,7 +1184,11 @@ class MarketConnections:
         with _LOCK:
             STATUS.update(self.balancer.metrics())
             STATUS['ws_shard_assets'] = [len(self.states.get(i, {}).get('assets', [])) for i in range(self.count)]
-            STATUS['ws_receive_queues'] = {i: dict(depth=s['inbox'].queue.qsize(), drops=s.get('receive_drops', 0) + s['inbox'].dropped, high_water=s['inbox'].high_water) for i, s in self.states.items() if 'inbox' in s}
+            STATUS['ws_receive_queues'] = {
+                i: dict(depth=s['inbox'].queue.qsize(), drops=s.get('receive_drops', 0) + s['inbox'].dropped,
+                        high_water=s['inbox'].high_water, capacity=s['inbox'].queue.maxsize,
+                        resyncs=s['inbox'].resyncs, lag_seconds=s['inbox'].lag_seconds)
+                for i, s in self.states.items() if 'inbox' in s}
             STATUS['ws_shards'] = self.count
             STATUS['ws_connected'] = sum(bool(s['connected']) for s in self.states.values())
             STATUS['connected'] = bool(self.states) and all(s['connected'] for s in self.states.values())

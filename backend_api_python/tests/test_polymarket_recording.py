@@ -228,3 +228,15 @@ def test_cleanup_uses_distinct_retention_per_table(monkeypatch):
         assert sql.startswith(f'DELETE FROM qd_polymarket_observer_{table} ')
         assert f'WHERE {column} < NOW()' in sql
         assert params == (days, 1000)
+
+
+
+def test_freshness_metrics_separate_idle_age_from_arrival_lag():
+    now = datetime.now(timezone.utc)
+    recorder = recording.Recorder()
+    recorder.metadata = {'idle': (now - timedelta(seconds=15), now - timedelta(seconds=14), 'ws'),
+                         'late': (now - timedelta(seconds=10), now, 'ws')}
+    metrics = recorder.metrics({'idle': {}, 'late': {}})
+    assert 15000 <= metrics['book_age_p95_ms'] < 16000
+    assert 14000 <= metrics['book_receipt_age_p95_ms'] < 15000
+    assert metrics['book_arrival_lag_p95_ms'] == 10000

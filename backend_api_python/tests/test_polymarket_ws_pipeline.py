@@ -378,13 +378,15 @@ def test_rest_fallback_uses_same_ordered_writer_queue(monkeypatch):
     assert params[8] == 'rest'
 
 
-def test_receive_queue_overflow_discards_generation_without_blocking():
+def test_receive_queue_overflow_requests_snapshot_without_disconnect():
     q = observer.ReceiveQueue(2)
     assert q.put('first') and q.put('second')
     assert not q.put('overflow')
-    assert q.invalid.is_set() and q.queue.empty()
-    assert q.dropped == 3 and q.high_water == 2
-    assert not q.put('late') and q.dropped == 4
+    assert q.resync.is_set() and not q.invalid.is_set()
+    assert q.dropped == 1 and q.high_water == 2
+    assert not q.put('late') and q.dropped == 2
+    q.discard()
+    assert q.queue.empty() and q.dropped == 4
 
 
 def test_balances_large_and_small_markets_with_pairs_together():
@@ -431,8 +433,9 @@ def test_socket_drains_while_worker_waits_for_book_lock(monkeypatch):
             sockets[0].callbacks['on_message'](sockets[0], json.dumps(dict(
                 event_type='book', asset_id='ay', timestamp=str(1780000000000 + i),
                 bids=[dict(price='.4', size='1')], asks=[dict(price='.5', size='1')])))
-        assert m.states[0]['inbox'].invalid.is_set()
-        assert m.states[0]['inbox'].dropped >= 7
+        assert not m.states[0]['inbox'].invalid.is_set()
+        assert m.states[0]['inbox'].dropped == 0
+        assert m.states[0]['inbox'].queue.maxsize >= 8
         assert not p.books
     m.close()
     assert not m.states[0]['worker'].is_alive()
@@ -469,3 +472,104 @@ def test_asset_target_grows_shards_and_keeps_market_pairs(monkeypatch):
     assert sorted(len(s['assets']) for s in m.states.values()) == [2, 4, 4]
     for i in range(5):
         assert m.balancer.assignment[f'{i}y'] == m.balancer.assignment[f'{i}n']
+
+
+def test_elastic_receive_fifo_keeps_deltas():
+    q = observer.ReceiveQueue(2, 8)
+    for i in range(8):
+        assert q.put(str(i))
+    assert [q.queue.get_nowait()[0] for _ in range(8)] == list(map(str, range(8)))
+    assert q.queue.maxsize == 8 and not q.invalid.is_set()
+
+
+def test_weighted_market_placement_reduces_hot_shard_and_keeps_pairs():
+    markets = [market(str(i)) for i in range(16)]
+    initial = observer.shard_markets(markets, 4)
+    previous = {a: i for i, group in initial.items() for a in observer.subscription_assets(group)}
+    rates = {a: (7 if owner == 3 else 1) for a, owner in previous.items()}
+    groups = observer.shard_markets(markets, 4, previous, rates)
+    target = {a: i for i, group in groups.items() for a in observer.subscription_assets(group)}
+    loads = [sum(rates[a] for a in target if target[a] == i) for i in range(4)]
+    assert max(loads) / min(loads) < 2
+    assert set(target) == set(previous)
+    for m in markets:
+        assert target[m['yesAssetId']] == target[m['noAssetId']]
+
+
+
+def test_hard_overflow_recovers_snapshots_on_same_socket(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+    opened, stopped, subscribed = threading.Event(), threading.Event(), threading.Event()
+    sockets, operations = [], []
+
+    class Socket:
+        def __init__(self, url, **callbacks):
+            self.callbacks = callbacks
+            sockets.append(self)
+        def run_forever(self, **kwargs):
+            self.callbacks['on_open'](self)
+            opened.set()
+            stopped.wait(3)
+        def send(self, raw):
+            payload = json.loads(raw)
+            operations.append(payload.get('operation'))
+            if payload.get('operation') == 'subscribe':
+                self.callbacks['on_message'](self, json.dumps(dict(
+                    event_type='book', asset_id='ay', bids=[], asks=[dict(price='.6', size='3')])))
+                subscribed.set()
+        def close(self):
+            stopped.set()
+
+    monkeypatch.setitem(sys.modules, 'websocket', SimpleNamespace(WebSocketApp=Socket))
+    monkeypatch.setattr(observer, '_STOP', threading.Event())
+    monkeypatch.setenv('POLYMARKET_OBSERVER_WS_SHARDS', '1')
+    monkeypatch.setenv('POLYMARKET_OBSERVER_WS_RECEIVE_QUEUE_MAX', '2')
+    monkeypatch.setenv('POLYMARKET_OBSERVER_WS_RECEIVE_QUEUE_CEILING', '2')
+    p = observer.Pipeline()
+    p.set_markets([market()])
+    monkeypatch.setattr(observer, '_PIPELINE', p)
+    m = observer.MarketConnections()
+    applied = threading.Event()
+    original = p.receive
+    def receive(*args, **kwargs):
+        original(*args, **kwargs)
+        if 'ay' in p.books and '.6' in p.books['ay']['asks']:
+            applied.set()
+    monkeypatch.setattr(p, 'receive', receive)
+    feed(p, market())
+    try:
+        with p.lock:
+            m.sync([market()])
+            assert opened.wait(1)
+            for _ in range(10):
+                sockets[0].callbacks['on_message'](sockets[0], json.dumps(dict(
+                    event_type='price_change', price_changes=[dict(asset_id='ay', side='SELL', price='.4', size='999')])))
+            assert m.states[0]['inbox'].resync.is_set()
+        assert subscribed.wait(1) and applied.wait(1)
+        assert len(sockets) == 1 and not stopped.is_set()
+        assert operations == [None, 'unsubscribe', 'subscribe']
+        assert p.books['ay']['asks'] == {'.6': '3'}
+        assert 'an' not in p.books
+        assert not m.states[0]['inbox'].invalid.is_set()
+        assert m.states[0]['inbox'].resyncs == 1
+    finally:
+        m.close()
+
+
+def test_popped_frame_from_before_overflow_cannot_repopulate_book():
+    p = observer.Pipeline()
+    p.set_markets([market()])
+    inbox = observer.ReceiveQueue(1)
+    assert inbox.put('old')
+    _, _, old_epoch = inbox.queue.get_nowait()
+    assert inbox.put('queued')
+    assert not inbox.put('gap')
+    inbox.discard()
+    inbox.resync.clear()
+    p.receive(dict(event_type='book', asset_id='ay', bids=[], asks=[]), {'ay'},
+              inbox=inbox, epoch=old_epoch)
+    assert not p.books and not p.messages
+    p.receive(dict(event_type='book', asset_id='ay', bids=[], asks=[]), {'ay'},
+              inbox=inbox, epoch=inbox.epoch)
+    assert 'ay' in p.books and p.messages == 1

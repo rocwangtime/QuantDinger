@@ -262,13 +262,22 @@ class Recorder:
         with self.health_lock:
             rates = {table: sum(count for at, count in history if at > second - 60)
                      for table, history in self.writes.items()}
-        def percentile(q):
-            return ages[min(len(ages) - 1, math.ceil(len(ages) * q) - 1)] if ages else None
+        receipt_ages = sorted((now - received).total_seconds() * 1000
+                              for token, (_, received, _) in self.metadata.items()
+                              if token in books and received is not None and received <= now)
+        arrival_lags = sorted((received - at).total_seconds() * 1000
+                              for token, (at, received, _) in self.metadata.items()
+                              if token in books and at is not None and received is not None and at <= received)
+
+        def percentile(q, values=ages):
+            return values[min(len(values) - 1, math.ceil(len(values) * q) - 1)] if values else None
         return dict(recording_enabled=self.enabled, recording_rows_per_minute=rates,
                     recording_retention_days=retention_days(),
                     recording_buffer_depth=len(self.pending), recording_dropped=self.dropped,
                     recording_invalid=self.invalid, book_age_p50_ms=percentile(.5),
-                    book_age_p95_ms=percentile(.95), book_age_tokens=len(ages))
+                    book_age_p95_ms=percentile(.95), book_age_tokens=len(ages),
+                    book_receipt_age_p95_ms=percentile(.95, receipt_ages),
+                    book_arrival_lag_p95_ms=percentile(.95, arrival_lags))
 
 
 def retention_days():
