@@ -51,6 +51,7 @@ celery_app.conf.update(
         "app.tasks.us_screener",
     ),
     task_routes={
+        "quantdinger.tasks.us_screener_rth_capture": {"queue": "maintenance"},
         "quantdinger.tasks.us_screener": {"queue": "maintenance"},
         "quantdinger.tasks.us_screener_tick": {"queue": "maintenance"},
         "quantdinger.tasks.hk_decision_scoring": {"queue": "maintenance"},

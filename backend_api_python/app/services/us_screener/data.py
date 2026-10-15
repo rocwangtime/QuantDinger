@@ -38,11 +38,12 @@ class FutuData:
             raise ValueError('futu_market_data_unavailable')
         return result
 
-    def quotes(self, symbols):
-        cached = store.query("SELECT symbol,quote FROM qd_us_screener_quote_cache WHERE symbol=ANY(%s) AND observed_at>NOW()-INTERVAL '60 seconds'", (symbols,))
-        result = {r['symbol']: r['quote'] for r in cached}
-        errors = {}
-        missing = [s for s in symbols if s not in result]
+    def quotes(self, symbols, as_of=None):
+        if as_of is not None:
+            cached = store.query("SELECT symbol,quote FROM qd_us_screener_quote_cache WHERE symbol=ANY(%s) AND session_date=%s", (symbols, as_of))
+            return {r['symbol']: r['quote'] for r in cached}, {}
+        result, errors = {}, {}
+        missing = symbols
         for i in range(0, len(missing), 50):
             batch = missing[i:i+50]
             try:
@@ -52,7 +53,6 @@ class FutuData:
                     # Avoid NaN/numpy values in JSON persistence.
                     quote = {key: str(r.get(key, '')) for key in ('last_price', 'bid_price', 'ask_price', 'update_time')}
                     result[symbol] = quote
-                    store.query('INSERT INTO qd_us_screener_quote_cache(symbol,quote) VALUES (%s,%s) ON CONFLICT(symbol) DO UPDATE SET quote=EXCLUDED.quote,observed_at=NOW()', (symbol, json.dumps(quote)))
             except Exception:
                 errors.update({s: 'quote_batch_failed' for s in batch})
         return result, errors

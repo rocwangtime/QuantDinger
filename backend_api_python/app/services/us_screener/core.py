@@ -67,7 +67,7 @@ def regular_spread(bars, quote, as_of):
 
     Average the last 20 adjacent daily estimates, floor negative alpha at zero.
     Daily ranges contain volatility; the estimator removes its two-day component.
-    This is an estimate, not an observed executable quote. Threshold remains 10bp.
+    This is an estimate, not an observed executable quote.
     """
     try:
         stamp = datetime.fromisoformat(str(quote['update_time']))
@@ -102,10 +102,16 @@ def evaluate(symbol, bars, quote, dates, as_of, params):
         row['features'].update(features(bars))
         price = float(bars[-1]['close'])
         spread, source = regular_spread(bars, quote, as_of)
-        row['features'].update(price=price, spread_bps=spread, spread_source=source)
+        observed = source == 'rth_snapshot'
+        row['features'].update(price=price, spread_bps=spread if observed else None, spread_source=source,
+                               spread_estimate_bps=None if observed else spread)
+        if not observed:
+            row['flags'].append('spread_unverified')
+            if params.get('unverified_spread', 'flag') == 'exclude':
+                row['exclusion_reasons'].append('spread_unverified')
         for condition, reason in ((price < params['min_price'], 'price_below_min'),
                                   (row['features']['avg_dollar_volume20'] < params['min_dollar_volume'], 'illiquid'),
-                                  (spread > params['max_spread_bps'], 'spread_too_wide')):
+                                  (observed and spread > params['max_spread_bps'], 'spread_too_wide')):
             if condition:
                 row['exclusion_reasons'].append(reason)
         reasons, flags = earnings_reasons(dates, as_of, params['earnings_window'], params['earnings_unknown'])
@@ -149,3 +155,16 @@ def completed_bars(raw, as_of):
         if set(frame.tail(61).day) != expected:
             raise ValueError('daily_bar_gaps')
     return frame.to_dict('records')
+
+
+def capture_session(now, scheduled=True):
+    local = now.astimezone(ZoneInfo('America/New_York'))
+    cal = calendar()
+    session = str(local.date())
+    if not cal.is_session(session):
+        return None
+    opening = cal.session_open(session).to_pydatetime()
+    closing = cal.session_close(session).to_pydatetime()
+    start = closing-timedelta(minutes=30) if scheduled else opening
+    end = closing-timedelta(minutes=2) if scheduled else closing
+    return local.date() if start <= now < end else None

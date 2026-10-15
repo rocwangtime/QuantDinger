@@ -10,6 +10,9 @@ from app.services.us_screener.core import calendar, evaluate, rank, regime, sche
 
 
 def parameters():
+    spread_policy = os.getenv('US_SCREENER_UNVERIFIED_SPREAD', 'flag')
+    if spread_policy not in {'flag', 'exclude'}:
+        raise ValueError('invalid_unverified_spread_policy')
     policy = os.getenv('US_SCREENER_EARNINGS_UNKNOWN', 'flag')
     if policy not in {'flag', 'exclude', 'open', 'closed'}:
         raise ValueError('invalid_earnings_policy')
@@ -19,7 +22,7 @@ def parameters():
     symbols = sorted(set(s.strip().upper() for s in os.getenv('US_SCREENER_MANUAL_SYMBOLS', '').split(',') if s.strip()))
     if len(symbols) > 200 or any(not re.fullmatch(r'[A-Z][A-Z0-9.-]{0,14}', s) for s in symbols):
         raise ValueError('invalid_manual_symbols')
-    return {'min_coverage': min_coverage, 'universe': 'nasdaq100', 'manual_fallback': symbols, 'top_n': 10,
+    return {'unverified_spread': spread_policy, 'min_coverage': min_coverage, 'universe': 'nasdaq100', 'manual_fallback': symbols, 'top_n': 10,
             'min_price': 5, 'min_dollar_volume': 50_000_000, 'max_spread_bps': 10,
             'earnings_window': 3, 'earnings_unknown': policy, 'quote_max_age_sec': 3600,
             'runtime_seconds': 480, 'score_version': '0.4*z(m20)+0.4*z(m60)-0.2*z(vol20)',
@@ -91,7 +94,7 @@ def execute(run_id, provider_factory=None):
         # Persist pending symbol coverage before any network call.
         store.finish(run_id, rows, market_regime, 'running')
         provider = (provider_factory or FutuData)(deadline)
-        quotes, errors = provider.quotes(symbols)
+        quotes, errors = provider.quotes(symbols, as_of=as_of)
         try:
             market_regime.update(regime(provider.bars('QQQ', as_of)))
         except Exception:
@@ -115,7 +118,11 @@ def execute(run_id, provider_factory=None):
         coverage = (len(rows)-failed)/len(rows)
         market_regime.update(coverage_ratio=coverage, failed_count=failed)
         status = 'partial' if coverage < params.get('min_coverage', 0.9) else 'completed'
-        store.finish(run_id, rows, market_regime, status)
+        error = ''
+        if not any(row['included'] for row in rows):
+            status, error = 'partial', 'no_eligible_symbols'
+            market_regime['reason'] = error
+        store.finish(run_id, rows, market_regime, status, error)
     except Exception as exc:
         store.finish(run_id, rows, market_regime, 'failed', str(exc)[:160] if isinstance(exc, ValueError) else 'screener_failed')
     finally:
