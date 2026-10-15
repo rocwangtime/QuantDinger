@@ -72,7 +72,7 @@ def books():
 
 def test_persistence_report_evidence_replay_and_restart(isolated):
     store = p.Store()
-    a = store.load({'retention_days': 90})
+    a = store.load({'retention_days': 90, 'taker_enabled': True})
     now = 1780000000000
     t = a.signal(market(), books(), now, dict(one_way_ms=100, median_rtt_ms=100, fallback=False))
     store.save(a, now)
@@ -106,7 +106,7 @@ def test_persistence_report_evidence_replay_and_restart(isolated):
 
 def test_retention_bounded_preserves_open_capital_evidence(isolated):
     store = p.Store()
-    a = p.Account({'retention_days': 1, 'merge_enabled': False})
+    a = p.Account({'taker_enabled': True, 'retention_days': 1, 'merge_enabled': False})
     now = 1780000000000
     t = a.signal(market(), books(), now, dict(one_way_ms=1))
     a.tick(now + 1, lambda *args: books())
@@ -121,7 +121,7 @@ def test_retention_bounded_preserves_open_capital_evidence(isolated):
 def test_maker_atomic_shared_ledger_reports_restart_and_retry(isolated):
     from app.services.polymarket.maker import Maker, RecordedFeed
     from tests.test_polymarket_maker import NOW, market as maker_market, books as maker_books, print_
-    a = p.Account()
+    a = p.Account({'taker_enabled': True})
     m = Maker(a)
     m.quote(maker_market(), maker_books(), 60000, NOW)
     m.trade('42', 0, print_(size='3'), NOW + 100)
@@ -180,7 +180,7 @@ def test_recorded_maker_feed_prints_official_and_proxy_settlement(isolated, monk
         cur.execute("INSERT INTO qd_polymarket_observer_windows(market_id,condition_id,asset,interval,start_time,end_time,official_outcome) VALUES ('42','c','BTC','5m',%s,%s,'Down')", (market_['eventStartTime'], market_['endDate']))
         db.commit()
         cur.close()
-    a = p.Account()
+    a = p.Account({'taker_enabled': True})
     feed = maker.RecordedFeed(a)
     feed.poll(pipeline, NOW)
     assert a.state['maker']['markets']['42']['quotes']
@@ -211,7 +211,7 @@ def test_recorded_maker_feed_prints_official_and_proxy_settlement(isolated, monk
             cur.execute("INSERT INTO qd_polymarket_observer_samples(market_id,reference_price,reference_source,reference_observed_at) VALUES ('42',%s,'api.binance.com',%s)", (price, at))
         db.commit()
         cur.close()
-    b = p.Account()
+    b = p.Account({'taker_enabled': True})
     mf = maker.RecordedFeed(b)
     mf.maker.quote(market_, [dict(bids=[dict(price='.5', size='4')], asks=[dict(price='.51', size='10')], exchange_at=NOW)] * 2, 60000, NOW)
     from tests.test_polymarket_maker import print_
@@ -224,7 +224,7 @@ def test_recorded_maker_feed_prints_official_and_proxy_settlement(isolated, monk
 def test_maker_evidence_failure_rolls_back_account_and_ledger(isolated):
     from app.services.polymarket.maker import Maker
     from tests.test_polymarket_maker import NOW, market as maker_market, books as maker_books
-    a = p.Account()
+    a = p.Account({'taker_enabled': True})
     store = p.Store()
     store.save(a, NOW)
     m = Maker(a)
@@ -251,7 +251,7 @@ def test_maker_evidence_failure_rolls_back_account_and_ledger(isolated):
 
 def test_verification_annotation_survives_repeated_saves(isolated, monkeypatch):
     monkeypatch.setenv('POLYMARKET_PAPER_ACCOUNT_TAKER_STATUS', 'unverified')
-    a = p.Account()
+    a = p.Account({'taker_enabled': True})
     for at in (1000, 2000):
         a.daily(at)
         p.Store().save(a, at)

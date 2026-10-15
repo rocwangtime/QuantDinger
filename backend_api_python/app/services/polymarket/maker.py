@@ -11,30 +11,57 @@ from .updown import timestamp
 
 TAG = 'maker_complete_set_v1'
 DEFAULTS = dict(combined_bid='.99', market_cap='20', global_cap='100', quote_shares='10',
-                spot_bps='3', stop_seconds='30', mark_seconds='5', max_age_ms='2000')
+                spot_bps='3', stop_seconds='30', mark_seconds='5', max_age_ms='2000',
+                pairing_seconds='60', spot_jump_bps='50', jump_bps='1000', thin_shares='1', depth_drop='0.75',
+                cooldown_ms='1000', signal_window_ms='30000', flow_shares='20', flow_skew='.01',
+                inventory_skew='.02', min_combined_bid='.90', time_discount='.02',
+                volatility_discount='2', history_min_shares='20', min_pair_rate='.5',
+                max_adverse_per_share='.02', rebate_fee_rate='.07', rebate_pool_fraction='.20', whitelist='BTC:5m,BTC:15m,ETH:5m,ETH:15m')
 
 
 def enabled():
     return os.getenv('POLYMARKET_PAPER_MAKER_ENABLED', 'false').lower() in {'1', 'true', 'yes'}
 
 
-def configuration():
-    config = {k: str(number(os.getenv('POLYMARKET_PAPER_MAKER_' + k.upper(), v))) for k, v in DEFAULTS.items()}
-    if any(number(v) <= 0 for v in config.values()) or number(config['combined_bid']) >= 1:
+def validate(config):
+    config = {**DEFAULTS, **config}
+    if set(config) != set(DEFAULTS):
+        raise ValueError('invalid_maker_configuration')
+    for key in DEFAULTS:
+        if key == 'whitelist':
+            continue
+        value = number(config[key])
+        if not value.is_finite() or value < 0 or value > 10000000:
+            raise ValueError('invalid_maker_configuration')
+        config[key] = str(value)
+    if (not 0 < number(config['min_combined_bid']) <= number(config['combined_bid']) < 1
+            or any(number(config[k]) <= 0 for k in ('market_cap', 'global_cap', 'quote_shares',
+                    'max_age_ms', 'signal_window_ms', 'mark_seconds', 'flow_shares'))
+            or any(number(config[k]) > 1 for k in ('depth_drop', 'min_pair_rate', 'rebate_fee_rate', 'rebate_pool_fraction'))):
+        raise ValueError('invalid_maker_configuration')
+    allowed = {'BTC:5m', 'BTC:15m', 'ETH:5m', 'ETH:15m'}
+    if not set(config['whitelist'].split(',')) <= allowed:
         raise ValueError('invalid_maker_configuration')
     return config
 
 
-def rebate(quantity, price):
-    # Estimated only, never credited to spendable cash.
-    return number(quantity) * Decimal('.07') * number(price) * (1 - number(price)) * Decimal('.20')
+def configuration():
+    return validate({k: os.getenv('POLYMARKET_PAPER_MAKER_' + k.upper(), v) for k, v in DEFAULTS.items()})
+
+
+def rebate(quantity, price, fee_rate='.07', pool_fraction='.20'):
+    # Scenario only: 20% of fee equivalent is NOT an earned rebate.
+    # Actual daily share requires the market pool and total maker weight.
+    # https://docs.polymarket.com/programs/maker-rebates
+    return number(quantity) * number(fee_rate) * number(price) * (1 - number(price)) * number(pool_fraction)
 
 
 class Maker:
     def __init__(self, account, config=None):
         self.account = account
-        self.config = config or configuration()
+        self.config = validate(config) if config is not None else configuration()
         self.state = account.state.setdefault('maker', dict(strategy=TAG, markets={}, days={}))
+        self.state.setdefault('history', {})
 
     def audit(self, event, market_id, now, detail):
         if not hasattr(self.account, 'maker_changed'):
@@ -66,6 +93,35 @@ class Maker:
             self.account.event('maker_cancel', now)
             self.audit('cancel', row['market']['id'], now, {})
 
+    def cohort(self, market):
+        key = market['asset'] + ':' + market['interval']
+        return self.state['history'].setdefault(key, dict(filled='0', paired='0', adverse='0'))
+
+    def selected(self, market):
+        key = market['asset'] + ':' + market['interval']
+        h = self.cohort(market)
+        filled = number(h['filled'])
+        return key in self.config['whitelist'].split(',') and (filled < number(self.config['history_min_shares']) or
+            (number(h['paired']) * 2 / filled >= number(self.config['min_pair_rate']) and
+             number(h['adverse']) / filled <= number(self.config['max_adverse_per_share'])))
+
+    def signals(self, row, books, spot, now):
+        window = float(self.config['signal_window_ms'])
+        samples = [s for s in row.get('samples', []) if now - s['at'] <= window][-199:]
+        mids = [(number(b['bids'][0]['price']) + number(b['asks'][0]['price'])) / 2 for b in books]
+        depth = [sum((number(l['size']) for l in b['bids']), ZERO) for b in books]
+        previous = samples[-1] if samples else None
+        jump = max((abs(m - number(p)) / number(p) * 10000 for m, p in zip(mids, previous['mids'])), default=ZERO) if previous else ZERO
+        thin = min(depth) < number(self.config['thin_shares']) or (previous and any(
+            d < number(p) * (1 - number(self.config['depth_drop'])) for d, p in zip(depth, previous['depth'])))
+        samples.append(dict(at=now, mids=list(map(str, mids)), depth=list(map(str, depth)), spot=str(spot)))
+        row['samples'] = samples
+        volatility = max((abs(number(s['spot']) / number(spot) - 1) for s in samples), default=ZERO)
+        spot_jump = abs(number(spot) / number(previous['spot']) - 1) * 10000 if previous else ZERO
+        if thin or jump >= number(self.config['jump_bps']) or spot_jump >= number(self.config['spot_jump_bps']):
+            row['blocked_until'] = now + float(self.config['cooldown_ms'])
+        return volatility, thin or now < row.get('blocked_until', 0)
+
     def quote(self, market, books, spot, now):
         if market.get('market_type') != 'up_down' or market.get('asset') not in {'BTC', 'ETH'} or market.get('interval') not in {'5m', '15m'}:
             return
@@ -86,6 +142,21 @@ class Maker:
         if now < timestamp(market['eventStartTime']).timestamp() * 1000 or now >= timestamp(market['endDate']).timestamp() * 1000 - float(self.config['stop_seconds']) * 1000 or not valid or self.account.daily(now)['loss_stop']:
             self.cancel(row, now)
             return
+        volatility, blocked = self.signals(row, books, spot, now)
+        imbalance = number(row['qty'][0]) - number(row['qty'][1])
+        seconds = (timestamp(market['endDate']).timestamp() * 1000 - now) / 1000
+        pairing_only = seconds <= float(self.config['pairing_seconds']) or not self.selected(market)
+        if blocked or (pairing_only and not imbalance):
+            self.cancel(row, now)
+            return
+        duration = (timestamp(market['endDate']) - timestamp(market['eventStartTime'])).total_seconds()
+        target = max(number(self.config['min_combined_bid']), number(self.config['combined_bid']) -
+            number(self.config['time_discount']) * number(max(0, 1 - seconds / duration)) -
+            number(self.config['volatility_discount']) * volatility)
+        flow = row.get('flow', ['0', '0']) if now - row.get('flow_at', 0) <= float(self.config['signal_window_ms']) else ['0', '0']
+        # Requote only when the executable tick budget changes, avoiding queue churn.
+        tick = number(market['tickSize'])
+        target = (target / tick).to_integral_value(rounding=ROUND_DOWN) * tick
         fingerprint = [[b['bids'][0]['price'], b['asks'][0]['price']] for b in books]
         if any(number(b['bids'][0]['price']) >= number(b['asks'][0]['price']) for b in books):
             self.cancel(row, now)
@@ -97,12 +168,18 @@ class Maker:
             paired = (remaining[0] == 0 and 0 < remaining[1] <= imbalance if imbalance > 0 else
                       remaining[1] == 0 and 0 < remaining[0] <= -imbalance if imbalance < 0 else
                       all(q > 0 for q in remaining))
-            if fingerprint == row['book'] and not moved and paired:
+            if fingerprint == row['book'] and not moved and paired and number(row.get('target', '0')) == target and row.get('pairing_only') == pairing_only and row.get('quote_flow') == flow:
                 return
             self.cancel(row, now)
         tick = number(market['tickSize'])
         prices = [(number(b['bids'][0]['price']) / tick).to_integral_value(rounding=ROUND_DOWN) * tick for b in books]
-        excess = sum(prices) - number(self.config['combined_bid'])
+        flow = row.get('flow', ['0', '0']) if now - row.get('flow_at', 0) <= float(self.config['signal_window_ms']) else ['0', '0']
+        skew = number(self.config['inventory_skew']) * imbalance / number(self.config['market_cap'])
+        skew += number(self.config['flow_skew']) * (number(flow[0]) - number(flow[1])) / number(self.config['flow_shares'])
+        prices = [max(tick, min(number(b['asks'][0]['price']) - tick, p + (-skew if i == 0 else skew)))
+                  for i, (p, b) in enumerate(zip(prices, books))]
+        prices = [(p / tick).to_integral_value(rounding=ROUND_DOWN) * tick for p in prices]
+        excess = sum(prices) - target
         if excess > 0:
             prices[prices.index(max(prices))] -= (excess / tick).to_integral_value(rounding='ROUND_UP') * tick
         if min(prices) <= 0 or any(p >= number(b['asks'][0]['price']) for p, b in zip(prices, books)):
@@ -119,7 +196,7 @@ class Maker:
             room = (-delta if delta < 0 else
                     min(number(self.config['market_cap']),
                         number(self.config['global_cap']) - self.exposure() - outstanding))
-            sizes.append(ZERO if delta > 0 else max(ZERO, min(number(self.config['quote_shares']), room)))
+            sizes.append(ZERO if delta > 0 or (pairing_only and delta >= 0) or number(flow[i]) >= number(self.config['flow_shares']) else max(ZERO, min(number(self.config['quote_shares']), room)))
         reserve = sum(p * z for p, z in zip(prices, sizes))
         budget = min(Decimal('1000'), number(self.account.config['trade_cap']), number(self.account.state['free']))
         factor = min(Decimal(1), budget / reserve) if reserve else ZERO
@@ -129,7 +206,7 @@ class Maker:
             return
         self.account.transfer('free', -reserve)
         self.account.transfer('locked', reserve)
-        row.update(reserved=str(reserve), spot=str(spot), book=fingerprint, joined=now,
+        row.update(quote_flow=list(flow), target=str(target), pairing_only=pairing_only, reserved=str(reserve), spot=str(spot), book=fingerprint, joined=now,
             quotes=[dict(price=str(p), remaining=str(size), ahead=str(sum((number(l['size']) for l in b['bids'] if number(l['price']) == p), ZERO)) if p >= min(number(l['price']) for l in b['bids']) else None, seen=[])
                     for p, size, b in zip(prices, sizes, books)])
         self.stats(now)['quotes'] += sum(z > 0 for z in sizes)
@@ -164,6 +241,9 @@ class Maker:
             available -= consumed
         # Bound ledger precision; never round a partial print up.
         delta = number(row['qty'][index]) - number(row['qty'][1 - index])
+        seconds = (timestamp(row['market']['endDate']).timestamp() * 1000 - at) / 1000
+        if (seconds <= float(self.config['pairing_seconds']) or not self.selected(row['market'])) and delta >= 0:
+            return ZERO
         outstanding = sum((max((number(q['remaining']) for q in r['quotes']), default=ZERO)
                            for r in self.state['markets'].values() if r is not row), ZERO)
         room = ZERO if delta > 0 else (-delta if delta < 0 else max(ZERO, min(
@@ -180,9 +260,15 @@ class Maker:
         row['cost'][index] = str(number(row['cost'][index]) + cost)
         row['marks'].append(dict(index=index, qty=str(qty), price=str(bid), due=at + float(self.config['mark_seconds']) * 1000))
         leg = 'up' if index == 0 else 'down'
+        if now - row.get('flow_at', 0) > float(self.config['signal_window_ms']):
+            row['flow'] = ['0', '0']
+        row.setdefault('flow', ['0', '0'])[index] = str(number(row['flow'][index]) + qty)
+        row['flow_at'] = now
+        h = self.cohort(row['market'])
+        h['filled'] = str(number(h['filled']) + qty)
         self.add(now, 'filled_' + leg, qty)
         self.stats(now)['fill_events_' + leg] += 1
-        self.add(now, 'estimated_rebate', rebate(qty, bid))
+        self.add(now, 'estimated_rebate', rebate(qty, bid, self.config['rebate_fee_rate'], self.config['rebate_pool_fraction']))
         peak = self.exposure()
         self.stats(now)['inventory_peak'] = str(max(number(self.stats(now)['inventory_peak']), peak))
         paired = min(map(number, row['qty']))
@@ -195,11 +281,12 @@ class Maker:
                 row['cost'][i] = str(number(row['cost'][i]) - costs[i])
             self.account.transfer('positions', -sum(costs))
             self.account.transfer('free', paired)
+            h['paired'] = str(number(h['paired']) + paired)
             self.add(now, 'paired_sets', paired)
             self.add(now, 'set_pnl', paired - sum(costs))
             self.add(now, 'net_pnl', paired - sum(costs))
         self.account.event('maker_fill', now)
-        self.audit('fill', market_id, now, dict(print=print_, index=index, quantity=str(qty), price=str(bid), maker_fee='0', estimated_rebate=str(rebate(qty, bid)), strategy=TAG))
+        self.audit('fill', market_id, now, dict(print=print_, index=index, quantity=str(qty), price=str(bid), maker_fee='0', estimated_rebate=str(rebate(qty, bid, self.config['rebate_fee_rate'], self.config['rebate_pool_fraction'])), strategy=TAG))
         return qty
 
     def mark(self, market_id, index, mid, at, now):
@@ -208,7 +295,10 @@ class Maker:
             if mark['index'] == index and at >= mark['due']:
                 # First recorded mid after horizon, at most max_age_ms late.
                 if at - mark['due'] <= float(self.config['max_age_ms']):
-                    self.add(now, 'adverse_selection_loss', max(ZERO, (number(mark['price']) - number(mid)) * number(mark['qty'])))
+                    loss = max(ZERO, (number(mark['price']) - number(mid)) * number(mark['qty']))
+                    self.add(now, 'adverse_selection_loss', loss)
+                    h = self.cohort(row['market'])
+                    h['adverse'] = str(number(h['adverse']) + loss)
                     self.stats(now)['mark_samples'] += 1
                 else:
                     self.stats(now)['mark_missing'] += 1
@@ -234,7 +324,13 @@ class Maker:
         s = dict(self.stats(now), config=self.config, inventory_units='unpaired_shares', maker_fee='0')
         for leg in ('up', 'down'):
             s['fill_rate_' + leg] = str(number(s['filled_' + leg]) / number(s['quoted_' + leg])) if number(s['quoted_' + leg]) else None
-        s['net_pnl_including_estimated_rebate'] = str(number(s['net_pnl']) + number(s['estimated_rebate']))
+        s['net_pnl_including_estimated_rebate'] = s['net_pnl']
+        s['rebate_scenario_only'] = s['estimated_rebate']
+        s['estimated_rebate'] = None  # Unknown daily pool/share; never fabricate earned income.
+        s['fee_source'] = 'https://docs.polymarket.com/trading/fees'
+        s['rebate_status'] = 'unknown_pool_not_credited'
+        s['rebate_source'] = 'https://docs.polymarket.com/programs/maker-rebates'
+        s['selection_history'] = copy.deepcopy(self.state['history'])
         s['net_pnl_per_completed_set'] = str(number(s['set_pnl']) / number(s['paired_sets'])) if number(s['paired_sets']) else None
         return s
 
