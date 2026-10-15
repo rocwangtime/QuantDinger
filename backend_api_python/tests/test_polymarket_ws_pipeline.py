@@ -654,3 +654,55 @@ def test_shard_lock_wait_measures_time_before_publication():
     thread.join(1)
     assert inbox.lock_wait_seconds >= .02
     assert inbox.lag_seconds >= inbox.lock_wait_seconds
+
+
+def test_hot_market_gets_dedicated_shard_and_retains_owner():
+    markets = [market(str(i)) for i in range(10)]
+    previous = {a: i % 4 for i, m in enumerate(markets) for a in observer.subscription_assets([m])}
+    rates = {a: (100 if i == 0 else 1) for i, m in enumerate(markets)
+             for a in observer.subscription_assets([m])}
+    groups = observer.shard_markets(markets, 4, previous, rates)
+    assert groups[0] == [markets[0]]
+    assert sorted(m['id'] for group in groups.values() for m in group) == sorted(m['id'] for m in markets)
+    assert observer.shard_markets(markets, 4, previous, rates) == groups
+
+
+def test_repeated_level_updates_are_coalesced_without_losing_other_levels():
+    books = {'a': {'bids': {}, 'asks': {}}}
+    rows = [dict(asset_id='a', side='BUY', price='.3', size=str(i)) for i in range(100)]
+    rows += [dict(asset_id='a', side='SELL', price='.4', size='2'),
+             dict(asset_id='a', side='BUY', price='.3', size='0')]
+    event = dict(event_type='price_change', price_changes=rows)
+    assert observer.ws_apply_event(event, books) == ['a']
+    assert books == {'a': {'bids': {}, 'asks': {'.4': '2'}}}
+    assert len(event['price_changes']) == 102  # Original paper history is intact.
+
+
+def test_expired_exchange_book_still_rejected_after_queue_delay():
+    from app.services.polymarket.account_history import pair_rejection
+    assert pair_rejection([1000, 1000], 3001) == 'stale'
+    assert pair_rejection([3000, 3000], 3001) is None
+
+
+def test_dominant_market_can_split_across_sockets():
+    markets = [market(str(i)) for i in range(8)]
+    rates = {a: (100 if i == 0 else 1) for i, m in enumerate(markets)
+             for a in observer.subscription_assets([m])}
+    target = observer.market_assignment(markets, 4, {}, rates)
+    assert target['0y'] != target['0n']
+    assert set(target) == set(observer.subscription_assets(markets))
+    for m in markets[1:]:
+        assert target[m['yesAssetId']] == target[m['noAssetId']]
+
+
+def test_evaluation_skips_copying_throttled_recording_books(monkeypatch):
+    p = observer.Pipeline()
+    p.recording.enabled = True
+    p.books = {'a': {'bids': {}, 'asks': {}}}
+    p.recording.last_books['a'] = (100, [[], []])
+    captured = []
+    monkeypatch.setattr(p.recording, 'books', lambda books, *args: captured.append(books) or [])
+    p.evaluate(100.1)
+    assert captured == [{}]
+    p.evaluate(101.1)
+    assert captured[-1] == p.books
