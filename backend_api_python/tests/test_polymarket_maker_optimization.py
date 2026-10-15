@@ -144,3 +144,31 @@ def test_pairing_boundary_existing_balanced_quotes_cannot_open_exposure():
     boundary = NOW + 230000
     assert m.trade('42', 0, print_('boundary', at=boundary, price='.01'), boundary) == 0
     assert m.state['markets']['42']['qty'] == ['0', '0']
+
+
+def test_default_time_discount_blocks_unknown_queue_but_allows_through_fill():
+    m = maker()
+    m.quote(market(), books(), 60000, NOW)
+    row = m.state['markets']['42']
+    assert D(row['target']) == D('.98')
+    assert D(row['quotes'][0]['price']) == D('.48')
+    assert m.trade('42', 0, print_('queued', size='3'), NOW + 100) == 0
+    assert row['qty'] == ['0', '0']
+    # Discounted bid is below recorded depth, so same-price queue is unknown.
+    assert row['quotes'][0]['ahead'] is None
+    assert m.trade('42', 0, print_('unknown', size='100'), NOW + 100) == 0
+    assert m.trade('42', 0, print_('through', price='.47', size='1'), NOW + 100) == 1
+
+
+def test_disabled_taker_creates_no_new_attempt_for_executable_opportunity():
+    from tests.test_polymarket_paper_account import market as taker_market, books as taker_books
+    active = Account({'taker_enabled': True})
+    assert active.signal(taker_market(), taker_books(), NOW, {'one_way_ms': 100}) is not None
+    assert active.daily(NOW)['attempted'] == 1
+    disabled = Account({'taker_enabled': False})
+    for at in (NOW, NOW + 1000):
+        assert disabled.signal(taker_market(), taker_books(), at, {'one_way_ms': 100}) is None
+    assert disabled.daily(NOW)['attempted'] == 0
+    assert not disabled.changed
+    assert not disabled.state['pending']
+    assert not disabled.state['events']

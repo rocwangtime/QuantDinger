@@ -118,7 +118,9 @@ def test_retention_bounded_preserves_open_capital_evidence(isolated):
     assert len(account_api.reports(day=p.day_key(now))) == 0
 
 
-def test_maker_atomic_shared_ledger_reports_restart_and_retry(isolated):
+def test_maker_atomic_shared_ledger_reports_restart_and_retry(isolated, monkeypatch):
+    # Ledger fixture assumes the original .99 quote budget.
+    monkeypatch.setenv("POLYMARKET_PAPER_MAKER_TIME_DISCOUNT", "0")
     from app.services.polymarket.maker import Maker, RecordedFeed
     from tests.test_polymarket_maker import NOW, market as maker_market, books as maker_books, print_
     a = p.Account({'taker_enabled': True})
@@ -145,8 +147,9 @@ def test_maker_atomic_shared_ledger_reports_restart_and_retry(isolated):
     assert report['attempted'] == report['filled'] == 0  # taker counters isolated
     assert report['maker']['paired_sets'] == '2'
     assert number(report['maker']['net_pnl']) == number('-.47')
-    assert report['maker']['rebate_estimated']
-    assert number(report['maker']['estimated_rebate']) > 0
+    assert report['maker']['estimated_rebate'] is None
+    assert number(report['maker']['rebate_scenario_only']) > 0
+    assert report['maker']['net_pnl_including_estimated_rebate'] == report['maker']['net_pnl']
     assert number(report['maker']['net_pnl_per_completed_set']) == number('.01')
     with isolated() as db:
         cur = db.cursor()
@@ -160,6 +163,8 @@ def test_maker_atomic_shared_ledger_reports_restart_and_retry(isolated):
 
 
 def test_recorded_maker_feed_prints_official_and_proxy_settlement(isolated, monkeypatch):
+    # Preserve the recorded .48 through-price fixture; defaults are tested separately.
+    monkeypatch.setenv("POLYMARKET_PAPER_MAKER_TIME_DISCOUNT", "0")
     import json
     import threading
     from types import SimpleNamespace
