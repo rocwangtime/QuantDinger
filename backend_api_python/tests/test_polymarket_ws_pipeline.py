@@ -295,7 +295,7 @@ def test_shards_dynamic_subscription_ping_and_independent_reconnect(monkeypatch)
             self.closed = True
     class Thread:
         def __init__(self, target, **kwargs):
-            self.target = target
+            self.target = target if 'receive' in kwargs.get('name', '') else lambda: None
             self.socket = sockets[-1]
         def start(self):
             self.target()
@@ -315,23 +315,29 @@ def test_shards_dynamic_subscription_ping_and_independent_reconnect(monkeypatch)
     assert len(sockets[0].sent) == len(sockets[1].sent) == 1
     c = market('c', market_type='up_down')
     manager.sync([a, c])
-    assert len(sockets) == 2
-    assert sockets[1].sent[1:] == [dict(assets_ids=['cn', 'cy'], operation='subscribe'),
-                                  dict(assets_ids=['bn', 'by'], operation='unsubscribe')]
+    assert len(sockets) == 3
+    assert sockets[1].closed
+    assert sockets[2].sent[0]['assets_ids'] == ['cy', 'cn']
     clock[0] += 10
     manager.tick()
-    assert sockets[0].sent[-1] == sockets[1].sent[-1] == 'PING'
-    sockets[1].closed = True
-    sockets[1].callbacks['on_error'](sockets[1], 'slow consumer: send buffer full')
-    sockets[1].callbacks['on_close'](sockets[1], 1008, 'slow consumer: send buffer full')
-    clock[0] += 5
+    assert sockets[0].sent[-1] == sockets[2].sent[-1] == 'PING'
+    sockets[2].closed = True
+    sockets[2].callbacks['on_error'](sockets[2], 'slow consumer: send buffer full')
+    sockets[2].callbacks['on_close'](sockets[2], 1008, 'slow consumer: send buffer full')
+    clock[0] += 16
     manager.tick()
-    assert len(sockets) == 3
+    assert len(sockets) == 4
     assert not sockets[0].closed
-    assert observer.STATUS['reconnect_count'] == 1
+    assert observer.STATUS['reconnect_count'] == 2
     assert observer.STATUS['slow_consumer_count'] == 1
     assert observer.STATUS['ws_connected'] == 2
-    assert sockets[2].sent[0]['assets_ids'] == ['cy', 'cn']
+    assert sockets[3].sent[0]['assets_ids'] == ['cy', 'cn']
+    assert manager.states[1]['attempts'] == 3
+    assert manager.failures() == 0  # A healthy open does not trigger REST fallback.
+    clock[0] += 61
+    sockets[3].callbacks['on_close'](sockets[3], 1000, 'closed')
+    assert manager.states[1]['attempts'] == 0
+    assert clock[0] + 2.5 <= manager.states[1]['retry_at'] <= clock[0] + 7.5
     manager.close()
     assert all(s.closed for s in sockets)
 
@@ -370,3 +376,96 @@ def test_rest_fallback_uses_same_ordered_writer_queue(monkeypatch):
     sql, params = p.queue.items[-1][2][0]
     assert sql.startswith('INSERT INTO qd_polymarket_observer_episodes')
     assert params[8] == 'rest'
+
+
+def test_receive_queue_overflow_discards_generation_without_blocking():
+    q = observer.ReceiveQueue(2)
+    assert q.put('first') and q.put('second')
+    assert not q.put('overflow')
+    assert q.invalid.is_set() and q.queue.empty()
+    assert q.dropped == 3 and q.high_water == 2
+    assert not q.put('late') and q.dropped == 4
+
+
+def test_balances_large_and_small_markets_with_pairs_together():
+    markets = [dict(id=str(i), yesAssetId=f'{i}y', noAssetId=f'{i}n') for i in range(1177)]
+    groups = observer.shard_markets(markets, 4)
+    counts = [len(observer.subscription_assets(groups[i])) for i in range(4)]
+    assert max(counts) - min(counts) <= 2
+    assert sorted(m['id'] for group in groups.values() for m in group) == sorted(m['id'] for m in markets)
+
+
+def test_socket_drains_while_worker_waits_for_book_lock(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+    entered = threading.Event()
+    stop = threading.Event()
+    sockets = []
+
+    class Socket:
+        def __init__(self, url, **callbacks):
+            self.callbacks = callbacks
+            sockets.append(self)
+        def run_forever(self, **kwargs):
+            self.callbacks['on_open'](self)
+            entered.set()
+            stop.wait(3)
+        def send(self, raw):
+            pass
+        def close(self):
+            stop.set()
+
+    monkeypatch.setitem(sys.modules, 'websocket', SimpleNamespace(WebSocketApp=Socket))
+    monkeypatch.setattr(observer, '_STOP', threading.Event())
+    monkeypatch.setenv('POLYMARKET_OBSERVER_WS_SHARDS', '1')
+    monkeypatch.setenv('POLYMARKET_OBSERVER_WS_RECEIVE_QUEUE_MAX', '2')
+    p = observer.Pipeline()
+    p.set_markets([market()])
+    monkeypatch.setattr(observer, '_PIPELINE', p)
+    m = observer.MarketConnections()
+    with p.lock:
+        m.sync([market()])
+        assert entered.wait(1)
+        # Worker can block on p.lock; the socket callback must still return.
+        for i in range(10):
+            sockets[0].callbacks['on_message'](sockets[0], json.dumps(dict(
+                event_type='book', asset_id='ay', timestamp=str(1780000000000 + i),
+                bids=[dict(price='.4', size='1')], asks=[dict(price='.5', size='1')])))
+        assert m.states[0]['inbox'].invalid.is_set()
+        assert m.states[0]['inbox'].dropped >= 7
+        assert not p.books
+    m.close()
+    assert not m.states[0]['worker'].is_alive()
+    assert not p.books
+
+
+def test_invalidated_generation_cannot_repopulate_book():
+    p = observer.Pipeline()
+    p.set_markets([market()])
+    inbox = observer.ReceiveQueue(1)
+    inbox.invalid.set()
+    p.receive(dict(event_type='book', asset_id='ay', bids=[], asks=[]), {'ay'}, inbox=inbox)
+    assert p.books == {}
+    assert p.messages == 0
+
+
+def test_catalogue_insertion_retains_balanced_owners():
+    markets = [market(str(i)) for i in range(40)]
+    groups = observer.shard_markets(markets, 4)
+    previous = {a: i for i, group in groups.items() for a in observer.subscription_assets(group)}
+    updated = observer.shard_markets([market('new'), *markets], 4, previous)
+    target = {a: i for i, group in updated.items() for a in observer.subscription_assets(group)}
+    assert all(target[a] == owner for a, owner in previous.items())
+    assert max(len(observer.subscription_assets(g)) for g in updated.values()) == 22
+
+
+def test_asset_target_grows_shards_and_keeps_market_pairs(monkeypatch):
+    monkeypatch.setenv('POLYMARKET_OBSERVER_WS_SHARDS', '1')
+    monkeypatch.setenv('POLYMARKET_OBSERVER_WS_ASSETS_PER_SHARD', '4')
+    m = observer.MarketConnections()
+    monkeypatch.setattr(m, 'tick', lambda: None)
+    m.sync([market(str(i)) for i in range(5)])
+    assert m.count == 3
+    assert sorted(len(s['assets']) for s in m.states.values()) == [2, 4, 4]
+    for i in range(5):
+        assert m.balancer.assignment[f'{i}y'] == m.balancer.assignment[f'{i}n']

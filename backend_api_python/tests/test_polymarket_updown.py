@@ -152,8 +152,8 @@ def test_api_filters_parameterized():
     assert params == ('up_down', 'BTC', '15m', '<30s')
 
 
-def test_loop_updates_subscription_without_reconnect_at_rediscovery(monkeypatch):
-    """Refresh updates the open public socket without clearing retained books."""
+def test_loop_requires_new_snapshot_generation_at_rediscovery(monkeypatch):
+    """Changed membership reconnects with a fresh snapshot generation."""
     import sys
     from types import SimpleNamespace
     monkeypatch.setenv('POLYMARKET_OBSERVER_WS_SHARDS', '1')
@@ -195,7 +195,7 @@ def test_loop_updates_subscription_without_reconnect_at_rediscovery(monkeypatch)
 
     class Thread:
         def __init__(self, target, **kwargs):
-            self.target = target
+            self.target = target if 'receive' in kwargs.get('name', '') else lambda: None
             self.socket = sockets[-1]
 
         def start(self):
@@ -238,10 +238,10 @@ def test_loop_updates_subscription_without_reconnect_at_rediscovery(monkeypatch)
     monkeypatch.setattr(updown, 'discover', discovery)
     monkeypatch.setitem(sys.modules, 'websocket', SimpleNamespace(WebSocketApp=Socket))
     observer._market_loop()
-    assert [s['assets_ids'] for s in subscriptions] == [['1', '2'], ['3', '4'], ['1', '2']]
+    assert [s['assets_ids'] for s in subscriptions] == [['1', '2'], ['3', '4']]
     assert subscriptions[0]['type'] == 'market'
-    assert [s['operation'] for s in subscriptions[1:]] == ['subscribe', 'unsubscribe']
-    assert len(sockets) == 1
+    assert all(s['type'] == 'market' for s in subscriptions)
+    assert len(sockets) == 2
     assert len(heartbeats) == 2
     assert all(sock.closed for sock in sockets)
 

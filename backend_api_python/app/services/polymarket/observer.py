@@ -1,13 +1,15 @@
 """Dedicated public market observer; it never places or signs orders."""
 import json
+import logging
 import os
 import threading
 import time
 from contextlib import contextmanager
 from collections import deque
 from itertools import groupby
-from zlib import crc32
-from threading import RLock
+import random
+from queue import Queue, Full, Empty
+from threading import RLock, Event
 from datetime import datetime, timezone
 
 from app.utils.db import get_db_connection
@@ -28,6 +30,7 @@ _REFERENCE = None
 _PIPELINE = None
 _WS = None
 _DAILY_STATS = DailyStats()
+_LOG = logging.getLogger(__name__)
 
 
 def enabled():
@@ -671,18 +674,20 @@ class Pipeline:
         for identity in previous - self.markets.keys():
             self.capture(identity, 'observation', lambda: _end_episode(identity, datetime.now(timezone.utc)))
 
-    def receive(self, raw, owned=None):
+    def receive(self, raw, owned=None, received_at=None, inbox=None):
         if raw == 'PONG':
             return
         try:
-            received = datetime.now(timezone.utc)
-            event = json.loads(raw)
+            received = received_at or datetime.now(timezone.utc)
+            event = json.loads(raw) if isinstance(raw, (str, bytes)) else raw
             with self.lock:
+                if inbox and inbox.invalid.is_set():
+                    return
                 event = recording.owned_events(event, owned)
                 changed = ws_apply_event(event, self.books)
                 self.recording.receive(event, changed, self.markets, self.asset_markets, received, owned)
                 if self.paper_account:
-                    self.paper_account.history.record(event, int(time.time() * 1000))
+                    self.paper_account.history.record(event, int(received.timestamp() * 1000))
                 self.dirty.update(self.asset_markets[a] for a in changed if a in self.asset_markets)
                 self.messages += 1
                 self.last_message = time.monotonic()
@@ -852,13 +857,67 @@ class Pipeline:
                                         and not (self.references.socket_thread and self.references.socket_thread.is_alive()))
 
 
-def shard_markets(markets, count):
-    """Stable whole-market assignment; two shards separate catalogue types."""
-    result = {}
-    for market in markets:
-        index = (0 if market.get('market_type') != 'up_down' else 1) if count == 2 else crc32(str(market['id']).encode()) % count
+def shard_markets(markets, count, previous=None):
+    """Balance whole markets by asset count, retaining owners when possible."""
+    result, loads = {}, [0] * count
+    pending = []
+    previous = previous or {}
+    for market in sorted(markets, key=lambda m: (-len(subscription_assets([m])), str(m['id']))):
+        assets = subscription_assets([market])
+        owners = {previous.get(a) for a in assets}
+        if len(owners) == 1 and None not in owners and next(iter(owners)) < count:
+            index = next(iter(owners))
+            result.setdefault(index, []).append(market)
+            loads[index] += len(assets)
+        else:
+            pending.append(market)
+    for market in pending:
+        index = min(range(count), key=lambda i: (loads[i], i))
         result.setdefault(index, []).append(market)
-    return result
+        loads[index] += len(subscription_assets([market]))
+    # Only move a retained market when doing so reduces count imbalance.
+    while markets:
+        high = max(range(count), key=lambda i: (loads[i], -i))
+        low = min(range(count), key=lambda i: (loads[i], i))
+        candidates = [m for m in result.get(high, [])
+                      if len(subscription_assets([m])) < loads[high] - loads[low]]
+        if not candidates:
+            break
+        market = min(candidates, key=lambda m: (abs(loads[high] - loads[low] -
+                                                 2 * len(subscription_assets([m]))), str(m['id'])))
+        size = len(subscription_assets([market]))
+        result[high].remove(market)
+        result.setdefault(low, []).append(market)
+        loads[high] -= size
+        loads[low] += size
+    return {i: group for i, group in result.items() if group}
+
+
+class ReceiveQueue:
+    """Bounded raw frames. Overflow invalidates the generation, never skips a delta."""
+    def __init__(self, maximum):
+        self.queue = Queue(maximum)
+        self.dropped = 0
+        self.high_water = 0
+        self.invalid = Event()
+
+    def put(self, raw):
+        if self.invalid.is_set():
+            self.dropped += 1
+            return False
+        try:
+            self.queue.put_nowait((raw, datetime.now(timezone.utc)))
+            self.high_water = max(self.high_water, self.queue.qsize())
+            return True
+        except Full:
+            self.invalid.set()
+            self.dropped += 1
+            while True:
+                try:
+                    self.queue.get_nowait()
+                    self.dropped += 1
+                except Empty:
+                    return False
 
 
 class MarketConnections:
@@ -872,49 +931,45 @@ class MarketConnections:
         self.closed = False
 
     def sync(self, markets):
-        assignments = shard_markets(markets, self.count)
-        current = {a: i for i, state in self.states.items() for a in state['assets']}
-        assignment = {a: current.get(a, i) for i, group in assignments.items() for a in subscription_assets(group)}
+        target = updown.setting('WS_ASSETS_PER_SHARD', 600, 1, 100000)
+        self.count = max(self.count, min(8, (len(subscription_assets(markets)) + target - 1) // target))
+        self.balancer.count = self.count
+        assignments = shard_markets(markets, self.count, self.balancer.assignment)
+        assignment = {a: i for i, group in assignments.items() for a in subscription_assets(group)}
         self.balancer.set_assets(assignment)
         self.apply_assignment(assignment)
         self.tick()
 
     def apply_assignment(self, assignment):
         assignments = {i: [a for a, shard in assignment.items() if shard == i] for i in range(self.count)}
-        # Send all additions before any removals; abort removals on a failed destination.
-        for index, assets in assignments.items():
-            state = self.states.get(index)
-            additions = sorted(set(assets) - set(state['assets'])) if state else []
-            if additions and state and state['connected']:
-                try:
-                    state['socket'].send(json.dumps(dict(assets_ids=additions, operation='subscribe')))
-                except Exception as exc:
-                    state['socket'].close()
-                    state['connected'] = False
-                    _ws_error(exc)
-                    return False
-        for index in list(self.states):
-            if index not in assignments:
-                state = self.states.pop(index)
+        # Membership changes start a new snapshot generation. Publishing owners
+        # before a fresh connection avoids the subscribe-before-owner snapshot race.
+        changed = {i for i, assets in assignments.items()
+                   if i in self.states and set(assets) != set(self.states[i]['assets'])}
+        invalid_assets = set()
+        for i in changed:
+            state = self.states[i]
+            invalid_assets.update(state['assets'])
+            invalid_assets.update(assignments[i])
+            if state.get('inbox'):
+                state['inbox'].invalid.set()
+            state['connected'] = False
+            if state['socket']:
                 state['socket'].close()
-                state['thread'].join(5)
-        for index, group in assignments.items():
-            assets = group
+        if _PIPELINE and invalid_assets:
+            with _PIPELINE.lock:
+                for asset in invalid_assets:
+                    _PIPELINE.books.pop(asset, None)
+                    _PIPELINE.recording.metadata.pop(asset, None)
+                    if _PIPELINE.paper_account:
+                        _PIPELINE.paper_account.history.assets.pop(asset, None)
+        for index, assets in assignments.items():
             state = self.states.get(index)
             if state:
                 with state['lock']:
-                    previous = state['assets']
                     state['assets'] = assets
-                    if state['connected']:
-                        try:
-                            for message in subscription_changes(previous, assets):
-                                if message['operation'] == 'subscribe':
-                                    continue
-                                state['socket'].send(json.dumps(message))
-                        except Exception as exc:
-                            state['connected'] = False
-                            state['socket'].close()
-                            _ws_error(exc)
+                    if index in changed:
+                        state['retry_at'] = time.monotonic()
             else:
                 self.states[index] = dict(assets=assets, socket=None, thread=None, connected=False, lock=RLock(),
                                           attempts=0, retry_at=0, ping_at=0)
@@ -925,19 +980,29 @@ class MarketConnections:
     def connect(self, index, state):
         import websocket
         if state['socket']:
+            if state.get('inbox'):
+                state['inbox'].invalid.set()
             state['socket'].close()
             state['thread'].join(5)
+            if state.get('worker'):
+                state['worker'].join(5)
             with _LOCK:
                 STATUS['reconnect_count'] += 1
             self.stats.increment('reconnect_count')
+            _LOG.info('Polymarket WS reconnect shard=%s attempt=%s', index, state['attempts'] + 1)
             self.reconnect_pending = True
             if _PIPELINE:
                 with _PIPELINE.lock:
                     for asset in state['assets']:
                         _PIPELINE.books.pop(asset, None)
+                        _PIPELINE.recording.metadata.pop(asset, None)
                         if _PIPELINE.paper_account:
                             _PIPELINE.paper_account.history.assets.pop(asset, None)
         state['attempts'] += 1
+        inbox = ReceiveQueue(updown.setting('WS_RECEIVE_QUEUE_MAX', 256, 1, 10000))
+        state['receive_drops'] = state.get('receive_drops', 0) + (state['inbox'].dropped if state.get('inbox') else 0)
+        state['inbox'] = inbox
+        state['queue_logged'] = False
         state['retry_at'] = time.monotonic() + min(120, 5 * 2 ** min(5, state['attempts'] - 1))
 
         def opened(sock):
@@ -947,20 +1012,61 @@ class MarketConnections:
             with state['lock']:
                 sock.send(json.dumps({'assets_ids': state['assets'], 'type': 'market'}))
                 state['connected'] = True
-                state['attempts'] = 0
+                state['opened_at'] = time.monotonic()
                 state['ping_at'] = time.monotonic() + 10
             _ws_connected()
             with _LOCK:
                 STATUS['ws_connections'] = STATUS.get('ws_connections', 0) + 1
 
+        def process_frames():
+            while not self.closed and state.get('inbox') is inbox and not inbox.invalid.is_set():
+                try:
+                    raw, received_at = inbox.queue.get(timeout=.2)
+                    if (datetime.now(timezone.utc) - received_at).total_seconds() > 2:
+                        inbox.invalid.set()
+                        inbox.dropped += 1
+                        state['socket'].close()
+                        continue
+                except Empty:
+                    continue
+                try:
+                    event = json.loads(raw)
+                    self.stats.message(index)
+                    self.balancer.receive(event, index)
+                    if _PIPELINE:
+                        # Recheck generation under the same lock used for invalidation.
+                        with _PIPELINE.lock:
+                            valid = not inbox.invalid.is_set() and state.get('inbox') is inbox
+                        if valid:
+                            _PIPELINE.receive(event, frozenset(state['assets']), received_at, inbox)
+                except (ValueError, TypeError, AttributeError):
+                    continue
+
+        def consume():
+            try:
+                process_frames()
+            except Exception:
+                _LOG.exception('Polymarket book worker failed shard=%s', index)
+                inbox.invalid.set()
+            finally:
+                while True:
+                    try:
+                        inbox.queue.get_nowait()
+                        inbox.dropped += 1
+                    except Empty:
+                        break
+                if _PIPELINE and inbox.invalid.is_set():
+                    with _PIPELINE.lock:
+                        if state.get('inbox') is inbox:
+                            for asset in state['assets']:
+                                _PIPELINE.books.pop(asset, None)
+                                _PIPELINE.recording.metadata.pop(asset, None)
+                                if _PIPELINE.paper_account:
+                                    _PIPELINE.paper_account.history.assets.pop(asset, None)
+
         def received(_sock, raw):
             if raw != 'PONG':
-                self.stats.message(index)
-                self.balancer.receive(raw, index)
-            if _PIPELINE:
-                with self.balancer.lock:
-                    owned = {asset for asset, owner in self.balancer.assignment.items() if owner == index}
-                _PIPELINE.receive(raw, owned)
+                inbox.put(raw)
 
         def failed(_sock, error):
             state['connected'] = False
@@ -975,6 +1081,7 @@ class MarketConnections:
         def closed(_sock, code=None, reason=None):
             state['connected'] = False
             counted = state.pop('slow_error', False)
+            _LOG.info('Polymarket WS close shard=%s code=%s slow_consumer=%s', index, code, 'slow consumer' in str(reason).lower() or 'slow_consumer' in str(reason).lower())
             slow = 'slow consumer' in str(reason).lower() or 'slow_consumer' in str(reason).lower()
             if slow and not counted:
                 self.stats.increment('slow_consumer_count')
@@ -982,26 +1089,33 @@ class MarketConnections:
                 close_reason(code, reason)
             elif not counted and not self.closed and 'slow consumer' not in str(STATUS.get('last_error', '')).lower():
                 close_reason(None, STATUS.get('last_error'))
-            state['retry_at'] = time.monotonic() + 5
+            inbox.invalid.set()
+            if time.monotonic() - state.get('opened_at', time.monotonic()) >= 60:
+                state['attempts'] = 0
+            state['retry_at'] = time.monotonic() + random.uniform(.5, 1.5) * min(120, 5 * 2 ** min(5, max(0, state['attempts'] - 1)))
 
         sock = websocket.WebSocketApp('wss://ws-subscriptions-clob.polymarket.com/ws/market',
                                      on_open=opened, on_message=received, on_error=failed, on_close=closed)
         state['socket'] = sock
         state['thread'] = threading.Thread(target=lambda: sock.run_forever(ping_interval=0),
                                            name=f'polymarket-receive-{index}', daemon=True)
+        state['worker'] = threading.Thread(target=consume, name=f'polymarket-book-{index}', daemon=True)
+        state['worker'].start()
         state['thread'].start()
 
     def tick(self):
         if self.closed or _STOP.is_set():
             return
         now = time.monotonic()
-        if all(s['connected'] for s in self.states.values()):
-            proposed = self.balancer.propose(now, self.reconnect_pending)
-            self.reconnect_pending = False
-            if proposed and self.apply_assignment(proposed):
-                self.balancer.last_rebalance = now
-                self.stats.increment('rebalance_count')
+        # Sample rates for diagnostics; placement stays in whole-market count bins.
+        self.balancer.propose(now, self.reconnect_pending)
+        self.reconnect_pending = False
         for index, state in self.states.items():
+            if state.get('inbox') and state['inbox'].invalid.is_set() and state['socket']:
+                if not state.get('queue_logged'):
+                    _LOG.warning('Polymarket WS generation invalidated shard=%s drops=%s', index, state['inbox'].dropped)
+                    state['queue_logged'] = True
+                state['socket'].close()
             if not state['thread'] or not state['thread'].is_alive():
                 if now >= state['retry_at']:
                     self.connect(index, state)
@@ -1015,22 +1129,28 @@ class MarketConnections:
                     _ws_error(exc)
         with _LOCK:
             STATUS.update(self.balancer.metrics())
+            STATUS['ws_shard_assets'] = [len(self.states.get(i, {}).get('assets', [])) for i in range(self.count)]
+            STATUS['ws_receive_queues'] = {i: dict(depth=s['inbox'].queue.qsize(), drops=s.get('receive_drops', 0) + s['inbox'].dropped, high_water=s['inbox'].high_water) for i, s in self.states.items() if 'inbox' in s}
             STATUS['ws_shards'] = self.count
             STATUS['ws_connected'] = sum(bool(s['connected']) for s in self.states.values())
             STATUS['connected'] = bool(self.states) and all(s['connected'] for s in self.states.values())
 
     def failures(self):
-        return max((state['attempts'] for state in self.states.values()), default=0)
+        return max((state['attempts'] for state in self.states.values() if not state['connected']), default=0)
 
     def close(self, timeout=5):
         deadline = time.monotonic() + timeout
         self.closed = True
         for state in list(self.states.values()):
+            if state.get('inbox'):
+                state['inbox'].invalid.set()
             if state['socket']:
                 state['socket'].close()
         for state in list(self.states.values()):
             if state['thread']:
                 state['thread'].join(max(0, deadline - time.monotonic()))
+            if state.get('worker'):
+                state['worker'].join(max(0, deadline - time.monotonic()))
         with _LOCK:
             STATUS['ws_connected'] = 0
             STATUS['connected'] = False

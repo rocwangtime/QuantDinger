@@ -79,24 +79,17 @@ def manager(monkeypatch):
     return m, sent
 
 
-def test_handover_subscribes_before_unsubscribe_preserves_books(monkeypatch):
+def test_handover_invalidates_generations_before_publishing_owners(monkeypatch):
     m, sent = manager(monkeypatch)
+    monkeypatch.setattr(observer, '_PIPELINE', None)
+    m.states[0]['inbox'] = observer.ReceiveQueue(2)
+    m.states[2]['inbox'] = observer.ReceiveQueue(2)
     assert m.apply_assignment(dict(a=0, b=2))
-    assert sent == [(2, dict(assets_ids=['b'], operation='subscribe')),
-                    (0, dict(assets_ids=['b'], operation='unsubscribe'))]
-    assert m.balancer.assignment == dict(a=0, b=2)
-    assert {a for s in m.states.values() for a in s['assets']} == {'a', 'b'}
-
-
-def test_failed_destination_keeps_source_owner(monkeypatch):
-    m, sent = manager(monkeypatch)
-    def fail(_):
-        raise RuntimeError('send failed')
-    monkeypatch.setattr(m.states[2]['socket'], 'send', fail)
-    assert not m.apply_assignment(dict(a=0, b=2))
     assert not sent
-    assert m.states[0]['assets'] == ['a', 'b']
-    assert m.balancer.assignment == dict(a=0, b=0)
+    assert m.states[0]['inbox'].invalid.is_set()
+    assert m.states[2]['inbox'].invalid.is_set()
+    assert not m.states[0]['connected'] and not m.states[2]['connected']
+    assert m.balancer.assignment == dict(a=0, b=2)
 
 
 def test_utc_counter_rollover_and_checkpoints(monkeypatch):
@@ -123,7 +116,7 @@ def test_reconnect_checks_before_periodic_deadline(monkeypatch):
     assert b.propose(1, reconnect=True)
 
 
-def test_manager_reconnect_runs_balance_on_next_connected_tick(monkeypatch):
+def test_manager_retains_market_locality_on_connected_tick(monkeypatch):
     from types import SimpleNamespace
     m, _ = manager(monkeypatch)
     b = balancer(monkeypatch, dict(a=0, b=0), dict(a=10, b=10))
@@ -133,9 +126,8 @@ def test_manager_reconnect_runs_balance_on_next_connected_tick(monkeypatch):
         state.update(thread=SimpleNamespace(is_alive=lambda: True), ping_at=float('inf'))
     monkeypatch.setattr(observer, 'time', SimpleNamespace(monotonic=lambda: 1))
     m.tick()
-    assert not m.reconnect_pending
-    assert m.balancer.assignment['a'] != m.balancer.assignment['b']
-    assert sum(day['rebalance_count'] for day in m.stats.days.values()) == 1
+    assert m.balancer.assignment['a'] == m.balancer.assignment['b']
+    assert not m.stats.days
 
 
 def test_checkpoint_failure_keeps_dirty_day_for_retry(monkeypatch):

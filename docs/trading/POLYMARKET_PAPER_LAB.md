@@ -284,13 +284,12 @@ limit except when a single indivisible transition group exceeds that limit.
 Current [Polymarket real-time documentation](https://docs.polymarket.com/market-data/realtime-data)
 explicitly supports `{"assets_ids":[...],"operation":"subscribe"}` and
 `unsubscribe` on an existing market connection. Unchanged subscriptions cause
-no wire update; removals and additions are sent in two bounded frames. Four connections are now the default, with independent receive threads,
+no wire update; changed membership now starts a fresh snapshot generation. Four connections are now the default, with independent receive threads,
 subscription sets and ten-second application `PING` keepalives. A local
 single-socket smoke still hit one slow-consumer close after receive isolation,
 so sharding was selected from that evidence. Unused custom-feature events
-are no longer requested. `WS_SHARDS=1` uses one connection; initial placement at 2 separates YES/NO and
-Up/Down, while 3–8 use stable CRC32 market-ID assignment. Measured token rates
-subsequently determine placement as described below. Reconnects affect only
+are no longer requested. `WS_SHARDS=1` sets a one-connection minimum; asset-count placement and automatic
+shard sizing are described below. Reconnects affect only
 the failed shard and clear that shard's depth. REST fallback remains available.
 
 Status uses the existing JSON status row and `polymarket-observer` heartbeat, with cumulative
@@ -527,33 +526,36 @@ before a book exists. Only the current owner contributes to that token's EWMA;
 brief handover overlap does not inflate its rate. Physical per-shard frame totals
 exclude `PONG` and include overlap traffic. Receive callbacks update only memory.
 
-Every `POLYMARKET_OBSERVER_WS_REBALANCE_SECONDS` (default 60), measured counts are
-converted to rates using elapsed monotonic time and an EWMA with
-`POLYMARKET_OBSERVER_WS_RATE_HALF_LIFE_SECONDS` (default 30). Idle tokens decay.
-Largest-first greedy bins balance individual asset/token subscriptions; YES/NO
-outcomes may use different shards after a rebalance. The total discovered token
-set is preserved. Equivalent bins are matched to existing shard owners to
-maximize retained subscriptions, then only a prefix of moves needed to enter
-the hysteresis band is applied. This is a churn-reducing heuristic, not a global
-minimum-move optimizer.
+As of the WS stability fix, placement uses largest-market-first bins by asset
+count on every catalogue refresh, retaining balanced owners to limit churn. Both outcomes stay on the same shard. The
+minimum `POLYMARKET_OBSERVER_WS_SHARDS` defaults to 4 (range 1–8); the soft target
+`POLYMARKET_OBSERVER_WS_ASSETS_PER_SHARD=600` can grow the count to at most 8.
+An indivisible large market or the eight-shard limit can exceed this target.
+Individual-token rate moves are disabled to preserve pair locality. EWMA rates
+remain diagnostic; the older REBALANCE_* knobs no longer move subscriptions.
+Membership changes invalidate affected connection generations, live books,
+recording metadata and taker history before reconnecting for fresh snapshots.
 
-Imbalance is `(max shard rate - min shard rate) / mean rate`, or zero for an idle
-feed. A move requires both current imbalance and its reduction to exceed
-`POLYMARKET_OBSERVER_WS_REBALANCE_HYSTERESIS` (default 0.25). Successful rebalances
-must be at least `POLYMARKET_OBSERVER_WS_REBALANCE_MIN_SECONDS` apart (default
-120). Reconnects request a fresh check as soon as all shards are connected,
-bypassing the periodic check deadline but preserving hysteresis and cooldown.
-A single indivisibly hot token can leave residual imbalance without causing
-repeated reshuffles. Status exposes `ws_shard_loads` (EWMA token frames/sec),
-`ws_load_imbalance`, `ws_rebalance_hysteresis` and
-`ws_last_rebalance_monotonic` (process-local clock; null before the first move).
+Socket callbacks only enqueue raw frames to per-shard bounded queues. Parsing,
+rate accounting, ownership filtering, book updates and history/recording work
+run in one ordered worker per shard. Evaluator freshness/pair-skew checks,
+maker simulation and SQL remain outside the socket receive path. Python workers
+still share the GIL and book lock; this isolates socket draining but does not
+promise unlimited processing throughput. `POLYMARKET_OBSERVER_WS_RECEIVE_QUEUE_MAX`
+defaults to 256 frames per shard. Overflow or over two seconds of local queue
+lag invalidates the entire generation; queued deltas are discarded and a new
+snapshot is required. Arbitrarily coalescing deltas would lose untouched price
+levels. Recovery may lose paper trade-print observations; recordings are not a
+complete event stream during overload. Receive timestamps are retained through
+the queue, so processing delay cannot masquerade as network receipt time.
 
-All destination subscribe frames are sent before source unsubscribe frames.
-A destination send failure aborts source removals. Healthy moves preserve book
-and paper history caches; reconnects still invalidate the failed shard's books.
-The public stream has no subscription acknowledgement barrier here: send order
-reduces gaps where feasible, but cannot guarantee gap-free delivery after a
-remote/network failure. Brief duplicate events remain possible during handover.
+Status exposes `ws_shard_assets`, `ws_receive_queues` (depth, cumulative drops,
+generation high-water), `ws_shard_loads` and `ws_load_imbalance`, alongside
+`reconnect_count`, `slow_consumer_count`, `book_age_p50_ms` and `book_age_p95_ms`.
+Counters are process-local except the existing daily DB checkpoints. Frame-rate
+counters measure processed frames; queue drops explain lost coverage. Reconnect
+and close logs identify the shard. Backoff is exponential (5–120 seconds), with
+0.5–1.5x jitter, and resets only after a connection survives at least 60 seconds.
 
 Migration `20261013_polymarket_ws_daily.sql` is additive, repeatable and registered
 in the bootstrap invoked by `python -m app.commands.migrate`. It stores cumulative
@@ -751,8 +753,8 @@ signing, credentials or real orders are involved.
 Each leg bids at the recorded best bid, rounded down to the market tick. If the
 sum exceeds `COMBINED_BID` (default 0.99), the larger bid is lowered by whole ticks.
 Quotes never cross the recorded ask. `QUOTE_SHARES` defaults to 10. Inventory
-caps are **unpaired shares**, per market (`MARKET_CAP=100`) and globally
-(`GLOBAL_CAP=500`). Admission includes the worst-case one-sided fill of every
+caps are **unpaired shares**, per market (`MARKET_CAP=20`) and globally
+(`GLOBAL_CAP=100`). Admission includes the worst-case one-sided fill of every
 outstanding quote. Paired quantities are immediately redeemed for $1 per set
 in the virtual ledger, at zero assumed merge cost. Residual positions retain
 cost basis in the ledger until resolution; they are not spendable cash.
@@ -943,3 +945,17 @@ repricing; no reconnect preceded that signal. The 250ms policy rejects that pair
 cannot prove depth completeness or exchange executability. Connection/ownership
 generation, snapshot integrity, timestamp regression and feed throughput remain separate
 investigation work; sampled recordings cannot establish missing-frame causality.
+
+
+## Paper maker inventory stability
+
+`POLYMARKET_PAPER_MAKER_MARKET_CAP=20` and
+`POLYMARKET_PAPER_MAKER_GLOBAL_CAP=100` bound unpaired shares (previous defaults
+100/500). Outstanding quotes count against global capacity. These are share
+caps, not dollar notional caps; no optional notional setting is introduced.
+After any one-sided fill, further fills and refreshed quotes on that overfilled
+side pause immediately. The underfilled side can quote up to the inventory
+imbalance even at the caps, including inventory above newly reduced limits.
+Pairing fills cannot overshoot into opposite one-leg exposure. Once paired,
+both sides can quote again. Existing cash reservation and paper-only execution
+remain in place; no wallet, signer or real-order integration is involved.
