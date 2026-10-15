@@ -79,16 +79,17 @@ def manager(monkeypatch):
     return m, sent
 
 
-def test_handover_invalidates_generations_before_publishing_owners(monkeypatch):
+def test_handover_sends_deltas_without_invalidating_generations(monkeypatch):
     m, sent = manager(monkeypatch)
     monkeypatch.setattr(observer, '_PIPELINE', None)
     m.states[0]['inbox'] = observer.ReceiveQueue(2)
     m.states[2]['inbox'] = observer.ReceiveQueue(2)
     assert m.apply_assignment(dict(a=0, b=2))
-    assert not sent
-    assert m.states[0]['inbox'].invalid.is_set()
-    assert m.states[2]['inbox'].invalid.is_set()
-    assert not m.states[0]['connected'] and not m.states[2]['connected']
+    assert sent == [(0, dict(assets_ids=['b'], operation='unsubscribe')),
+                    (2, dict(assets_ids=['b'], operation='subscribe'))]
+    assert not m.states[0]['inbox'].invalid.is_set()
+    assert not m.states[2]['inbox'].invalid.is_set()
+    assert m.states[0]['connected'] and m.states[2]['connected']
     assert m.balancer.assignment == dict(a=0, b=2)
 
 
@@ -174,3 +175,63 @@ def test_manager_applies_weighted_whole_market_rebalance_and_cooldown(monkeypatc
     # A repeated catalogue refresh must not undo the assignment or bypass cooldown.
     m.sync(m.markets)
     assert b.assignment == applied
+
+
+def test_weighted_packing_escapes_single_move_local_minimum():
+    # Two hot markets per shard require exchanges, not high-to-low moves.
+    weights = [8, 7, 6, 5, 4, 3, 2, 1]
+    markets = [dict(id=str(i), yesAssetId=f'{i}y', noAssetId=f'{i}n') for i in range(8)]
+    owners = [0, 0, 1, 1, 2, 2, 3, 3]
+    previous = {a: owners[i] for i, m in enumerate(markets) for a in observer.subscription_assets([m])}
+    rates = {a: weights[i] / 2 for i, m in enumerate(markets) for a in observer.subscription_assets([m])}
+    groups = observer.shard_markets(markets, 4, previous, rates)
+    target = {a: i for i, group in groups.items() for a in observer.subscription_assets(group)}
+    b = RateBalancer(4)
+    b.rates = rates
+    assert b.loads(target) == [9] * 4
+
+
+def test_rollover_keeps_retained_books_and_queue(monkeypatch):
+    from datetime import datetime, timezone, timedelta
+    m, sent = manager(monkeypatch)
+    p = observer.Pipeline()
+    monkeypatch.setattr(observer, '_PIPELINE', p)
+    p.set_markets([dict(id='keep', yesAssetId='a', noAssetId='b')])
+    p.receive(dict(event_type='book', asset_id='a', bids=[], asks=[]))
+    retained = p.books['a']
+    for state in m.states.values():
+        state['inbox'] = observer.ReceiveQueue(4)
+        state['socket'].close = lambda: pytest.fail('rollover closed socket')
+    inbox = m.states[0]['inbox']
+    inbox.put('queued retained delta')
+    for i in range(3):
+        m.apply_assignment(dict(a=0, b=0, **{f'new{i}': 1}))
+        assert p.books['a'] is retained
+        assert inbox.queue.qsize() == 1
+        assert not inbox.invalid.is_set()
+    moved = m.states[1]['inbox']
+    old = datetime.now(timezone.utc) - timedelta(seconds=1)
+    p.receive(dict(event_type='book', asset_id='new2', bids=[], asks=[]),
+              {'new2'}, old, moved, moved.epoch)
+    assert 'new2' not in p.books
+    assert not any(command['assets_ids'] == ['a', 'b'] for _, command in sent)
+
+
+def test_catalogue_owner_moves_count_once_and_wire_failure_is_local(monkeypatch):
+    m, _ = manager(monkeypatch)
+    monkeypatch.setattr(observer, '_PIPELINE', None)
+    monkeypatch.setattr(observer, 'STATUS', dict(observer.STATUS, rebalance_count=0))
+    closed = []
+    m.states[0]['inbox'] = observer.ReceiveQueue(4)
+    m.states[0]['socket'].send = lambda raw: (_ for _ in ()).throw(OSError('fake wire failure'))
+    m.states[0]['socket'].close = lambda: closed.append(0)
+    for i in (1, 2, 3):
+        m.states[i]['socket'].close = lambda: pytest.fail('unrelated socket closed')
+    m.apply_assignment(dict(a=0, b=2))
+    assert closed == [0]
+    assert m.states[0]['inbox'].invalid.is_set()
+    assert m.states[2]['connected']
+    assert observer.STATUS['rebalance_count'] == 1
+    assert next(iter(m.stats.days.values()))['rebalance_count'] == 1
+    m.apply_assignment(dict(a=0, b=2))
+    assert observer.STATUS['rebalance_count'] == 1

@@ -315,27 +315,28 @@ def test_shards_dynamic_subscription_ping_and_independent_reconnect(monkeypatch)
     assert len(sockets[0].sent) == len(sockets[1].sent) == 1
     c = market('c', market_type='up_down')
     manager.sync([a, c])
-    assert len(sockets) == 3
-    assert sockets[1].closed
-    assert sockets[2].sent[0]['assets_ids'] == ['cy', 'cn']
+    assert len(sockets) == 2
+    assert not any(s.closed for s in sockets)
+    assert sockets[1].sent[-2:] == [dict(assets_ids=['bn', 'by'], operation='unsubscribe'),
+                                          dict(assets_ids=['cn', 'cy'], operation='subscribe')]
     clock[0] += 10
     manager.tick()
-    assert sockets[0].sent[-1] == sockets[2].sent[-1] == 'PING'
-    sockets[2].closed = True
-    sockets[2].callbacks['on_error'](sockets[2], 'slow consumer: send buffer full')
-    sockets[2].callbacks['on_close'](sockets[2], 1008, 'slow consumer: send buffer full')
+    assert sockets[0].sent[-1] == sockets[1].sent[-1] == 'PING'
+    sockets[1].closed = True
+    sockets[1].callbacks['on_error'](sockets[1], 'slow consumer: send buffer full')
+    sockets[1].callbacks['on_close'](sockets[1], 1008, 'slow consumer: send buffer full')
     clock[0] += 16
     manager.tick()
-    assert len(sockets) == 4
+    assert len(sockets) == 3
     assert not sockets[0].closed
-    assert observer.STATUS['reconnect_count'] == 2
+    assert observer.STATUS['reconnect_count'] == 1
     assert observer.STATUS['slow_consumer_count'] == 1
     assert observer.STATUS['ws_connected'] == 2
-    assert sockets[3].sent[0]['assets_ids'] == ['cy', 'cn']
-    assert manager.states[1]['attempts'] == 3
+    assert sockets[2].sent[0]['assets_ids'] == ['cy', 'cn']
+    assert manager.states[1]['attempts'] == 2
     assert manager.failures() == 0  # A healthy open does not trigger REST fallback.
     clock[0] += 61
-    sockets[3].callbacks['on_close'](sockets[3], 1000, 'closed')
+    sockets[2].callbacks['on_close'](sockets[2], 1000, 'closed')
     assert manager.states[1]['attempts'] == 0
     assert clock[0] + 2.5 <= manager.states[1]['retry_at'] <= clock[0] + 7.5
     manager.close()
@@ -573,3 +574,83 @@ def test_popped_frame_from_before_overflow_cannot_repopulate_book():
     p.receive(dict(event_type='book', asset_id='ay', bids=[], asks=[]), {'ay'},
               inbox=inbox, epoch=inbox.epoch)
     assert 'ay' in p.books and p.messages == 1
+
+
+def test_rollover_snapshot_processed_on_original_worker(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+    opened, stopped, applied = threading.Event(), threading.Event(), threading.Event()
+    sockets = []
+    class Socket:
+        def __init__(self, url, **callbacks):
+            self.callbacks = callbacks
+            self.sent = []
+            sockets.append(self)
+        def run_forever(self, **kwargs):
+            self.callbacks['on_open'](self)
+            opened.set()
+            stopped.wait(5)
+        def send(self, raw):
+            payload = json.loads(raw)
+            self.sent.append(payload)
+            if payload.get('operation') == 'subscribe':
+                for asset in payload['assets_ids']:
+                    self.callbacks['on_message'](self, json.dumps(dict(
+                        event_type='book', asset_id=asset, bids=[], asks=[dict(price='.6', size='3')])) )
+        def close(self):
+            stopped.set()
+    monkeypatch.setitem(sys.modules, 'websocket', SimpleNamespace(WebSocketApp=Socket))
+    monkeypatch.setattr(observer, '_STOP', threading.Event())
+    monkeypatch.setenv('POLYMARKET_OBSERVER_WS_SHARDS', '1')
+    monkeypatch.setattr(observer, 'STATUS', dict(observer.STATUS, reconnect_count=0))
+    p = observer.Pipeline()
+    p.set_markets([market(), market('old'), market('new')])
+    original = p.receive
+    def receive(*args, **kwargs):
+        original(*args, **kwargs)
+        if 'newn' in p.books:
+            applied.set()
+    monkeypatch.setattr(p, 'receive', receive)
+    monkeypatch.setattr(observer, '_PIPELINE', p)
+    m = observer.MarketConnections()
+    try:
+        m.sync([market(), market('old')])
+        assert opened.wait(1)
+        feed(p, market())
+        retained = p.books['ay']
+        thread, worker = m.states[0]['thread'], m.states[0]['worker']
+        m.sync([market(), market('new')])
+        assert applied.wait(1)
+        assert len(sockets) == 1 and not stopped.is_set()
+        assert m.states[0]['thread'] is thread and m.states[0]['worker'] is worker
+        assert p.books['ay'] is retained
+        assert sockets[0].sent[1:] == [dict(assets_ids=['oldn', 'oldy'], operation='unsubscribe'),
+                                             dict(assets_ids=['newn', 'newy'], operation='subscribe')]
+        assert observer.STATUS['reconnect_count'] == 0
+        m.tick()
+        metrics = observer.STATUS['ws_receive_queues'][0]
+        assert metrics['queue_wait_seconds'] >= 0
+        assert metrics['lock_wait_seconds'] >= 0
+    finally:
+        m.close()
+
+
+def test_shard_lock_wait_measures_time_before_publication():
+    p = observer.Pipeline()
+    p.set_markets([market()])
+    inbox = observer.ReceiveQueue(4)
+    entered, finished = threading.Event(), threading.Event()
+    def publish():
+        entered.set()
+        p.receive(dict(event_type='book', asset_id='ay', bids=[], asks=[]), {'ay'},
+                  datetime.now(timezone.utc), inbox, inbox.epoch)
+        finished.set()
+    with p.lock:
+        thread = threading.Thread(target=publish)
+        thread.start()
+        assert entered.wait(1)
+        assert not finished.wait(.03)
+    assert finished.wait(1)
+    thread.join(1)
+    assert inbox.lock_wait_seconds >= .02
+    assert inbox.lag_seconds >= inbox.lock_wait_seconds
