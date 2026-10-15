@@ -38,7 +38,9 @@ def finish(run_id, rows, market_regime, status, error=''):
             cur.execute('INSERT INTO qd_us_screener_symbols(run_id,symbol,features,score,rank,included,exclusion_reasons,flags) VALUES (%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT(run_id,symbol) DO UPDATE SET features=EXCLUDED.features,score=EXCLUDED.score,rank=EXCLUDED.rank,included=EXCLUDED.included,exclusion_reasons=EXCLUDED.exclusion_reasons,flags=EXCLUDED.flags',
                         (run_id, r['symbol'], json.dumps(r['features']), r['score'], r['rank'], r['included'], json.dumps(r['exclusion_reasons']), json.dumps(r['flags'])))
         counts = {'universe': len(rows), 'included': sum(r['included'] for r in rows),
-                  'excluded': sum(not r['included'] for r in rows), 'flagged': sum(bool(r['flags']) for r in rows)}
+                  'excluded': sum(not r['included'] for r in rows), 'flagged': sum(bool(r['flags']) for r in rows),
+                  'failed': market_regime.get('failed_count', 0),
+                  'coverage_ratio': market_regime.get('coverage_ratio', 0)}
         cur.execute("UPDATE qd_us_screener_runs SET regime=%s,status=%s,counts=%s,error=%s,finished_at=CASE WHEN %s='running' THEN NULL ELSE NOW() END WHERE id=%s",
                     (json.dumps(market_regime), status, json.dumps(counts), error, status, run_id))
         db.commit()

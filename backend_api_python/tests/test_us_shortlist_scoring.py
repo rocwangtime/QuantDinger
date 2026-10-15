@@ -54,6 +54,8 @@ def test_resolution_latest_completed_and_stale_partial(db):
     assert shortlist.resolve(c, NOW) == {'run_id': good, 'as_of': '2026-10-13', 'symbols': ['MSFT']}
     latest = insert_screen('2026-10-14')
     assert shortlist.resolve(c, NOW)['run_id'] == latest
+    store.query("UPDATE qd_us_screener_symbols SET exclusion_reasons='[\"market_data_failed\"]'::jsonb WHERE run_id=%s AND symbol='MSFT' RETURNING symbol", (latest,))
+    assert shortlist.resolve(c, NOW)['symbols'] == ['NVDA']
     c['universe_max_age_days'] = 0
     assert shortlist.resolve(c, NOW) is None
 

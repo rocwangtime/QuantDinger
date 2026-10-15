@@ -62,19 +62,21 @@ def test_earnings_sessions_and_unknown():
 
 
 def test_filters():
-    now = datetime.now(core.ZoneInfo('America/New_York'))
+    now = datetime(2026,10,14,15,59,tzinfo=core.ZoneInfo('America/New_York'))
     p = parameters()
     quote = {'last_price': 100, 'bid_price': 99.99, 'ask_price':100.01, 'update_time': now.replace(tzinfo=None).isoformat()}
     r = core.evaluate('A', bars(), quote, [], now.date(), p)
     assert not r['exclusion_reasons'] and r['flags'] == ['earnings_unknown']
-    for key, value, reason in [('last_price',4,'price_below_min'), ('ask_price',101,'spread_too_wide')]:
-        assert reason in core.evaluate('A', bars(), {**quote,key:value}, [], now.date(), p)['exclusion_reasons']
+    assert 'spread_too_wide' in core.evaluate('A', bars(), {**quote, 'ask_price':101}, [], now.date(), p)['exclusion_reasons']
+    cheap = bars()
+    cheap[-1]['close'] = 4
+    assert 'price_below_min' in core.evaluate('A', cheap, quote, [], now.date(), p)['exclusion_reasons']
     thin = bars()
     for b in thin:
         b['volume'] = 1
     assert 'illiquid' in core.evaluate('A', thin, quote, [], now.date(), p)['exclusion_reasons']
-    assert core.evaluate('A', bars(), {**quote,'bid_price':None}, [], now.date(), p)['exclusion_reasons']
-    assert core.evaluate('A', bars(), {**quote,'update_time':'2000-01-01 16:00:00'}, [], now.date(), p)['exclusion_reasons']
+    for q in ({**quote,'bid_price':None}, {**quote,'update_time':'2000-01-01 16:00:00'}):
+        assert core.evaluate('A', bars(), q, [], now.date(), p)['features']['spread_source'] == 'corwin_schultz_daily'
 
 
 def test_scoring_and_tie_break():
@@ -114,6 +116,7 @@ def database():
     connection = psycopg2.connect(DSN)
     with connection.cursor() as cur:
         cur.execute((ROOT/'migrations/20261015_us_screener.sql').read_text())
+        cur.execute((ROOT/'migrations/20261015_us_screener_quality.sql').read_text())
     connection.commit()
     yield connection
     connection.close()
@@ -139,7 +142,7 @@ def test_execute_records_every_symbol(database):
         def close(self): pass
     with patch.dict(os.environ,DATABASE_URL=DSN):
         run=store.create(date(2026,10,14),parameters(),'test:'+str(datetime.now(timezone.utc)))
-        with patch('app.services.universe.UniverseService.resolve_members',return_value=[{'symbol':'BAD'},{'symbol':'MISSING'}]):
+        with patch('app.services.universe.UniverseService.resolve_members',return_value=[{'symbol':'BAD'},{'symbol':'MISSING'}]), patch('app.services.fundamental_data.screener_earnings_dates', return_value=[]):
             execute(run['id'],Provider)
         result=store.read(run['id'])
         assert result['status']=='partial'
@@ -301,3 +304,81 @@ def test_seed_effective_date_correction(database):
         cur.execute('SELECT COUNT(*) FROM qd_universe_members WHERE universe_id=%s AND valid_from<=%s', (universe_id,date(2026,10,13)))
         assert cur.fetchone()[0] == 99
     database.rollback()
+
+
+def test_regular_spread_ignores_extended_and_early_close():
+    quote = {'bid_price': 99, 'ask_price': 101, 'update_time': '2026-11-27 14:00:00'}
+    narrow = [{**b, 'high': b['close']*1.00001, 'low': b['close']*.99999} for b in bars()]
+    spread, source = core.regular_spread(narrow, quote, date(2026,11,27))
+    assert source == 'corwin_schultz_daily' and spread < 10
+    quote['update_time'] = '2026-11-27 12:59:00'
+    assert core.regular_spread(narrow, quote, date(2026,11,27)) == (200, 'rth_snapshot')
+    quote['update_time'] = '2026-11-26 12:59:00'
+    assert core.regular_spread(narrow, quote, date(2026,11,27))[1] == 'corwin_schultz_daily'
+
+
+def test_unknown_exclude_policy():
+    with patch.dict(os.environ, US_SCREENER_EARNINGS_UNKNOWN='exclude'):
+        row = core.evaluate('A', bars(), {}, [], date(2026,10,14), parameters())
+    assert row['features']['earnings_status'] == 'unknown'
+    assert 'earnings_unknown' in row['flags'] and 'earnings_unknown' in row['exclusion_reasons']
+
+
+@pytest.mark.parametrize('failed,threshold,status', [(1,.9,'completed'), (2,.9,'partial'), (1,1,'partial')])
+def test_coverage_threshold(database, failed, threshold, status):
+    symbols = ['T'+str(i) for i in range(10)]
+    class Provider:
+        def __init__(self, deadline): pass
+        def quotes(self, symbols): return {}, {s:'quote_batch_failed' for s in symbols[:failed]}
+        def bars(self, symbol, day): return bars()
+        def close(self): pass
+    run = store.create(date(2026,10,14), {**parameters(), 'min_coverage':threshold}, 'coverage:'+str(datetime.now(timezone.utc)))
+    try:
+        with patch('app.services.universe.UniverseService.resolve_members', return_value=[{'symbol':s} for s in symbols]), patch('app.services.fundamental_data.screener_earnings_dates', return_value=[]):
+            execute(run['id'], Provider)
+        result = store.read(run['id'])
+        assert result['status'] == status
+        assert result['counts']['failed'] == failed
+        assert result['counts']['coverage_ratio'] == (10-failed)/10
+        assert all(not r['included'] for r in result['symbols'] if 'market_data_failed' in r['exclusion_reasons'])
+    finally:
+        store.query('DELETE FROM qd_us_screener_runs WHERE id=%s', (run['id'],))
+
+
+@pytest.mark.parametrize('text', ['expected* to report earnings on  11/02/2026', 'estimated to report earnings on  11/02/2026'])
+def test_nasdaq_earnings_fetch_and_cache(database, text):
+    from app.services.fundamental_data import screener_earnings_dates
+    today = datetime.now(timezone.utc).date()
+    store.query("DELETE FROM qd_us_screener_earnings_cache WHERE symbol='NASDAQ_TEST'")
+    response = MagicMock()
+    response.json.return_value = {'data':{'reportText':text}}
+    try:
+        with patch('requests.get',return_value=response) as get, patch('time.sleep'):
+            assert screener_earnings_dates('NASDAQ_TEST',today) == [date(2026,11,2)]
+            assert screener_earnings_dates('NASDAQ_TEST',today) == [date(2026,11,2)]
+            assert get.call_count == 1
+        row = store.query("SELECT * FROM qd_us_screener_earnings_cache WHERE symbol='NASDAQ_TEST'", one=True)
+        assert row['fetched_at'] and row['source'] == 'nasdaq_expected_earnings'
+    finally:
+        store.query("DELETE FROM qd_us_screener_earnings_cache WHERE symbol='NASDAQ_TEST'")
+
+
+@pytest.mark.parametrize('value', ['0', '1.1', 'nan', '-0.1'])
+def test_invalid_coverage(value):
+    with patch.dict(os.environ, US_SCREENER_MIN_COVERAGE=value):
+        with pytest.raises(ValueError, match='invalid_min_coverage'):
+            parameters()
+
+
+def test_nasdaq_failure_is_cached_unknown(database):
+    import requests
+    from app.services.fundamental_data import screener_earnings_dates
+    today = datetime.now(timezone.utc).date()
+    store.query("DELETE FROM qd_us_screener_earnings_cache WHERE symbol='NASDAQ_FAILURE'")
+    try:
+        with patch('requests.get', side_effect=requests.HTTPError('429')) as get, patch('time.sleep'):
+            assert screener_earnings_dates('NASDAQ_FAILURE', today) == []
+            assert screener_earnings_dates('NASDAQ_FAILURE', today) == []
+            assert get.call_count == 1
+    finally:
+        store.query("DELETE FROM qd_us_screener_earnings_cache WHERE symbol='NASDAQ_FAILURE'")

@@ -347,6 +347,10 @@ def _apply_init_sql(logger, *, strict: bool = False):
                 path=Path(__file__).resolve().parent.parent.parent / "migrations" / "20261015_us_screener.sql",
             )
             _apply_migration_component(
+                conn, logger, name="20261015_us_screener_quality",
+                path=Path(__file__).resolve().parent.parent.parent / "migrations" / "20261015_us_screener_quality.sql",
+            )
+            _apply_migration_component(
                 conn, logger, name="20261015_nasdaq100_seed",
                 path=Path(__file__).resolve().parent.parent.parent / "migrations" / "20261015_nasdaq100_seed.sql",
             )

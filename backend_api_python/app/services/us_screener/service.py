@@ -11,12 +11,15 @@ from app.services.us_screener.core import calendar, evaluate, rank, regime, sche
 
 def parameters():
     policy = os.getenv('US_SCREENER_EARNINGS_UNKNOWN', 'flag')
-    if policy not in {'flag', 'open', 'closed'}:
+    if policy not in {'flag', 'exclude', 'open', 'closed'}:
         raise ValueError('invalid_earnings_policy')
+    min_coverage = float(os.getenv('US_SCREENER_MIN_COVERAGE', '0.9'))
+    if not 0 < min_coverage <= 1:
+        raise ValueError('invalid_min_coverage')
     symbols = sorted(set(s.strip().upper() for s in os.getenv('US_SCREENER_MANUAL_SYMBOLS', '').split(',') if s.strip()))
     if len(symbols) > 200 or any(not re.fullmatch(r'[A-Z][A-Z0-9.-]{0,14}', s) for s in symbols):
         raise ValueError('invalid_manual_symbols')
-    return {'universe': 'nasdaq100', 'manual_fallback': symbols, 'top_n': 10,
+    return {'min_coverage': min_coverage, 'universe': 'nasdaq100', 'manual_fallback': symbols, 'top_n': 10,
             'min_price': 5, 'min_dollar_volume': 50_000_000, 'max_spread_bps': 10,
             'earnings_window': 3, 'earnings_unknown': policy, 'quote_max_age_sec': 3600,
             'runtime_seconds': 480, 'score_version': '0.4*z(m20)+0.4*z(m60)-0.2*z(vol20)',
@@ -83,8 +86,8 @@ def execute(run_id, provider_factory=None):
             market_regime['universe_fallback'] = True
         if not symbols or len(symbols) > 200:
             raise ValueError('empty_or_oversized_universe')
-        rows = [{'symbol': s, 'features': {}, 'score': None, 'rank': None, 'included': False,
-                 'exclusion_reasons': ['not_processed'], 'flags': []} for s in symbols]
+        rows = [{'symbol': s, 'features': {'earnings_status': 'unknown'}, 'score': None, 'rank': None, 'included': False,
+                 'exclusion_reasons': ['not_processed'], 'flags': ['earnings_unknown']} for s in symbols]
         # Persist pending symbol coverage before any network call.
         store.finish(run_id, rows, market_regime, 'running')
         provider = (provider_factory or FutuData)(deadline)
@@ -103,10 +106,15 @@ def execute(run_id, provider_factory=None):
                 dates = screener_earnings_dates(symbol, as_of)
                 rows[i] = evaluate(symbol, bars, quotes.get(symbol, {}), dates, as_of, params)
             except Exception as exc:
+                rows[i]['features'] = {'earnings_status': 'unknown'}
+                rows[i]['flags'] = ['earnings_unknown']
+                rows[i]['features']['failure_detail'] = str(exc)[:160]
                 rows[i]['exclusion_reasons'] = ['runtime_budget' if isinstance(exc, TimeoutError) else 'market_data_failed']
         rank(rows, params['top_n'])
-        failed = any(any(r in {'market_data_failed', 'runtime_budget', 'invalid_or_missing_market_data', 'invalid_bars', 'insufficient_bars', 'invalid_quote', 'stale_quote'} for r in row['exclusion_reasons']) for row in rows)
-        status = 'partial' if failed or market_regime['flag'] == 'unknown' else 'completed'
+        failed = sum(any(r in {'market_data_failed', 'runtime_budget', 'invalid_or_missing_market_data', 'invalid_bars', 'insufficient_bars', 'invalid_quote', 'stale_quote'} for r in row['exclusion_reasons']) for row in rows)
+        coverage = (len(rows)-failed)/len(rows)
+        market_regime.update(coverage_ratio=coverage, failed_count=failed)
+        status = 'partial' if coverage < params.get('min_coverage', 0.9) else 'completed'
         store.finish(run_id, rows, market_regime, status)
     except Exception as exc:
         store.finish(run_id, rows, market_regime, 'failed', str(exc)[:160] if isinstance(exc, ValueError) else 'screener_failed')
