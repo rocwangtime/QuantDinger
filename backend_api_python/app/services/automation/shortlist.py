@@ -15,7 +15,7 @@ def resolve(config, now):
     if not run:
         return None
     rows = store.query("""SELECT symbol FROM qd_us_screener_symbols WHERE run_id=%s
-        AND included=TRUE ORDER BY rank NULLS LAST,symbol LIMIT %s""",
+        AND included=TRUE AND exclusion_reasons='[]'::jsonb ORDER BY rank NULLS LAST,symbol LIMIT %s""",
         (run['id'], config.get('top_n', 10)))
     symbols = list(dict.fromkeys(symbol(r['symbol'], 'USStock') for r in rows))
     return {'run_id': run['id'], 'as_of': str(run['as_of']), 'symbols': symbols} if symbols else None

@@ -749,7 +749,7 @@ def get_fundamental_data_service() -> FundamentalDataService:
     return _service
 
 
-def screener_earnings_dates(symbol: str, as_of: date) -> list[date]:
+def _cached_fundamental_earnings_dates(symbol: str, as_of: date) -> list[date]:
     """Read known earnings dates from persisted fundamentals, without provider calls.
 
     Past reporting/availability dates never imply a future earnings calendar.
@@ -776,3 +776,41 @@ def screener_earnings_dates(symbol: str, as_of: date) -> list[date]:
         except ValueError:
             continue
     return sorted(set(dates))
+
+
+def screener_earnings_dates(symbol: str, as_of: date) -> list[date]:
+    """Nasdaq expected earnings calendar, cached 24h (including empty responses).
+
+    Live observations are not backfilled into historical sessions. Nasdaq dates
+    are forecasts and may change; failures remain explicitly unknown.
+    """
+    import re
+    import time
+    import requests
+    from app.services.us_screener import store
+
+    dates = _cached_fundamental_earnings_dates(symbol, as_of)
+    if any(d >= as_of for d in dates):
+        return dates
+    today = datetime.now(timezone.utc).date()
+    if as_of < today - timedelta(days=1):
+        return dates
+    cached = store.query("SELECT dates FROM qd_us_screener_earnings_cache WHERE symbol=%s AND fetched_at>NOW()-INTERVAL '24 hours'", (symbol,), one=True)
+    if cached:
+        return [date.fromisoformat(d) for d in cached['dates']] or dates
+    # At most one public request per second per worker; no retries or bypasses.
+    time.sleep(1)
+    found = []
+    try:
+        response = requests.get('https://api.nasdaq.com/api/analyst/'+symbol+'/earnings-date',
+                                headers={'User-Agent': 'QuantDinger research screener'}, timeout=5)
+        response.raise_for_status()
+        text = (response.json().get('data') or {}).get('reportText') or ''
+        match = re.search(r'(?:expected\*?|estimated) to report earnings on\s+(\d{2}/\d{2}/\d{4})', text)
+        if match:
+            found = [datetime.strptime(match.group(1), '%m/%d/%Y').date()]
+    except (requests.RequestException, ValueError, TypeError):
+        pass
+    store.query("INSERT INTO qd_us_screener_earnings_cache(symbol,dates,source) VALUES (%s,%s,'nasdaq_expected_earnings') ON CONFLICT(symbol) DO UPDATE SET dates=EXCLUDED.dates,source=EXCLUDED.source,fetched_at=NOW()",
+                (symbol, json.dumps([d.isoformat() for d in found])))
+    return found or dates

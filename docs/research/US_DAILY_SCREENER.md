@@ -46,28 +46,48 @@ fallback is used. Universes above 200 symbols fail explicitly.
 
 All calculations use completed daily bars through the run's New York session date.
 Daily bars are sorted/deduplicated; the latest 61 sessions must be contiguous on
-XNYS. Missing/invalid bars, nonpositive or crossed bid/ask, missing quotes, quotes
-from another session, future quotes or quotes over 3600 seconds old are excluded.
-The after-close snapshot may show the final regular-session quote; this is research
-and is not a claim that the quote is executable.
+XNYS. Missing/invalid bars are excluded. Price is the completed session close.
+Extended-session bid/ask values never enter the spread filter.
 
-* Snapshot last price >= USD 5.
+* Session close >= USD 5.
 * Mean of `daily close × share volume` over 20 sessions >= USD 50 million.
-* Snapshot spread `(ask−bid)/midpoint × 10,000` <= 10 basis points.
+* Regular-session spread <= **10 basis points**, with per-symbol `spread_source`:
+  * `rth_snapshot`: valid uncrossed positive bid/ask timestamped inside the exact
+    as-of XNYS session (including its calendar-specific early close).
+  * `corwin_schultz_daily`: fallback when no valid RTH snapshot exists. For each
+    of the last 20 adjacent daily-bar pairs, beta = log(H1/L1)^2 + log(H2/L2)^2,
+    gamma = log(max(H1,H2)/min(L1,L2))^2, D = 3−2√2,
+    alpha = max(0, (√(2 beta)−√beta)/D−√(gamma/D)). Average
+    `2 tanh(alpha/2) × 10,000` across pairs. This Corwin–Schultz (2012)
+    high/low estimator removes a two-day volatility component; it is an estimate,
+    can floor at zero, and is not an executable spread or a substitute for measured
+    quotes in execution. The threshold is unchanged. No additional Futu API calls.
 * Earnings dates within three XNYS sessions on either side of the as-of date are
   excluded (including the earnings day). Holidays and weekends do not count.
-* Unknown earnings: `US_SCREENER_EARNINGS_UNKNOWN=flag` (default) or `open` permits
-  eligibility with the `earnings_unknown` flag; `closed` also excludes the symbol.
+* Unknown earnings: `US_SCREENER_EARNINGS_UNKNOWN=flag` (default) permits
+  eligibility with the visible `earnings_unknown` flag; `exclude` also excludes.
+  Legacy `open`/`closed` are aliases. Every row has `earnings_status=known|unknown`.
 
-Earnings are read only from **persisted** `fundamental_data` observations, ingested
-by the as-of cutoff and refreshed within seven days. Supported fields are
-`metadata_json.earnings_dates`, `analysisPayload.earnings_dates` and
-`analysisPayload.earnings.upcoming.next_earnings_date`. Existing fundamental
-history sync now retains its `_earnings_dates` results in metadata. The screener
-never invokes yfinance or another fundamental provider. Past period ends or
-publication dates never substitute for a future calendar. A missing calendar or
-one containing only older dates is unknown, with explicit coverage flags. Default
-flag-only does not guarantee the absence of an upcoming earnings event.
+The helper first reads fundamental observations ingested by the as-of cutoff and
+refreshed within seven days. If no future calendar exists, current/latest-session
+runs query Nasdaq's public expected earnings endpoint:
+`https://api.nasdaq.com/api/analyst/{symbol}/earnings-date`.
+`reportText` includes expected or estimated reporting dates supplied by Zacks.
+Forecast dates can change. Historical runs older than yesterday do not fetch live
+forecasts. Past period ends never substitute for a future calendar.
+
+`20261015_us_screener_quality.sql` adds the DB earnings cache with `source` and
+`fetched_at`. Positive and empty/error results are cached for 24 hours. Requests
+are spaced by at least one second, have a five-second timeout and no retries,
+credentials, challenge bypasses or region workarounds. Futu remains read-only;
+no trading context is used to fetch earnings. Unknown is never silently unflagged.
+
+Local network verification on 2026-10-15 using the application's User-Agent:
+Nasdaq returned HTTP 200 and dates for AAPL (2026-11-02), MSFT (2026-10-28),
+NVDA (2026-11-18). Yahoo chart returned 429, quoteSummary 401, and Stock Analysis
+403; these are not used. This verifies access from the development environment;
+the production server was not accessed. The cached snapshot-only implementation
+previously never refreshed `_earnings_dates`, explaining broad unknown coverage.
 
 Feature definitions:
 
@@ -98,8 +118,7 @@ The existing `FUTU_OPEND_HOST` / `FUTU_OPEND_PORT` configure the quote connectio
 No credential, account, position or order endpoint is called.
 
 Quotes are batched by 50; successive remote calls are at least 2.1 seconds apart.
-Quote cache TTL is 60 seconds, but source timestamps still pass the freshness
-filter. Daily QFQ bars are cached by symbol/session (300 bars requested over a
+Quote cache TTL is 60 seconds; source timestamps determine RTH eligibility. Daily QFQ bars are cached by symbol/session (300 bars requested over a
 420-day calendar window); cache history is retained for 14 days. Pagination is
 unneeded for the 61/200-bar windows; insufficient returned coverage fails explicitly.
 Broker permissions/history quotas can cause a partial run; there is no provider
@@ -114,7 +133,14 @@ Runs store as_of, frozen params, regime, status, counts, timestamps and error.
 Each symbol stores features, score/rank, included, exclusion reasons and flags.
 Pending rows are saved before network calls; final writes replace their observations
 atomically. A worker interruption retains `not_processed` coverage rather than
-silently dropping symbols. Runs with symbol/QQQ data failures are partial.
+silently dropping symbols. `counts.failed` and `counts.coverage_ratio` record
+market-data coverage, also copied to regime as `failed_count`/`coverage_ratio`.
+Coverage counts valid market observations regardless of eligibility filters.
+Runs complete when coverage >= `US_SCREENER_MIN_COVERAGE` (default 0.9, range
+(0,1]); below that they remain partial. Failed symbols stay excluded with reasons.
+An unavailable descriptive QQQ regime remains explicitly unknown. Item-2 resolves
+completed runs only and defensively requires included rows to have no exclusions;
+its existing `plan_only` constraints remain in force.
 
 The engine has a 480-second cooperative budget, SDK connection waits are capped,
 Celery soft/hard limits are 510/540 seconds, and CLI uses an isolated spawned process

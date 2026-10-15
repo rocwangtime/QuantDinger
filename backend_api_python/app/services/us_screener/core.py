@@ -28,7 +28,7 @@ def earnings_reasons(dates, as_of, window=3, policy='flag'):
         return (['earnings_blackout'], [])
     upcoming = [d for d in dates if d >= as_of]
     if not upcoming:
-        return (['earnings_unknown'] if policy == 'closed' else [], ['earnings_unknown'])
+        return (['earnings_unknown'] if policy in {'closed', 'exclude'} else [], ['earnings_unknown'])
     return ([], [])
 
 
@@ -62,20 +62,47 @@ def regime(bars):
             'close': c[-1], 'ma50': ma50, 'ma200': ma200}
 
 
+def regular_spread(bars, quote, as_of):
+    """RTH snapshot, otherwise Corwin-Schultz (2012) two-day high/low estimate.
+
+    Average the last 20 adjacent daily estimates, floor negative alpha at zero.
+    Daily ranges contain volatility; the estimator removes its two-day component.
+    This is an estimate, not an observed executable quote. Threshold remains 10bp.
+    """
+    try:
+        stamp = datetime.fromisoformat(str(quote['update_time']))
+        stamp = stamp.replace(tzinfo=ZoneInfo('America/New_York')) if stamp.tzinfo is None else stamp
+        session = str(as_of)
+        cal = calendar()
+        bid, ask = float(quote['bid_price']), float(quote['ask_price'])
+        if (stamp.date() == as_of and cal.is_session(session)
+                and cal.session_open(session).to_pydatetime() <= stamp <= cal.session_close(session).to_pydatetime()
+                and all(math.isfinite(v) and v > 0 for v in (bid, ask)) and ask >= bid):
+            return (ask-bid)/((ask+bid)/2)*10000, 'rth_snapshot'
+    except (ValueError, KeyError, TypeError):
+        pass
+    estimates = []
+    denominator = 3-2*math.sqrt(2)
+    for left, right in zip(bars[-21:-1], bars[-20:]):
+        h1, l1, h2, l2 = (float(left['high']), float(left['low']), float(right['high']), float(right['low']))
+        beta = math.log(h1/l1)**2 + math.log(h2/l2)**2
+        gamma = math.log(max(h1,h2)/min(l1,l2))**2
+        alpha = max(0, (math.sqrt(2*beta)-math.sqrt(beta))/denominator-math.sqrt(gamma/denominator))
+        estimates.append(2*math.tanh(alpha/2)*10000)
+    return statistics.mean(estimates), 'corwin_schultz_daily'
+
+
 def evaluate(symbol, bars, quote, dates, as_of, params):
     row = {'symbol': symbol, 'features': {}, 'score': None, 'rank': None,
            'included': False, 'exclusion_reasons': [], 'flags': []}
+    row['features']['earnings_status'] = 'known' if any(d >= as_of for d in dates) else 'unknown'
+    if row['features']['earnings_status'] == 'unknown':
+        row['flags'].append('earnings_unknown')
     try:
-        row['features'] = features(bars)
-        price, bid, ask = [float(quote[k]) for k in ('last_price', 'bid_price', 'ask_price')]
-        if not all(math.isfinite(v) and v > 0 for v in (price, bid, ask)) or ask < bid:
-            raise ValueError('invalid_quote')
-        stamp = datetime.fromisoformat(str(quote['update_time'])).replace(tzinfo=ZoneInfo('America/New_York'))
-        age = (datetime.now(ZoneInfo('America/New_York'))-stamp).total_seconds()
-        if stamp.date() != as_of or age < -5 or age > params['quote_max_age_sec']:
-            raise ValueError('stale_quote')
-        spread = (ask-bid)/((ask+bid)/2)*10000
-        row['features'].update(price=price, spread_bps=spread, quote_time=stamp.isoformat())
+        row['features'].update(features(bars))
+        price = float(bars[-1]['close'])
+        spread, source = regular_spread(bars, quote, as_of)
+        row['features'].update(price=price, spread_bps=spread, spread_source=source)
         for condition, reason in ((price < params['min_price'], 'price_below_min'),
                                   (row['features']['avg_dollar_volume20'] < params['min_dollar_volume'], 'illiquid'),
                                   (spread > params['max_spread_bps'], 'spread_too_wide')):
@@ -83,7 +110,7 @@ def evaluate(symbol, bars, quote, dates, as_of, params):
                 row['exclusion_reasons'].append(reason)
         reasons, flags = earnings_reasons(dates, as_of, params['earnings_window'], params['earnings_unknown'])
         row['exclusion_reasons'].extend(reasons)
-        row['flags'].extend(flags)
+        row['flags'] = sorted(set(row['flags'] + flags))
         row['features']['earnings_dates'] = [d.isoformat() for d in dates]
     except (ValueError, KeyError, TypeError, OverflowError) as exc:
         reason = str(exc)
