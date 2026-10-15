@@ -96,6 +96,7 @@ class AutomationReviewDataSchema(Schema):
     latest_valid_task_performance = fields.Dict(allow_none=True)
     current_risk = fields.Dict()
     orders = fields.List(fields.Dict())
+    daily_forward_reports = fields.List(fields.Dict())
     limitations = fields.List(fields.String())
 
 
@@ -114,7 +115,7 @@ class AutomationLatencyEnvelopeSchema(Schema):
 class AutomationDailyReportEnvelopeSchema(Schema):
     code = fields.Integer()
     msg = fields.String()
-    data = fields.Dict(metadata={'description': 'generated_at and nullable report. HK local day; task/symbol decisions, triggers, risk transitions, latency nearest-rank P50/P95, scored/missing coverage and per-horizon gross hypothetical PnL. WAIT excluded from hit denominator; fees/taxes excluded. Equity change covers observed samples only.'})
+    data = fields.Dict(metadata={'description': 'generated_at and nullable report. Market-local day; forward_scoring contains frozen screener run IDs, plan turnover and 1d/5d baseline hit rates/excess returns; task/symbol decisions, triggers, risk transitions, latency nearest-rank P50/P95, scored/missing coverage and per-horizon gross hypothetical PnL. WAIT excluded from hit denominator; fees/taxes excluded. Equity change covers observed samples only.'})
 
 
 class AutomationScoresEnvelopeSchema(Schema):

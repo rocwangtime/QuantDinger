@@ -27,6 +27,7 @@ def ensure_schema():
         sql = (Path(__file__).resolve().parents[3] / 'migrations/20261004_agent_automation.sql').read_text()
         sql += (Path(__file__).resolve().parents[3] / 'migrations/20261006_agent_performance.sql').read_text()
         sql += (Path(__file__).resolve().parents[3] / 'migrations/20261012_agent_scoring.sql').read_text()
+        sql += (Path(__file__).resolve().parents[3] / 'migrations/20261015_us_forward_scores.sql').read_text()
         with get_db_connection() as db:
             cur = db.cursor()
             cur.execute(sql)
@@ -56,6 +57,8 @@ def task(user_id, task_id):
 
 
 def create(user_id, name, config):
+    from app.services.automation.domain import validate_universe_source
+    validate_universe_source(config)
     from app.services.agent_trade_intents import account_scope
     from app.utils.agent_auth import generate_token
     from app.services.automation.symbol_config import DEFAULTS, US_DEFAULTS, materialize
@@ -105,6 +108,9 @@ def set_active(user_id, task_id, active, baseline=None, baseline_prices=None, ex
                 raise ValueError('Task not found')
             if active and row['config'].get('symbol_params') and (row['state'] or {}).get('risk', {}).get('halted'):
                 raise ValueError('Manual risk reset is required before resuming')
+            if active:
+                from app.services.automation.domain import validate_universe_source
+                validate_universe_source(row['config'])
             if row['active'] == active:
                 db.commit()
                 return row
@@ -147,6 +153,8 @@ def set_active(user_id, task_id, active, baseline=None, baseline_prices=None, ex
 
 
 def edit(user_id, task_id, name, config, symbol_params=None, expected_revision=None):
+    from app.services.automation.domain import validate_universe_source
+    validate_universe_source(config)
     from app.services.agent_trade_intents import account_scope
     account_scope(user_id, {'broker':'futu','credential_id':config['credential_id'],'market':config['market']})
     with get_db_connection() as db:
@@ -291,6 +299,10 @@ def submission_guard(row, run, order=None):
             live = cur.fetchone()
             if STOP.is_set() or runtime_changed(run) or not live or not live['active'] or live['revision'] != run['revision'] or live['cancel_requested'] or live['status'] != 'executing' or live['expires_at'] <= datetime.now(timezone.utc):
                 raise ValueError('Task paused, cancelled or expired before broker submission')
+            from app.services.automation.domain import validate_universe_source
+            validate_universe_source(live['config'])
+            if live['config'].get('universe_source'):
+                raise ValueError('Screener plans cannot submit orders')
             from app.services.automation.performance import purchase_allowed
             if order and order['side'] == 'buy' and not purchase_allowed(live, order['symbol']):
                 raise ValueError('独立保护已暂停买入，或账户行情监测已过期')

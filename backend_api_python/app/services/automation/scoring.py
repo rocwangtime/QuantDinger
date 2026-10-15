@@ -45,6 +45,10 @@ def register(run):
     stamp = decision_timestamp(result)
     if not stamp:
         return  # Never infer a decision time from later execution completion.
+    from app.services.automation import forward_scoring
+    forward_scoring.register(run)
+    if evidence.get('screener'):
+        return
     at = datetime.fromtimestamp(stamp, timezone.utc)
     for item in result.get('items', []):
         instrument = evidence.get('instruments', {}).get(item['symbol'], {})
@@ -167,11 +171,11 @@ def _tick(now=None):
             OR result->'fast_latency'->'timestamps'->>'decision' IS NOT NULL)
         AND evidence->'task_config'->>'market' IN ('HKStock','USStock')
         AND (SELECT COUNT(*) FROM qd_agent_decision_scores s WHERE s.run_id=r.id) <
-            4*jsonb_array_length(COALESCE(r.result->'items','[]'::jsonb))
+            (CASE WHEN jsonb_exists(r.evidence,'screener') THEN 2 ELSE 4 END)*jsonb_array_length(COALESCE(r.result->'items','[]'::jsonb))
         ORDER BY id LIMIT 100""")
     for run in runs:
         register(run)
-    scores = store.query('''SELECT * FROM qd_agent_decision_scores WHERE outcome IS NULL AND due_at<=%s
+    scores = store.query('''SELECT * FROM qd_agent_decision_scores WHERE horizon IN ('5m','30m','close','next_close') AND outcome IS NULL AND due_at<=%s
         AND (checked_at IS NULL OR checked_at<%s) ORDER BY checked_at NULLS FIRST,due_at LIMIT 100''',
         (now-timedelta(seconds=90), now-timedelta(minutes=10)))
     started = time.monotonic()
@@ -195,7 +199,7 @@ def _tick(now=None):
     # Refresh only reconciliation fields; historical horizon marks are immutable.
     completed = store.query('''SELECT s.* FROM qd_agent_decision_scores s
         JOIN qd_agent_automations t ON t.id=s.task_id
-        WHERE s.outcome IS NOT NULL AND EXISTS (SELECT 1 FROM qd_agent_trade_intents i
+        WHERE s.horizon IN ('5m','30m','close','next_close') AND s.outcome IS NOT NULL AND EXISTS (SELECT 1 FROM qd_agent_trade_intents i
             WHERE i.agent_token_id=t.token_id AND i.order_spec->>'strategy_version'=
                 'automation:'||s.task_id::text||':'||s.run_id::text AND i.updated_at>s.checked_at)
         ORDER BY s.checked_at LIMIT 100''')
@@ -205,6 +209,8 @@ def _tick(now=None):
         store.query('''UPDATE qd_agent_decision_scores SET outcome=outcome || %s::jsonb,checked_at=%s
             WHERE run_id=%s AND symbol=%s AND horizon=%s RETURNING run_id''',
             (store.dumps(metrics), now, score['run_id'], score['symbol'], score['horizon']))
+    from app.services.automation import forward_scoring
+    forward_scoring.tick(now)
     generate_reports(now)
 
 
@@ -281,11 +287,13 @@ def daily(row, start, end):
     samples = store.query('SELECT sampled_at,report FROM qd_agent_automation_samples WHERE task_id=%s AND sampled_at>=%s AND sampled_at<%s ORDER BY sampled_at', (row['id'], start, end))
     observed = [s for s in samples if s['report'].get('equity') is not None]
     observed_pnl = float(observed[-1]['report']['equity'])-float(observed[0]['report']['equity']) if len(observed)>1 else None
+    from app.services.automation.forward_scoring import metrics
     return {'day': start.date().isoformat(), 'timezone': str(start.tzinfo), 'currency': 'USD' if row['config']['market'] == 'USStock' else 'HKD', 'task_id': row['id'],
         'decisions': sum('items' in (r['result'] or {}) for r in runs),
         'decisions_without_reliable_timestamp': sum('items' in (r['result'] or {}) and not decision_timestamp(r['result']) for r in runs),
         'triggers': triggers, 'triggered_runs': len(runs), 'symbols': symbols, 'risk_events': events,
         'horizons': summarize(scores, row['config']['market']),
+        'forward_scoring': metrics(runs, scores),
         'latency': latency.summarize(runs),
         ('observed_equity_change_usd' if row['config']['market'] == 'USStock' else 'observed_equity_change_hkd'): observed_pnl,
         'observed_equity_window': [observed[0]['sampled_at'], observed[-1]['sampled_at']] if observed else [],

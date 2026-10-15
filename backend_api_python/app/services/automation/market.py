@@ -36,6 +36,9 @@ def account_snapshot(user_id, config):
 
 
 def build_evidence(row, *, news=True, cancelled=lambda:False):
+    if row['config'].get('universe_source'):
+        from app.services.automation.shortlist import build_evidence as shortlist_evidence
+        return shortlist_evidence(row, news=news, cancelled=cancelled)
     from app.services.futu_trading.quote_client import FutuQuoteClient
     from app.services.futu_trading.execution_quote import describe_futu_quote
     from app.services.futu_trading.config import config_from_exchange_config
