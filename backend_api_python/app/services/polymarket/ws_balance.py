@@ -52,7 +52,7 @@ class RateBalancer:
 
     def receive(self, raw, shard):
         try:
-            assets = event_assets(json.loads(raw))
+            assets = event_assets(json.loads(raw) if isinstance(raw, (str, bytes)) else raw)
         except (ValueError, TypeError, AttributeError):
             return
         with self.lock:

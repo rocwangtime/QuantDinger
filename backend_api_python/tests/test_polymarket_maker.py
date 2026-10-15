@@ -51,8 +51,8 @@ def test_strict_through_partial_size_no_book_fills_and_idempotence():
     assert m.state['markets']['42']['qty'] == ['0', '0']
     assert m.trade('42', 0, print_(), NOW + 100) == 3
     assert m.trade('42', 0, print_(), NOW + 100) == 0
-    assert m.trade('42', 0, print_('next', size='100'), NOW + 100) == 7
-    assert Decimal(a.state['positions']) == Decimal('4.9')
+    assert m.trade('42', 0, print_('next', size='100'), NOW + 100) == 0
+    assert Decimal(a.state['positions']) == Decimal('1.47')
     assert a.equity() == 5000
 
 
@@ -62,7 +62,7 @@ def test_at_price_queue_and_partial_fills():
     assert m.trade('42', 1, print_('a', price='.50', size='3'), NOW + 100) == 0
     assert m.trade('42', 1, print_('b', price='.50', size='3'), NOW + 100) == 2
     assert m.state['markets']['42']['quotes'][1]['ahead'] == '0'
-    assert m.trade('42', 1, print_('c', price='.50', size='2'), NOW + 100) == 2
+    assert m.trade('42', 1, print_('c', price='.50', size='2'), NOW + 100) == 0
 
 
 @pytest.mark.parametrize('change', [dict(side='BUY'), dict(size=None), dict(price='.51'), dict(exchange_ms=None), dict(exchange_ms=NOW - 1), dict(exchange_ms=NOW + 1000), dict(received_ms=NOW - 1)])
@@ -195,3 +195,17 @@ def test_fractional_repeated_pairing_releases_exact_cost_basis():
         m.settle('42', 'Down', NOW + 300000)
         assert Decimal(a.state['positions']) == Decimal(a.state['locked']) == 0
         assert a.equity() - 5000 == Decimal(m.stats(NOW)['net_pnl'])
+
+
+def test_overfilled_side_pauses_and_pairing_side_recovers_at_reduced_caps():
+    a, m = setup(dict(market_cap='3', global_cap='3'))
+    assert m.trade('42', 0, print_(size='100'), NOW + 100) == 3
+    m.config.update(market_cap='1', global_cap='1')
+    m.quote(market(), books(NOW + 200), 60000, NOW + 200)
+    row = m.state['markets']['42']
+    assert Decimal(row['quotes'][0]['remaining']) == 0
+    assert Decimal(row['quotes'][1]['remaining']) == 3
+    assert m.trade('42', 0, print_('blocked', size='100', at=NOW + 300), NOW + 300) == 0
+    assert m.trade('42', 1, print_('pair', size='100', at=NOW + 300), NOW + 300) == 3
+    assert m.exposure() == 0
+    assert Decimal(a.state['locked']) == 0

@@ -10,7 +10,7 @@ from .paper_account import day_key, utc
 from .updown import timestamp
 
 TAG = 'maker_complete_set_v1'
-DEFAULTS = dict(combined_bid='.99', market_cap='100', global_cap='500', quote_shares='10',
+DEFAULTS = dict(combined_bid='.99', market_cap='20', global_cap='100', quote_shares='10',
                 spot_bps='3', stop_seconds='30', mark_seconds='5', max_age_ms='2000')
 
 
@@ -92,7 +92,7 @@ class Maker:
             return
         if row['quotes']:
             moved = abs(number(spot) / number(row['spot']) - 1) * 10000 >= number(self.config['spot_bps'])
-            if fingerprint == row['book'] and not moved and all(number(q['remaining']) > 0 for q in row['quotes']):
+            if fingerprint == row['book'] and not moved and not self.exposure(row) and all(number(q['remaining']) > 0 for q in row['quotes']):
                 return
             self.cancel(row, now)
         tick = number(market['tickSize'])
@@ -105,20 +105,30 @@ class Maker:
         # Reserve worst-case one-sided fills for BOTH caps, across every live quote.
         others = [r for r in self.state['markets'].values() if r is not row]
         outstanding = sum((max((number(q['remaining']) for q in r['quotes']), default=ZERO) for r in others), ZERO)
-        size = min(number(self.config['quote_shares']), number(self.config['market_cap']) - self.exposure(row),
-                   number(self.config['global_cap']) - self.exposure() - outstanding,
-                   min(Decimal('1000'), number(self.account.config['trade_cap']), number(self.account.state['free'])) / sum(prices))
-        size = (size / Decimal('.01')).to_integral_value(rounding=ROUND_DOWN) * Decimal('.01')
-        if size <= 0 or self.account.daily(now)['loss_stop']:
+        imbalance = number(row['qty'][0]) - number(row['qty'][1])
+        sizes = []
+        for i in range(2):
+            delta = imbalance if i == 0 else -imbalance
+            # Pause the overfilled leg immediately; keep the pairing leg open,
+            # including at/above the cap after a configuration reduction.
+            room = (-delta if delta < 0 else
+                    min(number(self.config['market_cap']),
+                        number(self.config['global_cap']) - self.exposure() - outstanding))
+            sizes.append(ZERO if delta > 0 else max(ZERO, min(number(self.config['quote_shares']), room)))
+        reserve = sum(p * z for p, z in zip(prices, sizes))
+        budget = min(Decimal('1000'), number(self.account.config['trade_cap']), number(self.account.state['free']))
+        factor = min(Decimal(1), budget / reserve) if reserve else ZERO
+        sizes = [(z * factor).quantize(Decimal('.01'), rounding=ROUND_DOWN) for z in sizes]
+        reserve = sum(p * z for p, z in zip(prices, sizes))
+        if reserve <= 0:
             return
-        reserve = size * sum(prices)
         self.account.transfer('free', -reserve)
         self.account.transfer('locked', reserve)
         row.update(reserved=str(reserve), spot=str(spot), book=fingerprint, joined=now,
             quotes=[dict(price=str(p), remaining=str(size), ahead=str(sum((number(l['size']) for l in b['bids'] if number(l['price']) == p), ZERO)) if p >= min(number(l['price']) for l in b['bids']) else None, seen=[])
-                    for p, b in zip(prices, books)])
-        self.stats(now)['quotes'] += 2
-        for leg in ('up', 'down'):
+                    for p, size, b in zip(prices, sizes, books)])
+        self.stats(now)['quotes'] += sum(z > 0 for z in sizes)
+        for leg, size in zip(('up', 'down'), sizes):
             self.add(now, 'quoted_' + leg, size)
         self.account.event('maker_quote', now)
         self.audit('quote', market['id'], now, dict(quotes=row['quotes'], spot=str(spot), books=books))
@@ -148,7 +158,12 @@ class Maker:
             q['ahead'] = str(number(q['ahead']) - consumed)
             available -= consumed
         # Bound ledger precision; never round a partial print up.
-        qty = min(available, number(q['remaining'])).quantize(Decimal('.00000001'), rounding=ROUND_DOWN).normalize()
+        delta = number(row['qty'][index]) - number(row['qty'][1 - index])
+        outstanding = sum((max((number(q['remaining']) for q in r['quotes']), default=ZERO)
+                           for r in self.state['markets'].values() if r is not row), ZERO)
+        room = ZERO if delta > 0 else (-delta if delta < 0 else max(ZERO, min(
+            number(self.config['market_cap']), number(self.config['global_cap']) - self.exposure() - outstanding)))
+        qty = min(available, number(q['remaining']), room).quantize(Decimal('.00000001'), rounding=ROUND_DOWN).normalize()
         if qty <= 0:
             return ZERO
         cost = qty * bid
