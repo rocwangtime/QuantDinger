@@ -117,6 +117,7 @@ def database():
     with connection.cursor() as cur:
         cur.execute((ROOT/'migrations/20261015_us_screener.sql').read_text())
         cur.execute((ROOT/'migrations/20261015_us_screener_quality.sql').read_text())
+        cur.execute((ROOT/'migrations/20261015_us_screener_rth.sql').read_text())
     connection.commit()
     yield connection
     connection.close()
@@ -137,7 +138,7 @@ def test_persistence_and_partial_failure(database):
 def test_execute_records_every_symbol(database):
     class Provider:
         def __init__(self, deadline): pass
-        def quotes(self, symbols): return {}, {'BAD':'quote_batch_failed'}
+        def quotes(self, symbols, as_of=None): return {}, {'BAD':'quote_batch_failed'}
         def bars(self, symbol, day): return bars()
         def close(self): pass
     with patch.dict(os.environ,DATABASE_URL=DSN):
@@ -147,7 +148,8 @@ def test_execute_records_every_symbol(database):
         result=store.read(run['id'])
         assert result['status']=='partial'
         assert len(result['symbols'])==2
-        assert all(r['exclusion_reasons'] for r in result['symbols'])
+        assert next(r for r in result['symbols'] if r['symbol'] == 'MISSING')['included']
+        assert 'spread_unverified' in next(r for r in result['symbols'] if r['symbol'] == 'MISSING')['flags']
         store.query('DELETE FROM qd_us_screener_runs WHERE id=%s',(run['id'],))
 
 
@@ -329,7 +331,7 @@ def test_coverage_threshold(database, failed, threshold, status):
     symbols = ['T'+str(i) for i in range(10)]
     class Provider:
         def __init__(self, deadline): pass
-        def quotes(self, symbols): return {}, {s:'quote_batch_failed' for s in symbols[:failed]}
+        def quotes(self, symbols, as_of=None): return {}, {s:'quote_batch_failed' for s in symbols[:failed]}
         def bars(self, symbol, day): return bars()
         def close(self): pass
     run = store.create(date(2026,10,14), {**parameters(), 'min_coverage':threshold}, 'coverage:'+str(datetime.now(timezone.utc)))
@@ -382,3 +384,96 @@ def test_nasdaq_failure_is_cached_unknown(database):
             assert get.call_count == 1
     finally:
         store.query("DELETE FROM qd_us_screener_earnings_cache WHERE symbol='NASDAQ_FAILURE'")
+
+
+@pytest.mark.parametrize('stamp,expected', [
+    ('2026-10-14T19:29:00+00:00', None),
+    ('2026-10-14T19:30:00+00:00', date(2026,10,14)),
+    ('2026-10-14T19:58:00+00:00', None),
+    ('2026-11-27T17:30:00+00:00', date(2026,11,27)),
+    ('2026-11-27T17:58:00+00:00', None),
+    ('2026-11-26T17:30:00+00:00', None),
+    ('2026-03-06T20:30:00+00:00', date(2026,3,6)),
+    ('2026-03-09T19:30:00+00:00', date(2026,3,9)),
+])
+def test_rth_capture_window(stamp, expected):
+    assert core.capture_session(datetime.fromisoformat(stamp)) == expected
+
+
+def test_unverified_spread_policy():
+    row = core.evaluate('A', bars(), {}, [], date(2026,10,14), parameters())
+    assert row['features']['spread_estimate_bps'] > 10
+    assert row['features']['spread_bps'] is None
+    assert 'spread_unverified' in row['flags']
+    assert not row['exclusion_reasons']
+    with patch.dict(os.environ, US_SCREENER_UNVERIFIED_SPREAD='exclude'):
+        row = core.evaluate('A', bars(), {}, [], date(2026,10,14), parameters())
+    assert row['exclusion_reasons'] == ['spread_unverified']
+    with patch.dict(os.environ, US_SCREENER_UNVERIFIED_SPREAD='invalid'):
+        with pytest.raises(ValueError):
+            parameters()
+
+
+def test_capture_persistence_once_and_session_isolation(database):
+    from app.services.us_screener.capture import capture
+    from app.services.us_screener.data import FutuData
+    now = datetime.fromisoformat('2026-10-14T19:31:00+00:00')
+    quote = {'bid_price':'99.99','ask_price':'100.01','update_time':'2026-10-14 15:30:30'}
+    factory = MagicMock()
+    factory.return_value.quotes.return_value = ({'RTH_TEST':quote}, {})
+    store.query('DELETE FROM qd_us_screener_quote_captures WHERE session_date=%s', (now.date(),))
+    try:
+        with patch.dict(os.environ, US_SCREENER_RTH_CAPTURE_ENABLED='true'), patch('app.services.universe.UniverseService.resolve_members', return_value=[{'symbol':'RTH_TEST'}]):
+            assert capture(now, provider_factory=factory)['captured'] == 1
+            assert capture(now, provider_factory=factory)['reason'] == 'already_captured'
+        factory.assert_called_once()
+        factory.return_value.close.assert_called_once()
+        client = FutuData.__new__(FutuData)
+        assert client.quotes(['RTH_TEST'], as_of=now.date()) == ({'RTH_TEST':quote}, {})
+        assert client.quotes(['RTH_TEST'], as_of=date(2026,10,13)) == ({}, {})
+    finally:
+        store.query("DELETE FROM qd_us_screener_quote_cache WHERE symbol='RTH_TEST'")
+        store.query('DELETE FROM qd_us_screener_quote_captures WHERE session_date=%s', (now.date(),))
+
+
+def test_no_eligible_is_partial(database):
+    class Provider:
+        def __init__(self, deadline): pass
+        def quotes(self, symbols, as_of=None): return {}, {}
+        def bars(self, symbol, day): return bars()
+        def close(self): pass
+    run = store.create(date(2026,10,14), {**parameters(), 'unverified_spread':'exclude'}, 'empty:'+str(datetime.now(timezone.utc)))
+    try:
+        with patch('app.services.universe.UniverseService.resolve_members', return_value=[{'symbol':'A'}]), patch('app.services.fundamental_data.screener_earnings_dates', return_value=[]):
+            execute(run['id'], Provider)
+        result = store.read(run['id'])
+        assert result['status'] == 'partial'
+        assert result['error'] == result['regime']['reason'] == 'no_eligible_symbols'
+        assert result['counts']['included'] == 0
+    finally:
+        store.query('DELETE FROM qd_us_screener_runs WHERE id=%s', (run['id'],))
+
+
+def test_capture_disabled_and_outside_session():
+    from app.services.us_screener.capture import capture
+    with patch.dict(os.environ, US_SCREENER_ENABLED='false', US_SCREENER_RTH_CAPTURE_ENABLED='false'), patch.object(store, 'query') as query:
+        assert capture()['reason'] == 'capture_disabled'
+        query.assert_not_called()
+    with patch.dict(os.environ, US_SCREENER_RTH_CAPTURE_ENABLED='true'), patch.object(store, 'query') as query:
+        assert capture(datetime.fromisoformat('2026-10-14T21:00:00+00:00'), scheduled=False)['reason'] == 'outside_capture_window'
+        query.assert_not_called()
+
+
+def test_rth_migration_repairs_legacy_empty_completion(database):
+    run = store.create(date(2026,10,14), parameters(), 'legacy:'+str(datetime.now(timezone.utc)))
+    try:
+        store.finish(run['id'], [], {}, 'completed')
+        with database.cursor() as cur:
+            for _ in range(2):
+                cur.execute((ROOT/'migrations/20261015_us_screener_rth.sql').read_text())
+        database.commit()
+        result = store.read(run['id'])
+        assert result['status'] == 'partial'
+        assert result['error'] == 'no_eligible_symbols'
+    finally:
+        store.query('DELETE FROM qd_us_screener_runs WHERE id=%s', (run['id'],))

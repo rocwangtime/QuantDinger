@@ -61,7 +61,10 @@ Extended-session bid/ask values never enter the spread filter.
     `2 tanh(alpha/2) × 10,000` across pairs. This Corwin–Schultz (2012)
     high/low estimator removes a two-day volatility component; it is an estimate,
     can floor at zero, and is not an executable spread or a substitute for measured
-    quotes in execution. The threshold is unchanged. No additional Futu API calls.
+    quotes in execution. Store this only in `spread_estimate_bps`; `spread_bps` is null. Flag
+    `spread_unverified` and permit eligibility by default.
+    `US_SCREENER_UNVERIFIED_SPREAD=exclude` excludes unverified symbols.
+    The 10 bps cutoff applies only to observed RTH quotes.
 * Earnings dates within three XNYS sessions on either side of the as-of date are
   excluded (including the earnings day). Holidays and weekends do not count.
 * Unknown earnings: `US_SCREENER_EARNINGS_UNKNOWN=flag` (default) permits
@@ -186,3 +189,24 @@ the matching frontend build. The scheduler-worker and trading-worker have no new
 screener responsibilities. Migration/bootstrap has existing unrelated migrations;
 review those separately under the normal deployment procedure. Do not activate
 Agent tasks or any trading switch as part of enabling this research schedule.
+
+## Regular-session quote capture
+
+`US_SCREENER_ENABLED=true` or `US_SCREENER_RTH_CAPTURE_ENABLED=true` enables a
+bounded maintenance task. The minute tick captures once per XNYS session between
+close minus 30 minutes and close minus 2 minutes (15:30–15:58 ET normally,
+12:30–12:58 on half days). Holidays and DST use the exchange calendar.
+The read-only Futu provider batches at most 50 symbols with its existing rate limit.
+Only valid RTH bid/ask quotes updated within 120 seconds of capture are persisted.
+The cache is keyed by symbol and session, retained for 14 calendar days, and read
+for the exact run `as_of`; after-hours snapshots never overwrite it.
+
+Migration `20261015_us_screener_rth.sql` replaces legacy transient cache keys and
+adds per-session capture admission. Failed/partial captures remain recorded and
+are not retried that session; uncaptured symbols follow the unverified policy.
+Manual capture: `python -m app.commands.us_screener --capture-now`, with either
+enable flag, inside RTH only. The CLI uses a bounded child process.
+
+A run with zero shortlisted symbols is `partial`, with error and regime reason
+`no_eligible_symbols`, regardless of coverage, and cannot supply an automation
+shortlist.

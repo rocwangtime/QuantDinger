@@ -10,8 +10,29 @@ def child(run_id):
     execute(run_id)
 
 
+def capture_child():
+    from app.services.us_screener.capture import capture
+    print(capture(scheduled=False))
+
+
 def main():
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--capture-now', action='store_true', help='Capture quotes once for today, only inside RTH and with capture enabled')
+    args = parser.parse_args()
     os.environ['QD_PROCESS_ROLE'] = 'cli'
+    if args.capture_now:
+        worker = multiprocessing.get_context('spawn').Process(target=capture_child)
+        worker.start()
+        worker.join(95)
+        if worker.is_alive():
+            worker.terminate()
+            worker.join(5)
+            if worker.is_alive():
+                worker.kill()
+                worker.join(5)
+            raise SystemExit('Capture exceeded runtime budget')
+        raise SystemExit(worker.exitcode)
     from app.services.us_screener import store
     from app.services.us_screener.service import parameters, latest_closed_day
     import uuid
