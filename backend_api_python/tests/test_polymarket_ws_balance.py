@@ -144,3 +144,33 @@ def test_checkpoint_failure_keeps_dirty_day_for_retry(monkeypatch):
         stats.persist()
     assert stats.dirty == {'2026-10-13'}
     assert stats.days['2026-10-13']['reconnect_count'] == 1
+
+
+
+def test_manager_applies_weighted_whole_market_rebalance_and_cooldown(monkeypatch):
+    from types import SimpleNamespace
+    monkeypatch.setattr(observer, '_STOP', threading.Event())
+    monkeypatch.setattr(observer, '_DAILY_STATS', DailyStats())
+    monkeypatch.setenv('POLYMARKET_OBSERVER_WS_REBALANCE_SECONDS', '1')
+    monkeypatch.setenv('POLYMARKET_OBSERVER_WS_REBALANCE_MIN_SECONDS', '10')
+    monkeypatch.setattr(observer, '_PIPELINE', None)
+    m = observer.MarketConnections()
+    m.markets = [dict(id=str(i), yesAssetId=f'{i}y', noAssetId=f'{i}n') for i in range(16)]
+    groups = observer.shard_markets(m.markets, 4)
+    initial = {a: i for i, group in groups.items() for a in observer.subscription_assets(group)}
+    b = balancer(monkeypatch, initial, {a: (7 if i == 3 else 1) for a, i in initial.items()})
+    m.balancer = b
+    m.states = {i: dict(assets=[a for a in initial if initial[a] == i], socket=None,
+                        connected=False, lock=threading.RLock(), thread=SimpleNamespace(is_alive=lambda: True))
+                for i in range(4)}
+    monkeypatch.setattr(observer, 'time', SimpleNamespace(monotonic=lambda: 1))
+    m.tick()
+    assert b.imbalance(b.loads(b.assignment)) < b.imbalance(b.loads(initial))
+    assert b.last_rebalance == 1
+    assert next(iter(m.stats.days.values()))['rebalance_count'] == 1
+    for market in m.markets:
+        assert b.assignment[market['yesAssetId']] == b.assignment[market['noAssetId']]
+    applied = dict(b.assignment)
+    # A repeated catalogue refresh must not undo the assignment or bypass cooldown.
+    m.sync(m.markets)
+    assert b.assignment == applied
