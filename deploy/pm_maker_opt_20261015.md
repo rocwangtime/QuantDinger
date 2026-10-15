@@ -1,6 +1,6 @@
 # Polymarket paper maker optimization — 2026-10-15
 
-基线：最新 `origin/main`，`f4c68a5`（含 PR #63）。分支：`feat/pm-maker-opt-20261015`。
+分支基于 `f4c68a5`，本次以 `git revert -m 1 f4c68a5` 回退 PR #63；observer 和 ws pipeline 测试已核对与 `dac13bf` 完全一致，保留 PR #64 做市逻辑。分支：`feat/pm-maker-opt-20261015`。
 仅改纸面账户、虚拟 maker、参数示例和测试；未改实盘、PAPER_AUTO、钱包、签名，无密钥写入。未合并、未部署。无需前端变更：纸面账户现有状态接口返回 maker 配置、筛选历史和收益元数据。
 
 ## 行为
@@ -58,15 +58,21 @@
 
 因此 `net_pnl` 只含配对及结算的实际纸面损益；不计 rebate，也不重复扣减已经包含在成本内的未配对结算损失。`net_pnl_including_estimated_rebate` 兼容字段现在等于 `net_pnl`；`estimated_rebate=null`，`rebate_status=unknown_pool_not_credited`。旧的固定比例值仅作为 `rebate_scenario_only` 单独展示，不进入现金或收益。报告附两条官方来源。纸面账本不模拟真实 rebate 池、每日分配或实际钱包入账。
 
+## 回退与测试前提修复
+
+PR #63 上线后出现订阅分片 1/2/2/43、热门市场拆双腿排队 2.6–3.6 秒、单分片丢 16388 帧、过期拒绝约 3400 次/小时（线上观测由任务提供）。本分支回退该 PR 的 observer、专项测试及对应文档，恢复 dac13bf 行为；未触碰运行环境。
+
+两个 Postgres 集成测试的旧前提为 .99 报价和。默认时间折让在 fixture 的 10/300 秒进度使预算向下取 tick 为 .98，首腿报价从 .49 降为 .48；录制盘口只覆盖 .50，.48 同价队列未知，成交路径正确保守拒绝。账本重试及录制结算测试因此显式设置测试环境 TIME_DISCOUNT=0，恢复穿价成交前提，不改变生产默认值或安全门槛。账本报告断言同时更新为返利情景不入账、estimated_rebate=null 的现有策略。
+
+新增回归验证默认时间折让的 .98 预算、.48 未知队列同价拒绝及 .47 穿价可成交；另以相同有效套利机会对照验证 taker 开启产生 attempt，关闭时重复 signal 不产生 attempt、事件或 pending。
+
 ## 验证
 
-最终工作区结果：
+本地 PG18 测试库：127.0.0.1:5432/qd_automation_test；DATABASE_URL、AUTOMATION_TEST_DATABASE_URL、QD_TEST_POSTGRES_DSN 均指向该库，不涉及生产库。命令在 backend_api_python 下执行，使用 .venv。
 
-- 后端全量 `.venv/bin/pytest -q`：**4167 passed, 184 skipped, 1 failed, 44 warnings**，70.66 秒。唯一失败为下面已在原版复现的数据库环境依赖；未配置数据库或密钥来绕过该失败。可选集成测试按现有环境跳过，未声称通过。
-- Maker 规则及本次优化专项测试：**39 passed**。
+- 全量 `.venv/bin/pytest -q`（上述三个测试库变量均设置）：**4325 passed, 24 skipped, 59 warnings**，183.97 秒。
 - 全后端 `.venv/bin/ruff check .`：**All checks passed**。
 - `git diff --check`：通过。
+- `git diff dac13bf -- backend_api_python/app/services/polymarket/observer.py backend_api_python/tests/test_polymarket_ws_pipeline.py`：空差异。
 
-新增测试覆盖开关、边界旧挂单、补齐、快速跳价、薄盘、深度下降、冷却、动态时间/波动预算、tick 重报、库存偏移、被吃暂停/过期、历史筛选/白名单/重启、参数校验和 rebate 排除。
-
-原版 f4c68a5 单独运行 `tests/test_trading_recovery_incident.py::test_close_dispatch_continues_while_exchange_sync_blocks` 同样失败：`DATABASE_URL environment variable is not set`。未更改该测试或实盘相关实现。
+吃单默认关闭、库存 cap 20/100 不变；仅纸面测试和 observer 回退，未更改实盘/PAPER_AUTO/钱包，未写密钥。未合并、未部署。
