@@ -9,7 +9,7 @@ from .engine import EPS, IMPLEMENTATION_HASH, ONE, ZERO, digest, fee, number, pu
 VERSION = 'paper-account-2'
 SOURCE_HASH = hashlib.sha256(Path(__file__).read_bytes() + Path(__file__).with_name('account_history.py').read_bytes()
                              + IMPLEMENTATION_HASH.encode()).hexdigest()
-DEFAULTS = dict(initial_capital='5000', trade_cap='1000', free_fraction='0.20', locked_fraction='0.60',
+DEFAULTS = dict(taker_enabled=False, initial_capital='5000', trade_cap='1000', free_fraction='0.20', locked_fraction='0.60',
                 loss_fraction='0.02', min_edge_bps='10', full_edge_bps='100', min_ticket='10',
                 size_step='0.01', slippage='0', competitor_top='0.50', competitor_other='0',
                 merge_cost='0.02', merge_enabled=True, settlement_seconds=60, cooldown_seconds=60,

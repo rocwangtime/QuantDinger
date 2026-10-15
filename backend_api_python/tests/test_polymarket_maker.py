@@ -3,8 +3,11 @@ from decimal import Decimal
 
 import pytest
 
-from app.services.polymarket.maker import Maker, DEFAULTS, rebate, enabled
+from app.services.polymarket.maker import Maker, DEFAULTS as PRODUCTION_DEFAULTS, rebate, enabled
 from app.services.polymarket.paper_account import Account
+
+DEFAULTS = {**PRODUCTION_DEFAULTS, 'time_discount': '0', 'volatility_discount': '0',
+            'spot_jump_bps': '10000000', 'inventory_skew': '0', 'flow_skew': '0', 'jump_bps': '10000000', 'thin_shares': '0', 'depth_drop': '1'}
 
 NOW = 1780000000000
 

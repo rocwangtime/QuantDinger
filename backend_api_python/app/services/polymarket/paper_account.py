@@ -135,6 +135,8 @@ class Account:
             raise ValueError('paper_account_negative_capital')
 
     def signal(self, market, books, now, latency):
+        if not self.config['taker_enabled']:
+            return None
         self.rollover(now)
         if market.get('endDate') and timestamp(market['endDate']) <= utc(now):
             return None

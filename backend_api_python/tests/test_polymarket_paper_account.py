@@ -66,7 +66,7 @@ def test_lock_free_loss_stop_and_cooldown_limits():
     assert number(sizing(free='1000')['reserve']) <= 200
     assert sizing(stopped=True)['reason'] == 'daily_loss_stop'
     assert sizing(cooldown=True)['reason'] == 'cooldown'
-    a = Account(dict(merge_cost='0'))
+    a = Account(dict(taker_enabled=True, merge_cost='0'))
     a.signal(market(), books(), 1000, dict(one_way_ms=100))
     assert a.signal(market(), books(), 1050, dict(one_way_ms=100)) is None
     a.transfer('free', -number('200'))
@@ -100,7 +100,7 @@ def test_competitor_share_fok_and_subsequent_levels():
 
 
 def run(second_bad=False, residual=False, config=None):
-    a = Account(dict(merge_cost='0', **(config or {})))
+    a = Account(dict(taker_enabled=True, merge_cost='0', **(config or {})))
     trade = a.signal(market(), books(), 1000, dict(one_way_ms=100))
     def lookup(market, at):
         b = books(depth='10000', bid='.3')
@@ -171,7 +171,7 @@ def test_frozen_replay_matches_without_mutating_evidence(second_bad, residual):
 
 
 def test_first_leg_fok_failure_releases_reservation():
-    a = Account()
+    a = Account({'taker_enabled': True})
     t = a.signal(market(), books(), 1000, dict(one_way_ms=100))
     a.tick(1100, lambda *args: books(depth='1'))
     assert t['status'] == 'not_filled' and number(a.state['free']) == 5000
@@ -200,7 +200,7 @@ def test_account_routes_auth_and_openapi(client, app):
 def test_route_status_shape_and_invalid_filters(app, client, monkeypatch):
     from app.routes import polymarket as routes
     from app.services.polymarket import account_api
-    monkeypatch.setattr(account_api, 'status', lambda: Account().status(1000))
+    monkeypatch.setattr(account_api, 'status', lambda: Account({'taker_enabled': True}).status(1000))
     with app.test_request_context():
         response, status = inspect.unwrap(routes.account_status)()
         assert status == 200 and response.get_json()['data']['mode'] == 'paper'
@@ -231,7 +231,7 @@ def test_unresolved_residual_cost_also_counts_against_deployment_cap():
 
 
 def test_restart_cancellation_replay_and_released_pnl():
-    a = Account()
+    a = Account({'taker_enabled': True})
     t = a.signal(market(), books(), 1000, dict(one_way_ms=100))
     t['evidence']['decision']['reason'] = 'restart_cancelled'
     t['evidence']['restart_cancelled'] = True
@@ -252,7 +252,7 @@ def test_replay_detects_inconsistent_sizing_even_with_valid_bundle_digest():
 
 
 def test_verified_crypto_fee_can_erase_gross_edge_and_no_attempt_is_fabricated():
-    a = Account()
+    a = Account({'taker_enabled': True})
     mkt = {**market(), 'feeRate': '.07', 'market_type': 'up_down'}
     assert a.signal(mkt, books('.49'), 1000, dict(one_way_ms=100)) is None
     assert a.daily(1000)['opportunities'] == a.daily(1000)['attempted'] == 0

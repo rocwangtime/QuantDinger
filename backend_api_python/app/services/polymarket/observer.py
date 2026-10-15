@@ -86,21 +86,8 @@ def ws_apply_event(event, books):
             return [asset]
     if kind == "price_change":
         changes = event.get("price_changes") or (event.get("payload") or {}).get("priceChanges") or []
-        changed = set()
-        # Repeated writes to one price level in a frame have one final value.
-        # History still receives the original event, preserving paper evidence.
-        updates = {}
-        # Avoid an extra full pass for the usual distinct-level frames. A small
-        # duplicate sample selects the burst path; both paths have identical results.
-        compact = len(changes) >= 64 and len({
-            (str(r.get('asset_id') or r.get('assetId') or ''),
-             str(r.get('side', '')).upper() == 'BUY', str(r.get('price')))
-            for r in changes[:8]}) < 8
-        for row in changes if compact else ():
-            key = (str(row.get('asset_id') or row.get('assetId') or ''),
-                   str(row.get('side', '')).upper() == 'BUY', str(row.get('price')))
-            updates[key] = row
-        for row in updates.values() if compact else changes:
+        changed = []
+        for row in changes:
             asset = str(row.get("asset_id") or row.get("assetId") or "")
             if asset not in books:
                 continue
@@ -110,8 +97,8 @@ def ws_apply_event(event, books):
                 books[asset][side].pop(price, None)
             else:
                 books[asset][side][price] = size
-            changed.add(asset)
-        return list(changed)
+            changed.append(asset)
+        return changed
     return []
 
 
@@ -737,11 +724,8 @@ class Pipeline:
             pending = list(self.recording.pending)
             self.recording.pending.clear()
             # Copy while locked; sorting/throttling and queue work occur outside.
-            book_interval = updown.setting('BOOK_MIN_INTERVAL_MS', 1000, 100, 60000) / 1000
-            due_books = {a for a in self.books if a not in self.recording.last_books or
-                         now - self.recording.last_books[a][0] >= book_interval}
             recorded_books = {a: {side: dict(levels) for side, levels in book.items()}
-                              for a, book in self.books.items() if a in due_books} if self.recording.enabled else {}
+                              for a, book in self.books.items()} if self.recording.enabled else {}
             metadata = dict(self.recording.metadata)
             markets, asset_markets = dict(self.markets), dict(self.asset_markets)
             ready = [identity for identity in self.dirty if now - self.last_eval.get(identity, float('-inf')) >= 1]
@@ -889,21 +873,6 @@ def shard_markets(markets, count, previous=None, rates=None):
 
     def weight(market):
         return sum(max(.01, rates.get(a, unknown_weight)) for a in subscription_assets([market]))
-    weights = {str(m['id']): weight(m) for m in markets}
-    def cached_weight(market):
-        return weights[str(market['id'])]
-    weight = cached_weight
-    if count > 1 and len(markets) > 1 and rates:
-        hottest = max(markets, key=weight)
-        if weight(hottest) > sum(weights.values()) / count * 1.25:
-            assets = subscription_assets([hottest])
-            owner = (previous or {}).get(assets[0], 0)
-            owner = owner if owner < count else 0
-            others = [i for i in range(count) if i != owner]
-            remaining = [m for m in markets if m is not hottest]
-            prior = {a: others.index(i) for a, i in (previous or {}).items() if i in others}
-            groups = shard_markets(remaining, count - 1, prior, rates)
-            return {owner: [hottest], **{others[i]: group for i, group in groups.items()}}
     result, loads = {}, [0] * count
     pending = []
     previous = previous or {}
@@ -951,28 +920,6 @@ def shard_markets(markets, count, previous=None, rates=None):
     return {i: group for i, group in result.items() if group}
 
 
-def market_assignment(markets, count, previous, rates):
-    """Keep pairs together unless splitting a dominant pair reduces peak work."""
-    groups = shard_markets(markets, count, previous, rates)
-    target = {a: i for i, group in groups.items() for a in subscription_assets(group)}
-    loads = [sum(rates.get(a, 0) for a, owner in target.items() if owner == i) for i in range(count)]
-    if count < 2 or not sum(loads):
-        return target
-    for market in sorted(markets, key=lambda m: -sum(rates.get(a, 0) for a in subscription_assets([m]))):
-        assets = subscription_assets([market])
-        if sum(rates.get(a, 0) for a in assets) <= sum(loads) / count * 1.25:
-            continue
-        for asset in sorted(assets, key=lambda a: rates.get(a, 0)):
-            source = target[asset]
-            dest = min(range(count), key=lambda i: (loads[i], i))
-            candidate = list(loads)
-            candidate[source] -= rates.get(asset, 0)
-            candidate[dest] += rates.get(asset, 0)
-            if max(candidate) < max(loads) * .9:
-                target[asset], loads = dest, candidate
-    return target
-
-
 class ReceiveQueue:
     """Elastic bounded FIFO; a gap requests snapshots on the existing socket."""
     def __init__(self, maximum, ceiling=None):
@@ -985,9 +932,6 @@ class ReceiveQueue:
         self.lag_seconds = 0
         self.lock_wait_seconds = 0
         self.queue_wait_seconds = 0
-        self.process_seconds = 0
-        self.frames_processed = 0
-        self.process_max_seconds = 0
         self.dropped = 0
         self.high_water = 0
         self.invalid = Event()
@@ -1038,7 +982,8 @@ class MarketConnections:
         if set(subscription_assets(markets)) == set(self.balancer.assignment):
             self.tick()
             return
-        assignment = market_assignment(markets, self.count, self.balancer.assignment, self.balancer.rates)
+        assignments = shard_markets(markets, self.count, self.balancer.assignment, self.balancer.rates)
+        assignment = {a: i for i, group in assignments.items() for a in subscription_assets(group)}
         self.balancer.set_assets(assignment)
         self.apply_assignment(assignment)
         self.tick()
@@ -1172,7 +1117,6 @@ class MarketConnections:
                 except Empty:
                     continue
                 try:
-                    processing_at = time.monotonic()
                     event = json.loads(raw)
                     self.stats.message(index)
                     self.balancer.receive(event, index)
@@ -1185,10 +1129,6 @@ class MarketConnections:
                             if valid:
                                 _PIPELINE.receive(event, frozenset(state['assets']), received_at, inbox, epoch)
                                 inbox.lock_wait_seconds = lock_wait
-                    elapsed = time.monotonic() - processing_at
-                    inbox.process_seconds += elapsed
-                    inbox.process_max_seconds = max(inbox.process_max_seconds, elapsed)
-                    inbox.frames_processed += 1
                 except (ValueError, TypeError, AttributeError):
                     continue
 
@@ -1257,12 +1197,13 @@ class MarketConnections:
         if self.closed or _STOP.is_set():
             return
         now = time.monotonic()
-        # Sample token activity; split dominant pairs only, with hysteresis
+        # Sample token activity, but move whole markets only, with hysteresis
         # and a cooldown to avoid turning load balancing into reconnect churn.
         due = self.reconnect_pending or now - self.balancer.last_check >= self.balancer.interval
         self.balancer.propose(now, self.reconnect_pending)
         if due and self.markets and now - self.balancer.last_rebalance >= self.balancer.minimum:
-            target = market_assignment(self.markets, self.count, self.balancer.assignment, self.balancer.rates)
+            groups = shard_markets(self.markets, self.count, self.balancer.assignment, self.balancer.rates)
+            target = {a: i for i, group in groups.items() for a in subscription_assets(group)}
             old = self.balancer.imbalance(self.balancer.loads(self.balancer.assignment))
             new = self.balancer.imbalance(self.balancer.loads(target))
             if old - new > self.balancer.threshold:
@@ -1289,22 +1230,13 @@ class MarketConnections:
         with _LOCK:
             STATUS.setdefault('rebalance_count', 0)
             STATUS.update(self.balancer.metrics())
-            STATUS['ws_hot_markets'] = sorted(
-                [dict(market_id=m['id'], weight=sum(self.balancer.rates.get(a, 0)
-                      for a in subscription_assets([m])),
-                      shards=sorted({self.balancer.assignment[a] for a in subscription_assets([m])
-                                     if a in self.balancer.assignment})) for m in self.markets],
-                key=lambda row: row['weight'], reverse=True)[:10]
             STATUS['ws_shard_assets'] = [len(self.states.get(i, {}).get('assets', [])) for i in range(self.count)]
             STATUS['ws_receive_queues'] = {
                 i: dict(depth=s['inbox'].queue.qsize(), drops=s.get('receive_drops', 0) + s['inbox'].dropped,
                         high_water=s['inbox'].high_water, capacity=s['inbox'].queue.maxsize,
                         resyncs=s['inbox'].resyncs, lag_seconds=s['inbox'].lag_seconds,
                         queue_wait_seconds=s['inbox'].queue_wait_seconds,
-                        lock_wait_seconds=s['inbox'].lock_wait_seconds,
-                        process_seconds=s['inbox'].process_seconds,
-                        frames_processed=s['inbox'].frames_processed,
-                        process_max_seconds=s['inbox'].process_max_seconds)
+                        lock_wait_seconds=s['inbox'].lock_wait_seconds)
                 for i, s in self.states.items() if 'inbox' in s}
             STATUS['ws_shards'] = self.count
             STATUS['ws_connected'] = sum(bool(s['connected']) for s in self.states.values())

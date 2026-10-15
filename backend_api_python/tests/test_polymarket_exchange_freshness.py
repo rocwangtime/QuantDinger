@@ -210,7 +210,7 @@ def test_taker_independent_admission_and_delayed_lookup(monkeypatch, skew, limit
 def test_unwind_uses_fresh_held_leg_when_complement_is_missing():
     from tests.test_polymarket_paper_account import market, books
     from app.services.polymarket.paper_account import Account
-    a = Account(dict(merge_cost='0', competitor_top='0'))
+    a = Account(dict(taker_enabled=True, merge_cost='0', competitor_top='0'))
     trade = a.signal(market(), books(), 1000, dict(one_way_ms=100))
     def lookup(market, at):
         pair = books(bid='.3')
