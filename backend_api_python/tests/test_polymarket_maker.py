@@ -209,3 +209,18 @@ def test_overfilled_side_pauses_and_pairing_side_recovers_at_reduced_caps():
     assert m.trade('42', 1, print_('pair', size='100', at=NOW + 300), NOW + 300) == 3
     assert m.exposure() == 0
     assert Decimal(a.state['locked']) == 0
+
+
+def test_pairing_quote_survives_repeated_polls_and_other_market_rollover():
+    _, m = setup(dict(market_cap='3', global_cap='6'))
+    assert m.trade('42', 0, print_(size='100'), NOW + 100) == 3
+    m.quote(market(), books(NOW + 200), 60000, NOW + 200)
+    row = m.state['markets']['42']
+    joined, quotes = row['joined'], row['quotes']
+    cancels = m.stats(NOW)['cancels']
+    for step in range(3, 10):
+        m.quote(market('43'), books(NOW + step * 100), 60000, NOW + step * 100)
+        m.quote(market(), books(NOW + step * 100), 60000, NOW + step * 100)
+        assert row['joined'] == joined
+        assert row['quotes'] is quotes
+    assert m.stats(NOW)['cancels'] == cancels

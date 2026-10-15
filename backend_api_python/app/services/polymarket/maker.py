@@ -92,7 +92,12 @@ class Maker:
             return
         if row['quotes']:
             moved = abs(number(spot) / number(row['spot']) - 1) * 10000 >= number(self.config['spot_bps'])
-            if fingerprint == row['book'] and not moved and not self.exposure(row) and all(number(q['remaining']) > 0 for q in row['quotes']):
+            imbalance = number(row['qty'][0]) - number(row['qty'][1])
+            remaining = [number(q['remaining']) for q in row['quotes']]
+            paired = (remaining[0] == 0 and 0 < remaining[1] <= imbalance if imbalance > 0 else
+                      remaining[1] == 0 and 0 < remaining[0] <= -imbalance if imbalance < 0 else
+                      all(q > 0 for q in remaining))
+            if fingerprint == row['book'] and not moved and paired:
                 return
             self.cancel(row, now)
         tick = number(market['tickSize'])
