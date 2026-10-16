@@ -15,6 +15,7 @@ def balancer(monkeypatch, assignment, rates):
     b.set_assets(assignment)
     b.assignment = assignment.copy()
     b.rates = rates.copy()
+    b.measured = {a for a, rate in rates.items() if rate > 0}
     b.pending = rates.copy()  # One-second sample retains the supplied rates.
     b.sample_at = b.last_check = 0
     return b
@@ -54,7 +55,7 @@ def test_ewma_token_frames_include_unknown_book_and_decay(monkeypatch):
     assert b.pending == dict(a=1, b=1)
     b.propose(1)
     first = b.rates['a']
-    assert 0 < first < 1 and first == b.rates['b']
+    assert first == 1 and first == b.rates['b']
     b.propose(2)
     assert b.rates['a'] < first
     b.set_assets({'b': 1})
@@ -235,3 +236,110 @@ def test_catalogue_owner_moves_count_once_and_wire_failure_is_local(monkeypatch)
     assert next(iter(m.stats.days.values()))['rebalance_count'] == 1
     m.apply_assignment(dict(a=0, b=2))
     assert observer.STATUS['rebalance_count'] == 1
+
+
+def test_skewed_burst_replay_estimates_and_bounded_market_moves(monkeypatch):
+    # Stress fixture, NOT a production trace: totals match the reported pre-#68
+    # shard rates, while within each shard markets differ by up to 160x.
+    totals = [444, 597, 1300, 122]
+    markets = [dict(id=str(i), yesAssetId=f'{i}y', noAssetId=f'{i}n') for i in range(24)]
+    assignment = {a: i // 6 for i, market in enumerate(markets)
+                  for a in observer.subscription_assets([market])}
+    truth = {}
+    for shard, total in enumerate(totals):
+        weights = [total - 420, 210, 120, 60, 20, 10] if total > 420 else [62, 30, 15, 8, 5, 2]
+        for j, weight in enumerate(weights):
+            truth[str(shard * 6 + j)] = weight
+    b = RateBalancer(4)
+    b.set_assets(assignment)
+    b.assignment = assignment.copy()
+    b.sample_at = b.last_check = 0
+    b.interval = 1
+    # Consecutive asset bursts deliberately defeat a trailing 2048-frame sample.
+    for market in markets:
+        raw = json.dumps(dict(price_changes=[dict(asset_id=market['yesAssetId']),
+                                            dict(asset_id=market['noAssetId'])]))
+        for _ in range(truth[market['id']] * 10):
+            b.receive(raw, assignment[market['yesAssetId']])
+    b.propose(10)
+    for estimated, actual in zip(b.loads(assignment), totals):
+        assert abs(estimated / actual - 1) < .2
+    current = assignment
+    for _ in range(12):
+        packed = observer.shard_markets(markets, 4, current, b.rates)
+        target = {a: i for i, group in packed.items() for a in observer.subscription_assets(group)}
+        bounded = b.limit_moves(target, markets)
+        assert sum(current[a] != bounded[a] for a in current) <= b.max_moves
+        current = b.assignment = bounded
+    actual = [0] * 4
+    for market in markets:
+        owner = current[market['yesAssetId']]
+        assert owner == current[market['noAssetId']]
+        actual[owner] += truth[market['id']]
+    assert max(actual) / min(actual) < 2
+    for estimated, measured in zip(b.loads(current), actual):
+        assert abs(estimated / measured - 1) < .2
+
+
+def test_cold_assets_block_rebalance_until_observed():
+    b = RateBalancer(4)
+    b.set_assets(dict(a=0, b=1))
+    b.assignment = dict(a=0, b=1)
+    b.receive(dict(asset_id='a'), 0)
+    assert not b.ready()
+    b.receive(dict(asset_id='b'), 1)
+    assert not b.ready()  # Need a completed measurement interval too.
+    b.propose(b.sample_at + b.interval)
+    assert b.ready()
+    b.set_assets(dict(a=0, b=1, c=2))
+    assert not b.ready()
+
+
+def test_skewed_replay_uses_manager_cooldown_and_real_move_budget(monkeypatch):
+    from types import SimpleNamespace
+    monkeypatch.setattr(observer, '_STOP', threading.Event())
+    monkeypatch.setattr(observer, '_PIPELINE', None)
+    monkeypatch.setattr(observer, '_DAILY_STATS', DailyStats())
+    m = observer.MarketConnections()
+    m.markets = [dict(id=str(i), yesAssetId=f'{i}y', noAssetId=f'{i}n') for i in range(24)]
+    initial = {a: i // 6 for i, market in enumerate(m.markets)
+               for a in observer.subscription_assets([market])}
+    b = m.balancer
+    b.set_assets(initial)
+    b.assignment = initial.copy()
+    b.sample_at = b.last_check = 0
+    b.interval = 10
+    b.minimum = 10
+    rates = [24, 210, 120, 60, 20, 10, 177, 210, 120, 60, 20, 10,
+             880, 210, 120, 60, 20, 10, 62, 30, 15, 8, 5, 2]
+    m.states = {i: dict(assets=[a for a in initial if initial[a] == i], socket=None,
+                        connected=False, lock=threading.RLock(), thread=SimpleNamespace(is_alive=lambda: True))
+                for i in range(4)}
+    for now in range(10, 51, 10):
+        before = dict(b.assignment)
+        for market, rate in zip(m.markets, rates):
+            raw = dict(price_changes=[dict(asset_id=market['yesAssetId']), dict(asset_id=market['noAssetId'])])
+            for _ in range(rate * 10):
+                b.receive(raw, before[market['yesAssetId']])
+        monkeypatch.setattr(observer, 'time', SimpleNamespace(monotonic=lambda: now))
+        m.tick()
+        assert sum(before[a] != b.assignment[a] for a in before) <= b.max_moves
+        measured = [0] * 4
+        for market, rate in zip(m.markets, rates):
+            measured[b.assignment[market['yesAssetId']]] += rate
+        assert all(abs(estimate / actual - 1) < .2 for estimate, actual in zip(b.loads(b.assignment), measured))
+    assert max(measured) / min(measured) < 2
+
+
+def test_catalogue_refresh_never_moves_cold_retained_assets(monkeypatch):
+    from types import SimpleNamespace
+    m, _ = manager(monkeypatch)
+    monkeypatch.setattr(observer, '_PIPELINE', None)
+    m.balancer.set_assets(m.balancer.assignment)
+    for state in m.states.values():
+        state.update(thread=SimpleNamespace(is_alive=lambda: True), ping_at=float('inf'))
+    m.sync([dict(id='old', yesAssetId='a', noAssetId='b'),
+            dict(id='new', yesAssetId='c', noAssetId='d')])
+    assert m.balancer.assignment['a'] == m.balancer.assignment['b'] == 0
+    assert not m.balancer.ready()
+    assert not m.stats.days
