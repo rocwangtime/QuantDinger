@@ -14,6 +14,12 @@ CHAINLINK = 'https://data.chain.link/streams/btc-usd'
 BINANCE = 'https://www.binance.com/en/trade/BTC_USDT'
 
 
+# Quote/guard parameters of the original v3 table, before the 2026-10-16 replay calibration.
+# Mechanics tests written against that table pin it; defaults are covered separately.
+DOC = dict(gap_max='.04', fair_tol='0', k_tox='3', open_max_behind_ticks='0', depth_pull_frac='.5',
+           depth_pull_cooldown_ms='2000')
+
+
 def market(identity='42', start=NOW + 120000, duration=300000, interval='5m', asset='BTC', source=CHAINLINK, **extra):
     """Default: BTC 5m whose strike window opens at NOW + 60 s, so NOW is pre-open."""
     return dict(id=identity, market_type='up_down', asset=asset, interval=interval, yesAssetId=identity + 'u',
@@ -128,8 +134,7 @@ def test_invalid_early_late_or_better_priced_prints_never_fill(change):
 def test_cancel_takes_effect_after_latency_and_then_releases_capital():
     a, m = setup()
     row = step(m)
-    stale = books(NOW + 500)
-    stale[0]['exchange_at'] = NOW - 5000
+    stale = books(NOW - 5000)
     step(m, at=NOW + 500, bk=stale)
     order = [o for o in row['orders'] if o['kind'] == 'live' and o['side'] == 0][0]
     assert order['cancel_at'] == NOW + 750 and order['cancel_reason'] == 'book_stale'
@@ -186,8 +191,7 @@ def test_action_budget_defers_placements_never_protective_cancels():
     _, m = setup()
     row = step(m)
     row['actions'] = [NOW + 500] * 5
-    stale = books(NOW + 600)
-    stale[1]['exchange_at'] = NOW - 9000
+    stale = books(NOW - 9000)
     step(m, at=NOW + 600, bk=stale)
     assert not live(row)
     step(m, at=NOW + 900)
@@ -197,12 +201,12 @@ def test_action_budget_defers_placements_never_protective_cancels():
 
 
 def test_fair_value_adverse_move_and_depth_pull_guards():
-    _, m = setup()
+    _, m = setup(DOC)
     row = step(m, bk=books(up=book(bid='.48', ask='.52')))
     assert live(row, 0)[0]['price'] == '0.49'
     step(m, at=NOW + 300, bk=books(NOW + 300, up=book(bid='.48', ask='.52', ask_size='300', at=NOW + 300)))
     assert m.stats(NOW)['guard_cancels']['fv_adverse'] == 1
-    _, m = setup()
+    _, m = setup(DOC)
     row = step(m)
     thin = lambda at: books(at, up=book(bid_size='40', ask_size='40', at=at))  # Same microprice.
     step(m, at=NOW + 1000, bk=thin(NOW + 1000))
@@ -216,7 +220,7 @@ def test_fair_value_adverse_move_and_depth_pull_guards():
 def test_inventory_skew_monotone_and_cap_stops_only_risk_side():
     raws = []
     for qty in ('0', '5', '10', '15', '20'):
-        _, m = setup()
+        _, m = setup(DOC)
         row = step(m, spot=None) or m.state['markets']['42']
         row['qty'], row['cost'] = [qty, '0'], [str(D(qty) * D('.49')), '0']
         m.changed(row)
@@ -248,7 +252,7 @@ def test_strike_reduce_hedge_phases_quote_hedge_only_flat_none():
 
 
 def test_five_minute_post_open_is_too_toxic_even_to_hedge():
-    _, m = setup()
+    _, m = setup(DOC)
     mk = market()
     warm(m, mk, NOW - 5000, NOW + 125000)
     row = step(m, mk)
@@ -281,9 +285,7 @@ def test_open_phase_hourly_quotes_both_sides_and_hedge_phase_at_fair():
 def test_data_faults_calm_every_phase_and_coin_jump_waits_for_new_books():
     _, m = setup()
     row = step(m)
-    skew = books(NOW + 100)
-    skew[1]['exchange_at'] = NOW - 300
-    step(m, at=NOW + 100, bk=skew)
+    step(m, at=NOW + 100, bk=books(NOW - 3000))  # Both sides old, no recorder liveness: stale.
     assert row['phase'] == 'FLAT' and not live(row)
     m.observe_spot('BTC', '60000', NOW + 5000, NOW + 5000)
     m.observe_spot('BTC', '60300', NOW + 6000, NOW + 6000)  # Far beyond 4 sigma in one second.
@@ -296,13 +298,13 @@ def test_data_faults_calm_every_phase_and_coin_jump_waits_for_new_books():
 
 
 def test_own_fill_and_sweep_widen_the_opening_side():
-    _, m = setup()
+    _, m = setup(DOC)
     row = step(m)
     m.prints('42', 0, [print_('fill', price='.48', size='1')], NOW + 400)
     step(m, at=NOW + 500)
     up = row['decision']['sides'][0]
     assert up['widen'] >= .01 and up['reason'] == 'behind_best'
-    _, m = setup()
+    _, m = setup(DOC)
     row = step(m)
     sweep = [print_('s1', price='.49', size='1', at=NOW + 300, tx='0xabc'), print_('s2', price='.48', size='1', at=NOW + 300, tx='0xabc')]
     m.prints('42', 1, sweep, NOW + 400)
@@ -448,7 +450,7 @@ def test_size_bounded_by_trade_cap_and_free_capital():
 
 
 def test_microprice_anchor_and_gap_switches_to_reduce():
-    _, m = setup()
+    _, m = setup(DOC)
     row = step(m, bk=books(up=book(bid='.53', ask='.56')))
     assert row['phase'] == 'REDUCE' and row['decision']['phase'] == 'REDUCE'
     assert not live(row)  # Flat inventory: nothing to hedge.
