@@ -237,17 +237,6 @@ def test_recorded_maker_feed_prints_official_and_proxy_settlement(isolated, monk
     assert '42' not in mf.maker.state['markets']
     assert mf.maker.stats(NOW)['estimated_settlements'] == 1
     assert b.equity() == number('5002.55')
-    # The official result arrives late and overturns the proxy: cash and the day are restated.
-    with isolated() as db:
-        cur = db.cursor()
-        cur.execute("UPDATE qd_polymarket_observer_windows SET official_outcome='Down'")
-        db.commit()
-        cur.close()
-    clock['now'] = NOW + 720250
-    mf.poll(pipeline, NOW + 720250)
-    day = mf.maker.stats(NOW)
-    assert (day['estimated_settlements'], day['settlement_corrections']) == (0, 1)
-    assert b.equity() == number('4997.55') and not mf.maker.state['estimates']
 
 
 def test_maker_evidence_failure_rolls_back_account_and_ledger(isolated):

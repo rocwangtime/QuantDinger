@@ -2,7 +2,6 @@
 import json
 import logging
 import os
-import sys
 import threading
 import time
 from contextlib import contextmanager
@@ -18,7 +17,7 @@ from .account_history import max_pair_skew_ms, pair_rejection
 from .client import PublicClient
 from .engine import number, sweep
 from . import updown, recording
-from .ws_balance import RateBalancer, DailyStats, balance_key
+from .ws_balance import RateBalancer, DailyStats
 
 STATUS = {"enabled": False, "running": False, "mode": "stopped", "connected": False, "markets_subscribed": 0,
           "last_message_at": None, "rebalance_count": 0, "reconnect_count": 0, "ws_connections": 0, "slow_consumer_count": 0, "last_error": None, "started_at": None}
@@ -31,7 +30,6 @@ _REFERENCE = None
 _PIPELINE = None
 _WS = None
 _DAILY_STATS = DailyStats()
-MARKET_WS_URL = 'wss://ws-subscriptions-clob.polymarket.com/ws/market'
 _LOG = logging.getLogger(__name__)
 
 
@@ -299,31 +297,6 @@ def subscription_assets(markets):
     return [a for m in markets for a in (m['yesAssetId'], m['noAssetId'])]
 
 
-def tune_switch_interval():
-    """Shorten the GIL hand-off in the dedicated observer process.
-
-    Socket readers release the GIL on every recv; with the default 5 ms switch
-    interval a CPU-bound thread (evaluator, workers, paper account) can make
-    each reacquire wait that long. POLYMARKET_OBSERVER_GIL_SWITCH_MS, default
-    0.5; 0 keeps the interpreter default.
-    """
-    try:
-        value = float(os.getenv('POLYMARKET_OBSERVER_GIL_SWITCH_MS', '0.5'))
-    except ValueError:
-        return
-    if value > 0:
-        sys.setswitchinterval(min(5.0, max(.1, value)) / 1000)
-
-
-def _prior_group_rates():
-    """Group msg/s from the last persisted status, used only for first placement."""
-    try:
-        rates = (get_status() or {}).get('ws_group_rates') or {}
-        return {str(k): float(v) for k, v in rates.items() if float(v) >= 0}
-    except (TypeError, ValueError, AttributeError):
-        return {}
-
-
 def _market_loop():
     global _REFERENCE, _WS
     client = PublicClient()
@@ -384,10 +357,8 @@ def _market_loop():
                 use_ws = os.getenv("POLYMARKET_OBSERVER_WS_ENABLED", "true").lower() in {"1", "true", "yes"} and ws_failures < 3
                 if use_ws:
                     if connections is None:
-                        tune_switch_interval()
                         connections = MarketConnections()
                         _WS = connections
-                        connections.seed_rates(_prior_group_rates())
                         connections.sync(markets)
                     connections.tick()
                     ws_failures = connections.failures()
@@ -897,30 +868,59 @@ class Pipeline:
                                         and not (self.references.socket_thread and self.references.socket_thread.is_alive()))
 
 
-def shard_markets(markets, count, previous=None, rates=None, owners=None):
-    """Place whole balance groups (an Up/Down series or one YES/NO market).
+def shard_markets(markets, count, previous=None, rates=None):
+    """Balance whole markets by observed activity, retaining owners when possible."""
+    rates = rates or {}
+    from statistics import median
+    unknown_weight = median([r for r in rates.values() if r > 0]) if any(r > 0 for r in rates.values()) else .01
 
-    ``previous`` maps assets to their applied shard, ``owners`` remembers group
-    shards across rollovers and ``rates`` holds group msg/s. Known groups keep
-    their shard; new groups go largest-first to the lightest shard. Periodic
-    rebalancing is RateBalancer.plan, never a catalogue refresh.
-    """
-    balancer = RateBalancer(count)
-    balancer.rates = dict(rates or {})
-    groups = {}
-    for market in markets:
-        groups.setdefault(balance_key(market), []).append(market)
-    known = {k: v for k, v in (owners or {}).items() if v < count}
+    def weight(market):
+        return sum(max(.01, rates.get(a, unknown_weight)) for a in subscription_assets([market]))
+    result, loads = {}, [0] * count
+    pending = []
     previous = previous or {}
-    for key, group in groups.items():
-        votes = [previous[a] for a in subscription_assets(group) if previous.get(a, count) < count]
-        if key not in known and votes:
-            known[key] = min(set(votes), key=lambda shard: (-votes.count(shard), shard))
-    placed = balancer.place(list(groups), known)
-    result = {}
-    for key, group in groups.items():
-        result.setdefault(placed[key], []).extend(group)
-    return {i: result[i] for i in sorted(result) if result[i]}
+    for market in sorted(markets, key=lambda m: (-weight(m), str(m['id']))):
+        assets = subscription_assets([market])
+        owners = {previous.get(a) for a in assets}
+        if len(owners) == 1 and None not in owners and next(iter(owners)) < count:
+            index = next(iter(owners))
+            result.setdefault(index, []).append(market)
+            loads[index] += weight(market)
+        else:
+            pending.append(market)
+    for market in pending:
+        index = min(range(count), key=lambda i: (loads[i], i))
+        result.setdefault(index, []).append(market)
+        loads[index] += weight(market)
+    # Compare retained placement with a fresh largest-first packing. Single
+    # moves cannot escape layouts that require exchanging two large markets.
+    packed, packed_loads = {}, [0.0] * count
+    for market in sorted(markets, key=lambda m: (-weight(m), str(m['id']))):
+        index = min(range(count), key=lambda i: (packed_loads[i], i))
+        packed.setdefault(index, []).append(market)
+        packed_loads[index] += weight(market)
+    if RateBalancer.imbalance(packed_loads) + 1e-9 < RateBalancer.imbalance(loads):
+        # Match equivalent bins to existing owners to limit subscription churn.
+        from functools import lru_cache
+        overlap = [[0] * count for _ in range(count)]
+        for i, group in packed.items():
+            for asset in subscription_assets(group):
+                if asset in previous:
+                    overlap[i][previous[asset]] += 1
+        @lru_cache(None)
+        def match(index, used):
+            if index == count:
+                return 0, ()
+            candidates = []
+            for shard in range(count):
+                if not used & (1 << shard):
+                    score, tail = match(index + 1, used | (1 << shard))
+                    candidates.append((score + overlap[index][shard], (shard, *tail)))
+            return max(candidates, key=lambda item: item[0])
+        mapping = match(0, 0)[1]
+        result = {mapping[i]: group for i, group in packed.items()}
+
+    return {i: group for i, group in result.items() if group}
 
 
 class ReceiveQueue:
@@ -966,60 +966,6 @@ class ReceiveQueue:
                 return
 
 
-READ_AHEAD_BYTES = 65536
-
-
-def read_ahead_app(base):
-    """WebSocketApp whose reader drains buffered frames with few syscalls.
-
-    websocket-client reads a frame as select + 2-byte header + payload, each a
-    GIL release; under contention every reacquire can wait a full switch
-    interval, which capped a socket near 100 frames/s. This reader takes up to
-    64 KiB per recv (frame_buffer keeps the surplus) and parses every buffered
-    frame before selecting again. Unknown library internals fall back to the
-    stock dispatcher.
-    """
-    try:
-        import selectors
-        from websocket._dispatcher import DispatcherBase
-    except ImportError:
-        return base
-    if not isinstance(base, type):
-        return base
-
-    class Dispatcher(DispatcherBase):
-        def read(self, sock, read_callback, check_callback):
-            app = self.app
-            if app.sock is None or app.sock.sock is None:
-                return
-            frames = getattr(app.sock, 'frame_buffer', None)
-            raw = getattr(app.sock, '_recv', None)
-            if not (callable(raw) and hasattr(frames, 'recv_buffer')):
-                frames = None
-            else:
-                frames.recv = lambda _size: raw(READ_AHEAD_BYTES)
-            sock = app.sock.sock
-            pending = getattr(sock, 'pending', None)
-            sel = selectors.DefaultSelector()
-            sel.register(sock, selectors.EVENT_READ)
-            try:
-                while app.keep_running:
-                    if ((frames is not None and any(frames.recv_buffer))
-                            or (callable(pending) and pending()) or sel.select(self.ping_timeout)):
-                        if not read_callback():
-                            break
-                    check_callback()
-            finally:
-                sel.close()
-
-    class App(base):
-        def create_dispatcher(self, ping_timeout, dispatcher=None, is_ssl=False, handleDisconnect=None):
-            if dispatcher:
-                return super().create_dispatcher(ping_timeout, dispatcher, is_ssl, handleDisconnect)
-            return Dispatcher(self, ping_timeout or 10)
-    return App
-
-
 class MarketConnections:
     """Own independent public receive threads and per-socket subscription sets."""
     def __init__(self):
@@ -1036,26 +982,14 @@ class MarketConnections:
         target = updown.setting('WS_ASSETS_PER_SHARD', 600, 1, 100000)
         self.count = max(self.count, min(8, (len(subscription_assets(markets)) + target - 1) // target))
         self.balancer.count = self.count
-        self.balancer.set_groups({a: balance_key(m) for m in markets for a in subscription_assets([m])},
-                                 time.monotonic())
         if set(subscription_assets(markets)) == set(self.balancer.assignment):
             self.tick()
             return
-        # Rollover keeps each series on its shard: only changed assets move.
-        assignments = shard_markets(markets, self.count, self.balancer.assignment,
-                                    self.balancer.rates, self.balancer.owners)
+        assignments = shard_markets(markets, self.count, self.balancer.assignment, self.balancer.rates)
         assignment = {a: i for i, group in assignments.items() for a in subscription_assets(group)}
+        self.balancer.set_assets(assignment)
         self.apply_assignment(assignment)
         self.tick()
-
-    def seed_rates(self, rates):
-        """Prior weights place a cold start by load; they never trigger moves."""
-        with self.balancer.lock:
-            for key, rate in rates.items():
-                self.balancer.rates.setdefault(key, rate)
-
-    def assignment_for(self, owners):
-        return {a: owners[balance_key(m)] for m in self.markets for a in subscription_assets([m])}
 
     def apply_assignment(self, assignment):
         assignments = {i: [a for a, shard in assignment.items() if shard == i] for i in range(self.count)}
@@ -1086,7 +1020,6 @@ class MarketConnections:
                                                    for a in assets if a in changed or a in activated}
             with self.balancer.lock:
                 self.balancer.assignment = dict(assignment)
-                self.balancer.owners.update(self.balancer.current_owners())
             for operation in ('unsubscribe', 'subscribe'):
                 for index, commands in changes.items():
                     state = self.states[index]
@@ -1187,8 +1120,9 @@ class MarketConnections:
                 except Empty:
                     continue
                 try:
-                    event = json.loads(raw) if isinstance(raw, (str, bytes, bytearray)) else raw
+                    event = json.loads(raw)
                     self.stats.message(index)
+                    self.balancer.receive(event, index)
                     if _PIPELINE:
                         # Recheck generation under the same lock used for invalidation.
                         waiting_at = time.monotonic()
@@ -1224,16 +1158,8 @@ class MarketConnections:
                                     _PIPELINE.paper_account.history.assets.pop(asset, None)
 
         def received(_sock, raw):
-            if raw in ('PONG', b'PONG'):
-                return
-            # Parse once here (C json); count before the FIFO so a backlog
-            # cannot hide load. The worker reuses the parsed event.
-            try:
-                event = json.loads(raw)
-            except ValueError:
-                return
-            self.balancer.receive(event, index)
-            inbox.put(event)
+            if raw != 'PONG':
+                inbox.put(raw)
 
         def failed(_sock, error):
             state['connected'] = False
@@ -1261,13 +1187,10 @@ class MarketConnections:
                 state['attempts'] = 0
             state['retry_at'] = time.monotonic() + random.uniform(.5, 1.5) * min(120, 5 * 2 ** min(5, max(0, state['attempts'] - 1)))
 
-        sock = read_ahead_app(websocket.WebSocketApp)(os.getenv('POLYMARKET_OBSERVER_WS_URL', MARKET_WS_URL),
+        sock = websocket.WebSocketApp('wss://ws-subscriptions-clob.polymarket.com/ws/market',
                                      on_open=opened, on_message=received, on_error=failed, on_close=closed)
         state['socket'] = sock
-        # websocket-client validates UTF-8 per byte in Python without wsaccel
-        # (~50 us per price_change, ~0.5 ms per book) on the reading thread;
-        # json.loads rejects invalid UTF-8 in C instead.
-        state['thread'] = threading.Thread(target=lambda: sock.run_forever(ping_interval=0, skip_utf8_validation=True),
+        state['thread'] = threading.Thread(target=lambda: sock.run_forever(ping_interval=0),
                                            name=f'polymarket-receive-{index}', daemon=True)
         state['worker'] = threading.Thread(target=consume, name=f'polymarket-book-{index}', daemon=True)
         state['worker'].start()
@@ -1277,22 +1200,18 @@ class MarketConnections:
         if self.closed or _STOP.is_set():
             return
         now = time.monotonic()
-        # Sample ingress rates per group; move whole groups only, at most
-        # REBALANCE_MAX_GROUPS per round, with hysteresis and a cooldown.
-        balancer = self.balancer
-        # A cold start (no prior, nothing measured) samples once after 20 s.
-        first = not balancer.measured and not balancer.rates
-        if (self.reconnect_pending or now - balancer.last_check >= balancer.interval
-                or first and now - balancer.last_check >= min(20, balancer.interval)):
-            balancer.last_check = now
-            balancer.sample(now)
-            owners = balancer.current_owners()
-            if (self.markets and balancer.measured and now - balancer.last_rebalance >= balancer.minimum
-                    and set(owners) >= {balance_key(m) for m in self.markets}):
-                target = balancer.plan(owners)
-                if target:
-                    self.apply_assignment(self.assignment_for(target))
-                    balancer.last_rebalance = now
+        # Sample token activity, but move whole markets only, with hysteresis
+        # and a cooldown to avoid turning load balancing into reconnect churn.
+        due = self.reconnect_pending or now - self.balancer.last_check >= self.balancer.interval
+        self.balancer.propose(now, self.reconnect_pending)
+        if due and self.markets and now - self.balancer.last_rebalance >= self.balancer.minimum:
+            groups = shard_markets(self.markets, self.count, self.balancer.assignment, self.balancer.rates)
+            target = {a: i for i, group in groups.items() for a in subscription_assets(group)}
+            old = self.balancer.imbalance(self.balancer.loads(self.balancer.assignment))
+            new = self.balancer.imbalance(self.balancer.loads(target))
+            if old - new > self.balancer.threshold:
+                self.apply_assignment(target)
+                self.balancer.last_rebalance = now
         self.reconnect_pending = False
         for index, state in self.states.items():
             if state.get('inbox') and state['inbox'].invalid.is_set() and state['socket']:

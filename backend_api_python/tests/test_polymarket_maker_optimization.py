@@ -5,7 +5,7 @@ import pytest
 
 from app.services.polymarket.maker import DEFAULTS, Maker, TAG, configuration, params, select
 from app.services.polymarket.paper_account import Account, configuration as account_configuration, day_key, utc
-from tests.test_polymarket_maker import DOC, NOW, book, books, live, market, print_, setup, step, warm
+from tests.test_polymarket_maker import NOW, book, books, live, market, print_, setup, step, warm
 
 P = params(dict(DEFAULTS))
 
@@ -49,11 +49,7 @@ def test_invalid_config(monkeypatch, key, value):
 def test_defaults_follow_the_v3_parameter_table():
     c = configuration()
     assert (c['n_cap'], c['n_cap_coin_dir'], c['n_cap_global_dir']) == ('20', '60', '100')
-    assert (c['lam_fee'], c['latency_eff_s'], c['z_hard_max'], c['h_min']) == ('1', '0.30', '0.03', '0.01')
-    # Replay-calibrated on recorded BTC/ETH 5m/15m books (deploy/pm_maker_v3_tuning_20261016.md).
-    assert (c['k_tox'], c['gap_max'], c['fair_tol'], c['open_max_behind_ticks']) == ('1', '0.06', '0.03', '3')
-    assert (c['depth_pull_frac'], c['depth_pull_cooldown_ms'], c['book_quiet_ms'], c['feed_stale_ms']) == ('1', '500', '60000', '2000')
-    assert c['cold_start'] == 'BTC:15m,ETH:15m,BTC:5m:preopen,ETH:5m:preopen'
+    assert (c['k_tox'], c['lam_fee'], c['latency_eff_s'], c['gap_max'], c['z_hard_max']) == ('3', '1', '0.30', '0.04', '0.03')
     assert (c['place_latency_ms'], c['cancel_latency_ms'], c['complementary_prints']) == ('250', '250', 'verify')
 
 
@@ -90,7 +86,7 @@ def test_hedge_leg_ignores_caps_that_block_the_risk_side():
 
 
 def test_soft_stop_halves_size_and_widens_hard_stop_hedges_only():
-    a, m = setup(DOC)
+    a, m = setup()
     m.stats(NOW)['net_pnl'] = '-60'
     row = step(m, bk=books(up=book(bid='.47', ask='.53')))
     assert m.risk['soft'] and not m.risk['hard']

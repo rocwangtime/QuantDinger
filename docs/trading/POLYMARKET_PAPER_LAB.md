@@ -314,8 +314,7 @@ durable transitions. Inspect flush/error metrics before terminating the worker.
 
 | New environment variable | Default | Bounds / meaning |
 | --- | --- | --- |
-| `POLYMARKET_OBSERVER_WS_SHARDS` | 4 | 1–8; whole balance groups (an Up/Down series or a YES/NO market), balanced by ingress msg/s (2026-10-16, `deploy/pm_ws_shard_group_20261016.md`) |
-| `POLYMARKET_OBSERVER_GIL_SWITCH_MS` | 0.5 | 0.1–5; GIL hand-off for socket readers in the observer process; 0 keeps Python's default |
+| `POLYMARKET_OBSERVER_WS_SHARDS` | 4 | 1–8; initial market assignment, then measured token-rate balancing |
 | `POLYMARKET_OBSERVER_EVALUATE_MS` | 250 | 50–5000; evaluator cadence |
 | `POLYMARKET_OBSERVER_WRITE_QUEUE_MAX` | 10000 | 1–100000; atomic queued groups |
 | `POLYMARKET_OBSERVER_WRITE_BATCH_SIZE` | 500 | 1–5000; SQL operations per transaction |
