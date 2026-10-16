@@ -211,7 +211,7 @@ def test_recorded_maker_feed_prints_official_and_proxy_settlement(isolated, monk
     assert feed.maker.stats(NOW)['estimated_settlements'] == 0
     assert a.equity() == number('4997.55')
     assert '42' not in feed.maker.state['markets']
-    # A second run with no official outcome can use recorded Binance boundaries.
+    # A second run with no official outcome waits for it, then uses recorded Binance boundaries.
     with isolated() as db:
         cur = db.cursor()
         cur.execute("UPDATE qd_polymarket_observer_windows SET official_outcome=NULL")
@@ -228,8 +228,13 @@ def test_recorded_maker_feed_prints_official_and_proxy_settlement(isolated, monk
     clock['now'] = NOW + 400
     mf.poll(pipeline, NOW + 400)
     assert b.state['maker']['markets']['42']['qty'][0] == '5.00000000'
-    clock['now'] = NOW + 420001
-    mf.poll(pipeline, NOW + 420001)
+    for at in (NOW + 420001, NOW + 719999):  # Chainlink cell: up to 300 s past the end for the official result.
+        clock['now'] = at
+        mf.poll(pipeline, at)
+        assert not b.state['maker']['markets']['42']['settled']
+    clock['now'] = NOW + 720000
+    mf.poll(pipeline, NOW + 720000)
+    assert '42' not in mf.maker.state['markets']
     assert mf.maker.stats(NOW)['estimated_settlements'] == 1
     assert b.equity() == number('5002.55')
 

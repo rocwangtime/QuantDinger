@@ -21,7 +21,11 @@ def parse_rules(market):
     """SettlementSpec from the market's own rule text, never from its interval label.
 
     Chainlink-stream markets average the settlement source over a 60 s window
-    (w=60); Binance candle markets use single prints (w=0). Ambiguous text -> None.
+    (w=60); Binance candle markets use single prints (w=0). t0/t1 are the strike
+    and final prints: the window boundaries, or `lag` seconds after them when the
+    rules compare 1-minute candle closes (daily). The book keeps trading past
+    endDate until resolution, so every time-based step keys off the prints.
+    Ambiguous text -> None.
     """
     def source(text):
         text = text.lower()
@@ -36,7 +40,8 @@ def parse_rules(market):
         return None
     text = (str(market.get('description') or '') + ' ' + str(market.get('question') or '')).lower()
     tie = .5 if '50-50' in text or '50/50' in text else 1.0  # value of Up when X == K
-    return dict(source=kind, w=60.0 if kind == 'chainlink' else 0.0, t0=t0, t1=t1, tie=tie)
+    lag = print_lag(market) if kind == 'binance' else 0
+    return dict(source=kind, w=60.0 if kind == 'chainlink' else 0.0, t0=t0 + lag, t1=t1 + lag, lag=lag, tie=tie)
 
 
 def print_lag(market):

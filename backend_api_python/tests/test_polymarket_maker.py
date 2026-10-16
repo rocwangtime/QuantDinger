@@ -26,6 +26,16 @@ def hourly(identity='77', start=NOW - 600000, strike='60000'):
     return market(identity, start=start, duration=3600000, interval='1h', source=BINANCE, price_to_beat=strike)
 
 
+DAILY = ('This market will resolve to "Up" if the "Close" price for the Binance 1 minute candle for BTC/USDT '
+         '12:00 in the ET timezone (noon) is lower than the final "Close" price for the next 12:00 ET candle. '
+         'If the final "Close" price for both of these candles is exactly equal on Binance, this market will resolve 50-50.')
+
+
+def daily(identity='88', start=NOW - 86400000, **extra):
+    """BTC 1d on Binance 1-minute candle closes, which print a minute after each boundary."""
+    return market(identity, start=start, duration=86400000, interval='1d', source=BINANCE, description=DAILY, **extra)
+
+
 def book(bid='.49', ask='.51', bid_size='100', ask_size='100', at=NOW, more=()):
     return dict(bids=[dict(price=bid, size=bid_size), *more], asks=[dict(price=ask, size=ask_size)], exchange_at=at)
 
@@ -479,16 +489,13 @@ def test_recorded_outcome_reads_hourly_candle_boundaries_from_the_market_samples
     assert RecordedFeed.outcome(SettlementCursor(prices=['60000']), row, end) == (None, False)
 
 
-def test_recorded_outcome_waits_for_daily_one_minute_candle_closes():
+def test_recorded_outcome_waits_for_the_daily_closing_print_then_for_the_official_result():
     from app.services.polymarket import maker_model as mm
     from app.services.polymarket.maker import RecordedFeed
-    rule = ('This market will resolve to "Up" if the "Close" price for the Binance 1 minute candle for BTC/USDT '
-            '12:00 in the ET timezone (noon) is lower than the final "Close" price for the next 12:00 ET candle. '
-            'If the final "Close" price for both of these candles is exactly equal on Binance, this market will resolve 50-50.')
-    mk = market('88', start=NOW - 86400000, duration=86400000, interval='1d', source=BINANCE, description=rule)
+    mk = daily()
     row = dict(market=mk, spec=mm.parse_rules(mk))
-    end = row['spec']['t1'] * 1000
-    assert row['spec']['tie'] == .5
+    end, wait = NOW, 1800  # endDate; the closing 1-minute candle prints a minute later.
+    assert row['spec']['t1'] * 1000 == end + 60000 and row['spec']['tie'] == .5
     for now in (end, end + 59999):
         cur = SettlementCursor(prices=['60000', '60100'])
         assert RecordedFeed.outcome(cur, row, now) == (None, False)
@@ -501,3 +508,57 @@ def test_recorded_outcome_waits_for_daily_one_minute_candle_closes():
     assert RecordedFeed.outcome(SettlementCursor(prices=['60000', '60000']), row, end + 60000) == ('Tie', True)
     assert RecordedFeed.outcome(SettlementCursor(prices=['60000', '59999']), row, end + 60000) == ('Down', True)
     assert RecordedFeed.outcome(SettlementCursor(official='Up'), row, end) == ('Up', False)
+    # With a wait, the proxy stands in only once the official result is that late.
+    cur = SettlementCursor(prices=['60000', '60100'])
+    assert RecordedFeed.outcome(cur, row, end + 60000 + wait * 1000 - 1, wait) == (None, False)
+    assert len(cur.queries) == 1
+    assert RecordedFeed.outcome(SettlementCursor(official='Down'), row, end + 60000, wait) == ('Down', False)
+    late = SettlementCursor(prices=['60000', '60100'])
+    assert RecordedFeed.outcome(late, row, end + 60000 + wait * 1000, wait) == ('Up', True)
+
+
+def test_official_wait_follows_the_settlement_source_and_stays_within_the_timeout():
+    from app.services.polymarket import maker_model as mm
+    _, m = setup()
+    assert m.official_wait(mm.parse_rules(market())) == 300  # Chainlink resolves within about a minute.
+    assert m.official_wait(mm.parse_rules(hourly())) == m.official_wait(mm.parse_rules(daily())) == 1800
+    assert m.official_wait(dict(source='legacy', w=0.0, t0=0, t1=0, tie=1.0)) == 1800
+    with pytest.raises(ValueError, match='configuration'):
+        Maker(Account(), {'official_wait_binance_s': '3601'})
+    assert Maker(Account(), {'official_wait_chainlink_s': '0'}).official_wait(mm.parse_rules(market())) == 0
+
+
+def test_daily_strike_fair_value_phases_and_settlement_follow_the_candle_close_prints():
+    _, m = setup(cells=('BTC:1d',))
+    start = NOW + 30000  # eventStartTime; the opening 1-minute candle closes at NOW + 90 s.
+    mk = daily('89', start=start)
+    strike, end = start + 60000, start + 86400000
+    warm(m, mk, NOW - 5000, start + 30001)
+    row = step(m, mk, at=start + 30000)
+    # Past the boundary but before the strike prints: spot moves cancel out, F = 0.5.
+    assert row['phase'] == 'PREOPEN' and row['decision']['F'] == .5 and row['a_start'] is None
+    m.observe_spot('BTC', '60000', strike - 3000, strike - 3000)
+    m.observe_spot('BTC', '60001', strike + 2000, strike + 2000)
+    step(m, mk, at=strike + 2500, bk=books(strike + 2500), spot=None)
+    assert row['phase'] == 'OPEN'
+    assert row['a_start'] == pytest.approx(math.log(60000))  # The candle close: last observation before it.
+    # endDate - 1 s still has a minute of price risk to the closing print.
+    step(m, mk, at=end - 1000, bk=books(end - 1000))
+    assert row['phase'] == 'HEDGE' and row['decision']['tau'] == pytest.approx(61)
+    step(m, mk, at=end + 30000, bk=books(end + 30000), spot=None)
+    assert row['phase'] == 'FLAT' and m.stats(end + 30000)['phase_counts']['FLAT'] == 1
+    m.settle('89', 'Up', end + 59999)
+    assert not row['settled']
+    step(m, mk, at=end + 61000, bk=books(end + 61000), spot=None)
+    assert m.stats(end + 61000)['phase_counts']['FLAT'] == 1  # Waiting for a result is not phase time.
+    m.settle('89', 'Up', end + 61000)
+    assert row['settled'] and row['outcome'] == 'Up'
+
+
+def test_hourly_strike_without_price_to_beat_is_the_first_observation_at_the_open():
+    _, m = setup()
+    mk = market('79', start=NOW + 3000, duration=3600000, interval='1h', source=BINANCE)
+    m.observe_spot('BTC', '60000', NOW, NOW)
+    m.observe_spot('BTC', '60001', NOW + 5000, NOW + 5000)
+    row = step(m, mk, at=NOW + 5500, bk=books(NOW + 5500), spot=None)
+    assert row['phase'] == 'OPEN' and row['a_start'] == pytest.approx(math.log(60001))

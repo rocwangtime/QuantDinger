@@ -273,6 +273,8 @@ def test_daily_proxy_settlement_reads_same_asset_samples_at_candle_closes(databa
     end = t1.timestamp() * 1000
     assert RecordedFeed.outcome(cur, row, end + 30000) == (None, False)
     assert RecordedFeed.outcome(cur, row, end + 60000) == ('Up', True)
+    assert RecordedFeed.outcome(cur, row, end + 60000, 1800) == (None, False)  # Official result may still land.
+    assert RecordedFeed.outcome(cur, row, end + 60000 + 1800000, 1800) == ('Up', True)
     sample('902', 'BTC', t1 + timedelta(seconds=59), '60000')
     assert RecordedFeed.outcome(cur, row, end + 60000) == ('Tie', True)
     cur.execute("UPDATE qd_polymarket_observer_windows SET official_outcome='Down'")
