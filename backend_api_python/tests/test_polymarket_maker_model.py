@@ -55,6 +55,30 @@ def test_print_lag_only_for_one_minute_candle_closes():
     assert mm.print_lag(dict(description='the 11 minute candle')) == 0
     assert mm.print_lag({}) == 0
 
+def test_daily_candle_close_rules_key_strike_variance_and_phases_to_the_prints():
+    from app.services.polymarket.updown import timestamp
+    base = dict(eventStartTime='2026-10-15T16:00:00Z', endDate='2026-10-16T16:00:00Z', interval='1d',
+                resolutionSource='https://www.binance.com/en/trade/BTC_USDT',
+                description='The "Close" price for the Binance 1 minute candle for BTC/USDT 12:00 ET. '
+                            'If both candles are equal this market will resolve 50-50.')
+    t0, t1 = (timestamp(base[k]).timestamp() for k in ('eventStartTime', 'endDate'))
+    s = mm.parse_rules(base)
+    assert (s['source'], s['w'], s['t0'], s['t1'], s['lag'], s['tie']) == ('binance', 0, t0 + 60, t1 + 60, 60, .5)
+    # Hourly candles and Chainlink streams print at the boundaries, whatever else the text says.
+    hourly = mm.parse_rules(dict(base, endDate='2026-10-15T17:00:00Z', description='BTC/USDT 1 hour candle.'))
+    chain = mm.parse_rules(dict(base, resolutionSource='https://data.chain.link/streams/btc-usd'))
+    assert all((x['lag'], x['t0']) == (0, t0) for x in (hourly, chain)) and chain['t1'] == t1
+    # Spot moves before the strike prints shift K and X alike.
+    assert mm.weight(s, t0 + 59) == 0 and mm.weight(s, t0 + 60) == 1
+    assert mm.fair(s, t0 + 30, 5.0, 0.0, 0.0, SIGMA)[0] == .5
+    # The minute after endDate is still price risk.
+    assert mm.variance(s, t1 - 100) == 160 and mm.variance(s, t1) == 60 and mm.variance(s, t1 + 60) == 0
+    th = P.phases['1d']
+    at = lambda t: mm.phase(s, t, th, P.preopen['1d'], P.preopen_pull_s, P.strike_wait_s)
+    assert [at(t) for t in (t0 - 3541, t0 + 30, t0 + 56, t0 + 63, t1 - 241, t1 - 240, t1 - 1, t1)] == [
+        mm.WAIT, mm.PREOPEN, mm.STRIKE, mm.OPEN, mm.REDUCE, mm.HEDGE, mm.HEDGE, mm.FLAT]
+
+
 @pytest.mark.parametrize('z', [-3.0, 0.0, 11.0, 50.0])
 def test_before_strike_window_fair_half_and_zero_toxicity_for_any_spot(z):
     s = spec()

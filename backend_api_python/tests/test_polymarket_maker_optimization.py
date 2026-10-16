@@ -38,7 +38,8 @@ def test_disabled_taker_creates_no_new_attempt_for_executable_opportunity():
 @pytest.mark.parametrize('key,value', [('depth_pull_frac', '2'), ('min_markets', '1.5'), ('fair_min', '.95'),
     ('phases', '5m:10:20:5,15m:180:90:30,1h:300:120:30,4h:600:180:60,1d:900:300:60'), ('cold_start', 'DOGE:1m'),
     ('universe_assets', 'BTC'), ('complementary_prints', 'maybe'), ('review_utc', '25:00'), ('event_times', 'soon'),
-    ('h_min', '0'), ('bootstrap_iters', '10'), ('lcb_alpha', '1'), ('preopen_windows', '5m:120')])
+    ('h_min', '0'), ('bootstrap_iters', '10'), ('lcb_alpha', '1'), ('preopen_windows', '5m:120'),
+    ('official_wait_chainlink_s', '3601')])
 def test_invalid_config(monkeypatch, key, value):
     monkeypatch.setenv('POLYMARKET_PAPER_MAKER_' + key.upper(), value)
     with pytest.raises(ValueError, match='configuration'):

@@ -70,6 +70,8 @@ DEFAULTS = dict(
     # simulator
     place_latency_ms='250', cancel_latency_ms='250', print_lag_ms='2000', complementary_prints='verify',
     settle_timeout_s='3600',
+    # past the final print, wait this long for the official result before the Binance proxy
+    official_wait_binance_s='1800', official_wait_chainlink_s='300',
     # scenario only
     rebate_fee_rate='.07', rebate_pool_fraction='.20')
 
@@ -138,7 +140,7 @@ def params(c):
     if (any(getattr(p, k) <= 0 for k in positive) or any(getattr(p, k) > 1 for k in fractions)
             or any(getattr(p, k) != int(getattr(p, k)) for k in integers) or p.bootstrap_iters < 100
             or not p.lcb_alpha < 1 or not p.fair_min < p.fair_max or not p.round_tol_ticks < 1
-            or p.time_mult_cap < 1):
+            or p.time_mult_cap < 1 or max(p.official_wait_binance_s, p.official_wait_chainlink_s) > p.settle_timeout_s):
         raise ValueError('bounds')
     p.sigma_prior = p.sigma_prior_annual / math.sqrt(mm.SECONDS_PER_YEAR)
     return p
@@ -420,10 +422,12 @@ class Maker:
                 strike = row['market'].get('price_to_beat')
                 if strike and number(strike) > 0:
                     a_start = math.log(float(strike))
-                else:  # Binance candle open: first observation at/after T0, else last before.
-                    after = [z for s, z in a['samples'] if t0 <= s <= t0 + gap]
-                    before = [z for s, z in a['samples'] if t0 - gap <= s < t0]
-                    a_start = after[0] if after else before[-1] if before else None
+                else:  # Binance candle open: first observation at/after T0, else last before;
+                    # a candle close (daily rules) prefers the last observation before it.
+                    after = [z for s, z in a['samples'] if t0 <= s <= t0 + gap][:1]
+                    before = [z for s, z in a['samples'] if t0 - gap <= s < t0][-1:]
+                    found = before + after if spec.get('lag') else after + before
+                    a_start = found[0] if found else None
                 if a_start is None:
                     return None
                 row['a_start'] = a_start
@@ -604,7 +608,8 @@ class Maker:
         self.shadow(row, ctx if quoting else dict(ctx, ok=False), now)
         self.sample(row, ctx, now)
         row['phase'] = ctx['phase']
-        self.count(now, 'phase_counts', ctx['phase'])
+        if now < row['spec']['t1'] * 1000:  # Rows waiting for their result add no phase time.
+            self.count(now, 'phase_counts', ctx['phase'])
 
     def context(self, row, books, now):
         p, spec, market = self.p, row['spec'], row['market']
@@ -1317,6 +1322,14 @@ class Maker:
             for o in row['orders']:
                 self.cancel(row, o, now, 'shutdown')
 
+    def official_wait(self, spec):
+        """Seconds past the final print to wait for the official result before the proxy.
+
+        Chainlink cells resolve automatically within about a minute; Binance candle
+        cells go through UMA and were seen resolving 11-18 minutes after the end.
+        """
+        return self.p.official_wait_chainlink_s if spec['source'] == 'chainlink' else self.p.official_wait_binance_s
+
     def cleanup(self):
         for identity, row in list(self.state['markets'].items()):
             if row['settled']:
@@ -1435,7 +1448,7 @@ class RecordedFeed:
                     m.prints(identity, index, batch[:self.LIMIT], now, complete=len(batch) <= self.LIMIT)
                 for identity, row in active.items():
                     if now >= row['spec']['t1'] * 1000 and all(row['caught_up']):
-                        outcome, estimated = self.outcome(cur, row, now)
+                        outcome, estimated = self.outcome(cur, row, now, m.official_wait(row['spec']))
                         m.settle(identity, outcome, now, estimated)
                 if m.review_due(now):
                     cur.execute("SELECT detail FROM qd_polymarket_maker_events WHERE account_id=%s AND strategy=%s AND event='market_summary' AND observed_at>=%s",
@@ -1446,22 +1459,27 @@ class RecordedFeed:
         m.cleanup()
 
     @staticmethod
-    def outcome(cur, row, now=None):
-        market, identity = row['market'], row['market']['id']
+    def outcome(cur, row, now, wait_s=0):
+        """(outcome, estimated) after the final print, or (None, False) while waiting.
+
+        A recorded official result always wins; the Binance-sample proxy is only a
+        fallback once `wait_s` has passed since the final print.
+        """
+        market, identity, spec = row['market'], row['market']['id'], row['spec']
         cur.execute('SELECT official_outcome FROM qd_polymarket_observer_windows WHERE market_id=%s', (identity,))
         resolution = cur.fetchone()
         if resolution and resolution['official_outcome']:
             return resolution['official_outcome'], False
-        # Recorded Binance observations nearest each settlement print, no lookahead.
-        # Daily rules print a minute after each boundary, after this market's own
-        # samples stop: wait for the print, then read any same-asset sample.
-        lag = mm.print_lag(market) if (row['spec'] or {}).get('source') == 'binance' else 0
-        if lag and (now is None or now < (row['spec']['t1'] + lag) * 1000):
+        if now < (spec['t1'] + wait_s) * 1000:
             return None, False
+        # Recorded Binance observations nearest each settlement print, no lookahead.
+        # Daily candle closes print a minute after each boundary, after this market's
+        # own samples stop, so any same-asset sample is read there.
+        lag = spec.get('lag', 0)
         values = []
-        for boundary in (market['eventStartTime'], market['endDate']):
+        for boundary, at in ((market['eventStartTime'], spec['t0']), (market['endDate'], spec['t1'])):
             if lag:
-                boundary = utc(timestamp(boundary).timestamp() * 1000 + lag * 1000)
+                boundary = utc(at * 1000)
                 where = "asset=%s AND observed_at>=%s::timestamptz - INTERVAL '10 seconds' AND observed_at<%s::timestamptz + INTERVAL '5 minutes'"
                 params = (market['asset'], boundary, boundary)
             else:
@@ -1471,6 +1489,6 @@ class RecordedFeed:
             values.append(number(sample['reference_price']) if sample else None)
         if any(v is None for v in values):
             return None, False
-        if values[1] == values[0] and row['spec'] and row['spec']['tie'] != 1:
+        if values[1] == values[0] and spec['tie'] != 1:
             return 'Tie', True
         return ('Up' if values[1] >= values[0] else 'Down'), True
