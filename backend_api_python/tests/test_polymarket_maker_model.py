@@ -9,7 +9,6 @@ from app.services.polymarket import maker_model as mm
 from app.services.polymarket.maker import DEFAULTS, params
 
 P = params(dict(DEFAULTS))
-P_DOC = params(dict(DEFAULTS, k_tox='3', open_max_behind_ticks='0'))  # Original v3 table.
 SIGMA = .5 / math.sqrt(mm.SECONDS_PER_YEAR)
 
 
@@ -146,26 +145,26 @@ def test_rounding_tolerance_and_post_only_improve_bounds():
         bid = D(rng.randrange(5, 90)) / 100
         ask = bid + D(rng.randrange(1, 6)) / 100
         px = D(rng.randrange(1, 99)) / 100
-        out, why = mm.constrain(px, False, bid, ask, tick, P_DOC)
+        out, why = mm.constrain(px, False, bid, ask, tick, P)
         if out is not None:
             assert bid <= out <= min(ask - tick, bid + tick)
         else:
             assert why == 'behind_best' and min(px, ask - tick) < bid
-        hedge, _ = mm.constrain(px, True, bid, ask, tick, P_DOC)
+        hedge, _ = mm.constrain(px, True, bid, ask, tick, P)
         if hedge is not None:
             assert bid - 3 * tick <= hedge <= ask - tick
 
 
 def test_inventory_skew_monotone_risk_widens_hedge_narrows():
-    risk = [mm.half_spread(P_DOC, .5, .002, n, False, mm.OPEN, 600, 900, .07) for n in (0, 5, 10, 20, 40)]
-    hedge = [mm.half_spread(P_DOC, .5, .002, n, True, mm.OPEN, 600, 900, .07) for n in (0, 5, 10, 20, 40)]
+    risk = [mm.half_spread(P, .5, .002, n, False, mm.OPEN, 600, 900, .07) for n in (0, 5, 10, 20, 40)]
+    hedge = [mm.half_spread(P, .5, .002, n, True, mm.OPEN, 600, 900, .07) for n in (0, 5, 10, 20, 40)]
     assert risk == sorted(risk) and risk[3] == risk[4]
     assert hedge == sorted(hedge, reverse=True)
     # Hedge floor: max(0, k_hedge Z - fee) normally; -e_neg (at fair) in the hedge phase.
     # base = max(.01, 3*.02 - .0175) = .0425; skew = .02 * g_tau.
-    assert mm.half_spread(P_DOC, .5, .02, 20, True, mm.REDUCE, 600, 900, .07) == pytest.approx(.0425 - .02)
-    assert mm.half_spread(P_DOC, .5, .02, 20, True, mm.REDUCE, 100, 900, .07) == pytest.approx(1.5 * .02 - .07 * .25)
-    assert mm.half_spread(P_DOC, .5, .02, 20, True, mm.HEDGE, 60, 900, .07) == 0
+    assert mm.half_spread(P, .5, .02, 20, True, mm.REDUCE, 600, 900, .07) == pytest.approx(.0425 - .02)
+    assert mm.half_spread(P, .5, .02, 20, True, mm.REDUCE, 100, 900, .07) == pytest.approx(1.5 * .02 - .07 * .25)
+    assert mm.half_spread(P, .5, .02, 20, True, mm.HEDGE, 60, 900, .07) == 0
     assert mm.time_mult(450, 900, 3) == 1 and mm.time_mult(50, 900, 3) == 3
 
 

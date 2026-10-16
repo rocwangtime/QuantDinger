@@ -32,7 +32,6 @@ INTERVALS = ('5m', '15m', '1h', '4h', '1d')
 SHORT = ('5m', '15m')
 Z_EDGES, TAU_EDGES, QUEUE_EDGES = (.0025, .005, .01, .02, .03), (60, 300, 900, 3600, 14400), (0, 50, 200)
 Q2, Q8 = Decimal('.01'), Decimal('.00000001')
-OUTCOMES = {'Up': Decimal(1), 'Down': ZERO, 'Tie': Decimal('.5')}
 DATA_FAULTS = ('book_missing', 'book_stale', 'updown_skew', 'crossed', 'spot_stale')
 FEE_SOURCE = 'https://docs.polymarket.com/trading/fees'
 REBATE_SOURCE = 'https://docs.polymarket.com/programs/maker-rebates'
@@ -41,19 +40,17 @@ TEXT = ('universe_assets', 'universe_intervals', 'cold_start', 'review_utc', 'pr
 DEFAULTS = dict(
     # selection (shadow layer covers the whole universe; active layer <= max_active cells)
     universe_assets='BTC,ETH,SOL,XRP', universe_intervals='5m,15m,1h,4h,1d',
-    # cold start only on cells the observer records by default (BTC/ETH 5m/15m); see pm_maker_v3_tuning_20261016.md
-    cold_start='BTC:15m,ETH:15m,BTC:5m:preopen,ETH:5m:preopen',
+    cold_start='BTC:1h,ETH:1h,BTC:15m,ETH:15m,BTC:5m:preopen,ETH:5m:preopen',
     review_utc='00:05', lookback_days='7', halflife_days='3', min_markets='150', min_filled_shares='1000',
     as_edge_ratio_max='.7', max_active='6', max_active_per_coin='3', probation_days='3', probation_size_mult='.5',
     exit_cooloff_days='3', exit_min_markets='50', min_quotable_share='.20', min_taker_volume='2000',
     tight_spread_ticks='2', min_tight_share='.5', max_stale_share='.02', bootstrap_iters='2000', lcb_alpha='.10',
     # fair value / toxicity
     sigma_prior_annual='.5', vol_halflife_short_s='300', vol_halflife_long_s='14400', vol_mix='.5', vol_scale='1',
-    # gap_max/z_hard_max/fair_tol calibrated by maker_replay on 45 h of recordings (pm_maker_v3_tuning_20261016.md)
-    gap_max='.06', latency_eff_s='.30', sigma_short_window_s='60', z_hard_max='.03', fair_tol='.03',
+    gap_max='.04', latency_eff_s='.30', sigma_short_window_s='60', z_hard_max='.03',
     # quote
-    h_min='.01', k_tox='1', lam_fee='1', c0='0', k_hedge='1.5', e_neg='0', round_tol_ticks='.2',
-    max_improve_ticks='1', hedge_max_behind_ticks='3', open_max_behind_ticks='3', fair_min='.10', fair_max='.90', spread_spike_mult='2',
+    h_min='.01', k_tox='3', lam_fee='1', c0='0', k_hedge='1.5', e_neg='0', round_tol_ticks='.2',
+    max_improve_ticks='1', hedge_max_behind_ticks='3', fair_min='.10', fair_max='.90', spread_spike_mult='2',
     base_size='10', max_order='25', kappa_inv='.02', n_cap='20', time_mult_cap='3',
     flow_ticks='1', flow_hold_s='15', flow_window_s='10', flow_median_s='1800', flow_mult='3',
     sweep_levels='2', sweep_window_s='5', fill_ticks='1', fill_hold_s='10', fill_size_mult='.5',
@@ -63,10 +60,8 @@ DEFAULTS = dict(
     # order management / guards
     min_rest_ms='500', up_persist_ms='300', resize_ratio='.5', max_actions_per_market_s='5',
     book_stale_ms='2000', book_stale_ms_short='2000', updown_sync_ms='250', spot_stale_ms='6000',
-    # a quiet book stays current up to book_quiet_ms while the recorder wrote any row within feed_stale_ms
-    book_quiet_ms='60000', feed_stale_ms='2000',
     jump_sigma='4', jump_cooldown_ms='3000', fv_adverse_frac='.5',
-    depth_pull_frac='1', depth_pull_window_ms='1500', depth_pull_cooldown_ms='500',
+    depth_pull_frac='.5', depth_pull_window_ms='1500', depth_pull_cooldown_ms='2000',
     event_blackout_min='10', event_times='',
     # risk (stops are loss magnitudes in USD)
     n_cap_coin_dir='60', n_cap_global_dir='100', worst_loss_market='12', worst_loss_global='75',
@@ -128,20 +123,18 @@ def params(c):
     p.complementary = c['complementary_prints']
     if p.complementary not in ('verify', 'count'):
         raise ValueError('complementary_prints')
-    for key in ('max_improve_ticks', 'hedge_max_behind_ticks', 'open_max_behind_ticks', 'base_size', 'max_order', 'n_cap', 'n_cap_coin_dir',
+    for key in ('max_improve_ticks', 'hedge_max_behind_ticks', 'base_size', 'max_order', 'n_cap', 'n_cap_coin_dir',
                 'n_cap_global_dir', 'worst_loss_market', 'worst_loss_global', 'lock_market', 'lock_global'):
         setattr(p, key + '_d', number(c[key]))
     p.max_improve_ticks, p.hedge_max_behind_ticks = p.max_improve_ticks_d, p.hedge_max_behind_ticks_d
-    p.open_max_behind_ticks = p.open_max_behind_ticks_d
     positive = ('h_min', 'base_size', 'max_order', 'n_cap', 'sigma_prior_annual', 'vol_halflife_short_s',
                 'vol_halflife_long_s', 'vol_scale', 'sigma_short_window_s', 'flow_window_s', 'sweep_window_s',
                 'lookback_days', 'halflife_days', 'probation_size_mult', 'fill_size_mult', 'soft_size_mult',
                 'max_actions_per_market_s', 'book_stale_ms', 'book_stale_ms_short', 'spot_stale_ms', 'jump_sigma',
-                'book_quiet_ms', 'feed_stale_ms',
                 'momentum_sigma', 'time_mult_cap', 'flow_mult', 'max_active', 'max_active_per_coin', 'lcb_alpha')
     fractions = ('vol_mix', 'probation_size_mult', 'fill_size_mult', 'soft_size_mult', 'fv_adverse_frac',
                  'depth_pull_frac', 'resize_ratio', 'min_quotable_share', 'min_tight_share', 'max_stale_share',
-                 'rebate_fee_rate', 'rebate_pool_fraction', 'fair_min', 'fair_max', 'fair_tol')
+                 'rebate_fee_rate', 'rebate_pool_fraction', 'fair_min', 'fair_max')
     integers = ('bootstrap_iters', 'max_active', 'max_active_per_coin', 'min_markets', 'exit_min_markets',
                 'lookback_days', 'probation_days', 'exit_cooloff_days', 'sweep_levels')
     if (any(getattr(p, k) <= 0 for k in positive) or any(getattr(p, k) > 1 for k in fractions)
@@ -188,20 +181,20 @@ def day_template():
                 placed_up='0', placed_down='0', filled_up='0', filled_down='0', fill_events_up=0, fill_events_down=0,
                 filled_improve='0', filled_join='0', quote_seconds_improve='0', quote_seconds_join='0',
                 notional_filled='0', paired_sets='0', set_pnl='0', net_pnl='0', settlement_pnl='0',
-                unpaired_settlement_loss='0', markets_settled=0, markets_with_fills=0, unresolved_markets=0, settlement_corrections=0,
+                unpaired_settlement_loss='0', markets_settled=0, markets_with_fills=0, unresolved_markets=0,
                 decomposed_shares='0', fill_edge='0', residual='0', decomposed_pnl='0',
                 **{f'as_{h}': '0' for h in HORIZONS}, mark_samples=0, mark_missing=0, estimated_settlements=0,
                 paired_before_flat='0', unpaired_at_flat='0', flat_settlement_pnl='0', flat_red_flags=[],
                 hedge_durations=[], inventory_peak='0', locked_sum='0', locked_count=0, locked_max='0',
                 rebate_basis='0', prop_filled='0', skip_reasons={}, phase_counts={}, guard_cancels={},
-                mirror_checked=0, mirror_mismatch=0, mirror_rebuilt=0, complementary_checked=0, complementary_sum_one=0,
+                mirror_checked=0, mirror_mismatch=0, complementary_checked=0, complementary_sum_one=0,
                 complementary_fills='0', brier_model='0', brier_book='0', brier_n=0,
                 reliability=[[0, '0', '0'] for _ in range(10)], shadow={}, cells={},
                 soft_stop=False, hard_stop=False, alerts=[])
 
 
 def fresh():
-    return dict(strategy=TAG, version=VERSION, seq=0, markets={}, days={}, assets={}, selection={}, halt=None, estimates={})
+    return dict(strategy=TAG, version=VERSION, seq=0, markets={}, days={}, assets={}, selection={}, halt=None)
 
 
 def upgrade(state, account):
@@ -241,41 +234,6 @@ def new_row(market, spec, now, **values):
     return row
 
 
-def mirror(book):
-    """The other outcome's view of one book: Up bids at p are Down asks at 1 - p."""
-    flip = lambda levels: [dict(price=str(1 - number(level['price'])), size=level['size']) for level in levels]
-    return dict(book, bids=flip(book['asks']), asks=flip(book['bids']))
-
-
-def coherent(books, sync_ms):
-    """(books, rebuilt): a pair that can describe one moment of the single Up/Down book.
-
-    Recorded snapshots taken together mirror each other; when the tops disagree and
-    the timestamps differ, the older side missed an update, so it is replaced by the
-    mirror of the newer side. A missing side is rebuilt the same way.
-    """
-    usable = [bool(b and b.get('bids') and b.get('asks') and b.get('exchange_at') is not None) for b in books[:2]]
-    if len(books) != 2 or usable == [False, False]:
-        return books, False
-    if usable != [True, True]:
-        good = usable.index(True)
-        pair = [None, None]
-        pair[good], pair[1 - good] = books[good], mirror(books[good])
-        return pair, True
-    up, down = books
-    tops = [(number(b['bids'][0]['price']), number(b['asks'][0]['price'])) for b in books]
-    if tops[0][0] + tops[1][1] == 1 and tops[1][0] + tops[0][1] == 1:
-        return books, False
-    if abs(up['exchange_at'] - down['exchange_at']) <= sync_ms:
-        return books, False
-    return ([up, mirror(up)] if up['exchange_at'] > down['exchange_at'] else [mirror(down), down]), True
-
-
-def top(book):
-    """Best level of each side: enough to audit a placement without storing the whole ladder."""
-    return dict(bid=book['bids'][0], ask=book['asks'][0], exchange_at=book['exchange_at'])
-
-
 def displayed(book, price):
     """Visible bid size at `price`; 0 above best bid, None below the recorded depth."""
     levels = [(number(level['price']), number(level['size'])) for level in book['bids']]
@@ -293,12 +251,8 @@ def select(summaries, previous, p, now):
     shadow fills (rebates excluded), one-sided LCB by cluster bootstrap.
     """
     today = utc(now).date()
-    by_cell, latest = {}, {}
-    for s in summaries:  # A corrected summary supersedes the proxy-settled one of the same market.
-        key = s.get('market_id') or id(s)
-        if s.get('corrected') or key not in latest:
-            latest[key] = s
-    for s in latest.values():
+    by_cell = {}
+    for s in summaries:
         end = utc(s['end']).date()
         if today - timedelta(days=int(p.lookback_days)) <= end < today and s.get('outcome') is not None:
             by_cell.setdefault(s['cell'], []).append((s, (today - end).days))
@@ -378,7 +332,6 @@ class Maker:
         upgrade(self.state, account)
         self.memory = {}  # Ephemeral flow/spread history; rebuilt after restart.
         self.risk = None
-        self.feed_at = None  # Newest recorded book row (any token), set by the feed each poll.
 
     # ----- bookkeeping -------------------------------------------------------------
     def audit(self, event, market_id, now, detail):
@@ -640,11 +593,7 @@ class Maker:
         if row is None or row['settled']:
             return
         row['market'] = market
-        books, rebuilt = coherent(books, self.p.updown_sync_ms)
-        day = self.stats(now)
-        day['mirror_rebuilt'] = day.get('mirror_rebuilt', 0) + int(rebuilt)
         self.observe_ring(row, books)
-        self.strike(row, now)
         ctx = self.context(row, books, now)
         if ctx.get('ok'):
             self.observe_books(row, ctx, now)
@@ -663,16 +612,6 @@ class Maker:
         if now < row['spec']['t1'] * 1000:  # Rows waiting for their result add no phase time.
             self.count(now, 'phase_counts', ctx['phase'])
 
-    def strike(self, row, now):
-        """Lock the strike average once its window has passed, whatever the books look like.
-
-        Spot samples are kept for minutes only, so a strike left for a later poll
-        (a stale or missing book at T0) would never be recoverable.
-        """
-        a = self.asset(row['market']['asset'])
-        if row['a_start'] is None and now / 1000 >= row['spec']['t0'] and a['at'] is not None:
-            self.windows(row, now / 1000, a)
-
     def context(self, row, books, now):
         p, spec, market = self.p, row['spec'], row['market']
         t, interval = now / 1000, market['interval']
@@ -686,21 +625,12 @@ class Maker:
             return calm('phase')
         if len(books) != 2 or not all(b and b.get('bids') and b.get('asks') and b.get('exchange_at') is not None for b in books):
             return calm('book_missing')
-        best = [(number(b['bids'][0]['price']), number(b['asks'][0]['price'])) for b in books]
-        # Up and Down are one book seen from both sides: a pair whose tops mirror is
-        # coherent even when the recorder wrote the two tokens at different times.
-        mirrored = best[0][0] + best[1][1] == 1 and best[1][0] + best[0][1] == 1
-        if abs(books[0]['exchange_at'] - books[1]['exchange_at']) > p.updown_sync_ms and not mirrored:
-            return calm('updown_skew')
-        # Rows are written only when the top five levels change, so a quiet book is
-        # current while the recorder keeps writing other rows (feed_at); a stalled
-        # feed or writer falls back to the strict age limit.
         stale = p.book_stale_ms_short if interval in SHORT else p.book_stale_ms
-        if self.feed_at is not None and 0 <= now - self.feed_at <= p.feed_stale_ms:
-            stale = max(stale, p.book_quiet_ms)
-        newest = max(b['exchange_at'] for b in books) if mirrored else min(b['exchange_at'] for b in books)
-        if not -100 <= now - newest <= stale:
+        if any(not -100 <= now - b['exchange_at'] <= stale for b in books):
             return calm('book_stale')
+        if abs(books[0]['exchange_at'] - books[1]['exchange_at']) > p.updown_sync_ms:
+            return calm('updown_skew')
+        best = [(number(b['bids'][0]['price']), number(b['asks'][0]['price'])) for b in books]
         if any(bid >= ask for bid, ask in best):
             return calm('crossed')
         a = self.asset(market['asset'])
@@ -717,9 +647,7 @@ class Maker:
             f, d, v = mm.fair(spec, t, a['z'], *parts, sigma)
             # Effective exposure: reaction latency plus the age of our spot observation.
             z = mm.toxicity(spec, t, d, v, self.sigma_short(a, now), p.latency_eff_s + (now - a['at']) / 1000)
-        # Conservative fair: the book microprice, shaded down only where the model is
-        # lower by more than its own noise (fair_tol); fair_tol=0 is min(F, M).
-        fair = [min(mid, f + p.fair_tol), min(1 - mid, 1 - f + p.fair_tol)]
+        fair = [min(f, mid), min(1 - f, 1 - mid)]
         ctx.update(ok=True, books=books, best=best, M=mid, F=f, d=d, V=v, Z=z, sigma=sigma, fair=fair,
                    gap=abs(f - mid), g=mm.weight(spec, t), asset=a)
         row['fair'] = fair
@@ -895,7 +823,7 @@ class Maker:
         self.add(now, 'placed_' + ('up' if side == 0 else 'down'), size)
         self.account.event('maker_quote', now)
         self.audit('place', row['market']['id'], now, dict(order={k: order[k] for k in ('id', 'side', 'price', 'size', 'ahead', 'live_from', 'improve')},
-                                                          decision=row['decision'], books=[top(b) for b in ctx['books']]))
+                                                          decision=row['decision'], books=ctx['books']))
         return order
 
     def cancel(self, row, order, now, reason):
@@ -1034,7 +962,7 @@ class Maker:
                                    self.widen(row, ctx, side, now))
                 base = mm.bid_price(fair_k, h, tick, p.round_tol_ticks)
                 bid, ask = ctx['best'][side]
-                eligible = (ctx['phase'] in mm.OPENING and base >= bid - p.open_max_behind_ticks * tick and p.fair_min <= fair_k <= p.fair_max
+                eligible = (ctx['phase'] in mm.OPENING and base >= bid and p.fair_min <= fair_k <= p.fair_max
                             and not ctx.get('spread_spike'))
                 quotable = quotable or eligible
                 for level in LEVELS:
@@ -1304,176 +1232,84 @@ class Maker:
         return dict(qty=q, edge=q * (pre - price), **{f'as_{h}': q * (marks[h] - pre) for h in HORIZONS},
                     residual=q * (y - marks[int(MAIN_HORIZON)]), pnl=q * (y - price))
 
-    def effects(self, row, y):
-        """Every outcome-dependent ledger change of one settlement, as additive deltas.
-
-        Keys are 'cash', 'day|<name>', 'cell|<name>', 'shadow|<bucket>|<name>',
-        'reliability|<decile>|<column>' and 'market|<name>' (summary only); values
-        are decimal strings. Estimated settlements keep the deltas of every possible
-        outcome, so a late official result is applied as an exact difference.
-        """
-        e = {}
-
-        def add(key, value):
-            e[key] = e.get(key, ZERO) + value
-        cost = sum(map(number, row['cost']))
-        payout = (number(row['qty'][0]) * y + number(row['qty'][1]) * (1 - y)) if y is not None else ZERO
-        add('cash', payout)
-        for key in ('day|net_pnl', 'day|settlement_pnl', 'cell|pnl', 'market|pnl'):
-            add(key, payout - cost)
-        add('day|unpaired_settlement_loss', max(ZERO, cost - payout))
-        if y is None:
-            add('day|unresolved_markets', 1)
-            return {k: str(v) for k, v in e.items()}
-        end = row['spec']['t1'] * 1000
-        for record in row['fills']:
-            parts = self.decompose(record, y, end)
-            for key in ('edge', 'residual', 'pnl') + tuple(f'as_{h}' for h in HORIZONS):
-                add('day|' + {'edge': 'fill_edge', 'pnl': 'decomposed_pnl'}.get(key, key), parts[key])
-            add('day|decomposed_shares', parts['qty'])
-            add('cell|as60_shares', parts['qty'])
-            for key in ('cell|as60', 'market|as60'):
-                add(key, parts['as_60'])
-            add('market|edge', parts['edge'])
-        shadow = {}
-        for record in row['shadow_fills']:
-            parts = self.decompose(record, y, end)
-            for bucket in [str(record['level'])] + ['eligible'] * bool(record['eligible']):
-                for name, value in (('shares', parts['qty']), ('pnl', parts['pnl']), ('edge', parts['edge']), ('as60', parts['as_60'])):
-                    add(f'shadow|{bucket}|{name}', value)
-                    shadow[bucket] = shadow.get(bucket, ZERO) + (value if name == 'shares' else ZERO)
-        for bucket, shares in shadow.items():
-            add(f'shadow|{bucket}|markets', int(shares > 0))
-        if row['flat']:
-            add('day|flat_settlement_pnl', sum((number(q) * (value - Decimal(repr(f))) for q, f, value in
-                                                zip(row['flat']['qty'], row['flat']['fair'], (y, 1 - y))), ZERO))
-        for _, f, m in row['calib']:
-            add('day|brier_model', Decimal(repr((f - float(y)) ** 2)))
-            add('day|brier_book', Decimal(repr((m - float(y)) ** 2)))
-            add('day|brier_n', 1)
-            decile = min(9, int(f * 10))
-            add(f'reliability|{decile}|0', 1)
-            add(f'reliability|{decile}|1', Decimal(repr(f)))
-            add(f'reliability|{decile}|2', y)
-        return {k: str(v) for k, v in e.items()}
-
-    def apply(self, effects, day, cell, sign=1):
-        """Add (sign=1) or remove (sign=-1) settlement deltas on one day's statistics."""
-        cs = day['cells'].setdefault(cell, dict(pnl='0', filled='0', as60='0', as60_shares='0', stopped=None))
-        for key, value in effects.items():
-            kind, *path = key.split('|')
-            if kind == 'day':
-                target, name = day, path[0]
-            elif kind == 'cell':
-                target, name = cs, path[0]
-            elif kind == 'shadow':
-                target, name = day['shadow'].setdefault(path[0], dict(shares='0', pnl='0', edge='0', as60='0', markets=0)), path[1]
-            elif kind == 'reliability':
-                target, name = day['reliability'][int(path[0])], int(path[1])
-            else:  # 'cash' moves with the account; 'market' only feeds the summary.
-                continue
-            current = target[name] if isinstance(target, list) else target.get(name, 0)
-            if isinstance(current, int):
-                target[name] = current + sign * int(number(value))
-            else:
-                target[name] = str(number(current) + sign * number(value))
-
     def settle(self, market_id, outcome, now, estimated=False):
         row = self.state['markets'][market_id]
         spec = row['spec']
         if row['settled'] or now < spec['t1'] * 1000:
             return
         holding = any(number(q) for q in row['qty'])
-        if outcome not in OUTCOMES and (holding or now < spec['t1'] * 1000 + self.p.settle_timeout_s * 1000):
+        if outcome not in ('Up', 'Down', 'Tie') and (holding or now < spec['t1'] * 1000 + self.p.settle_timeout_s * 1000):
             return  # Unknown winner is never inferred; inventory waits for resolution.
         self.resolve_marks(row, now, final=True)
         self.finalize(row, now, force=True)
-        day = self.stats(now)
+        y = {'Up': Decimal(1), 'Down': ZERO, 'Tie': Decimal('.5')}.get(outcome)
+        day, end = self.stats(now), spec['t1'] * 1000
         cost = sum(map(number, row['cost']))
-        effects = self.effects(row, OUTCOMES.get(outcome))
-        payout = number(effects['cash'])
+        payout = (number(row['qty'][0]) * y + number(row['qty'][1]) * (1 - y)) if y is not None else ZERO
         self.account.transfer('positions', -cost)
         self.account.transfer('free', payout)
-        self.apply(effects, day, row['cell'])
+        self.add(now, 'net_pnl', payout - cost)
+        self.add(now, 'settlement_pnl', payout - cost)
+        self.add(now, 'unpaired_settlement_loss', max(ZERO, cost - payout))
+        row['pnl'] = str(number(row['pnl']) + payout - cost)
+        cs = self.cell_stats(now, row['cell'])
+        cs['pnl'] = str(number(cs['pnl']) + payout - cost)
         day['estimated_settlements'] += int(estimated)
         day['markets_settled'] += 1
         day['markets_with_fills'] += int(number(row['filled']) > 0)
-        summary = self.summary(row, market_id, outcome, estimated, effects)
+        shadow = {str(level): dict(shares='0', pnl='0', edge='0', as60='0') for level in LEVELS}
+        shadow['eligible'] = dict(shares='0', pnl='0', edge='0', as60='0')
+        totals = dict(edge=ZERO, as60=ZERO)
+        if y is None:
+            day['unresolved_markets'] += 1
+        else:
+            for record in row['fills']:
+                parts = self.decompose(record, y, end)
+                for key in ('edge', 'residual', 'pnl') + tuple(f'as_{h}' for h in HORIZONS):
+                    self.add(now, {'edge': 'fill_edge', 'pnl': 'decomposed_pnl'}.get(key, key), parts[key])
+                self.add(now, 'decomposed_shares', parts['qty'])
+                totals['edge'] += parts['edge']
+                totals['as60'] += parts['as_60']
+            cs['as60'] = str(number(cs['as60']) + totals['as60'])
+            cs['as60_shares'] = str(number(cs['as60_shares']) + sum((number(r['qty']) for r in row['fills']), ZERO))
+            for record in row['shadow_fills']:
+                parts = self.decompose(record, y, end)
+                for key in [str(record['level'])] + ['eligible'] * bool(record['eligible']):
+                    bucket = shadow[key]
+                    for name, value in (('shares', parts['qty']), ('pnl', parts['pnl']), ('edge', parts['edge']), ('as60', parts['as_60'])):
+                        bucket[name] = str(number(bucket[name]) + value)
+            for key, bucket in shadow.items():
+                total = day['shadow'].setdefault(key, dict(shares='0', pnl='0', edge='0', as60='0', markets=0))
+                for name in ('shares', 'pnl', 'edge', 'as60'):
+                    total[name] = str(number(total[name]) + number(bucket[name]))
+                total['markets'] += int(number(bucket['shares']) > 0)
+            if row['flat']:
+                fair = row['flat']['fair']
+                flat = sum((number(q) * (value - Decimal(repr(f))) for q, f, value in
+                            zip(row['flat']['qty'], fair, (y, 1 - y))), ZERO)
+                self.add(now, 'flat_settlement_pnl', flat)
+            for _, f, m in row['calib']:
+                day['brier_model'] = str(number(day['brier_model']) + Decimal(repr((f - float(y)) ** 2)))
+                day['brier_book'] = str(number(day['brier_book']) + Decimal(repr((m - float(y)) ** 2)))
+                day['brier_n'] += 1
+                cell = day['reliability'][min(9, int(f * 10))]
+                cell[0] += 1
+                cell[1] = str(number(cell[1]) + Decimal(repr(f)))
+                cell[2] = str(number(cell[2]) + y)
+        summary = dict(strategy=TAG, market_id=market_id, cell=row['cell'], end=end, outcome=outcome, estimated=estimated,
+                       filled=row['filled'], pnl=row['pnl'], edge=str(totals['edge']), as60=str(totals['as60']),
+                       shadow=shadow, unpaired_at_flat=str(abs(number(row['flat']['qty'][0]) - number(row['flat']['qty'][1]))) if row['flat'] else '0',
+                       **row['summary'])
         self.audit('market_summary', market_id, now, summary)
-        if estimated and outcome in OUTCOMES:
-            # A proxy result can be overturned by the official one; keep each outcome's deltas.
-            self.state.setdefault('estimates', {})[market_id] = dict(
-                outcome=outcome, day=day_key(now), at=now, cell=row['cell'], summary=summary,
-                effects={o: effects if o == outcome else self.effects(row, y) for o, y in OUTCOMES.items()})
-        if row['shadow_fills'] and outcome in OUTCOMES:
-            y = OUTCOMES[outcome]
+        if row['shadow_fills'] and y is not None:
             self.audit('shadow_fills', market_id, now, dict(fills=[
                 [r['level'], r['side'], r['qty'], r['price'], r['pre'], *[r['marks'].get(str(h)) for h in HORIZONS],
                  str(y if r['side'] == 0 else 1 - y), r['tau'], r['z'], r['queue'], r['eligible']] for r in row['shadow_fills']]))
         self.changed(row)
-        row['pnl'] = summary['pnl']
         row.update(settled=True, outcome=outcome, estimated=estimated, qty=['0', '0'], cost=['0', '0'], lots=[[], []],
                    fills=[], shadow_fills=[], orders=[], ring=[[], []], recent=[[], []], print_ids=[[], []], calib=[])
         self.account.event('maker_settlement', now)
         self.audit('settlement', market_id, now, dict(outcome=outcome, estimated=estimated, cost=str(cost), payout=str(payout)))
-
-    @staticmethod
-    def summary(row, market_id, outcome, estimated, effects):
-        value = lambda key: number(effects.get(key, '0'))
-        shadow = {bucket: {name: str(value(f'shadow|{bucket}|{name}')) for name in ('shares', 'pnl', 'edge', 'as60')}
-                  for bucket in [str(level) for level in LEVELS] + ['eligible']}
-        return dict(strategy=TAG, market_id=market_id, cell=row['cell'], end=row['spec']['t1'] * 1000, outcome=outcome,
-                    estimated=estimated, filled=row['filled'], pnl=str(number(row['pnl']) + value('market|pnl')),
-                    edge=str(value('market|edge')), as60=str(value('market|as60')), shadow=shadow,
-                    unpaired_at_flat=str(abs(number(row['flat']['qty'][0]) - number(row['flat']['qty'][1]))) if row['flat'] else '0',
-                    **row['summary'])
-
-    def correct(self, market_id, official, now):
-        """Restate a proxy settlement when the official result arrives and differs.
-
-        The cash difference moves at once; statistics are restated on the day the
-        market settled (or today, once that day has been pruned), and a corrected
-        market summary supersedes the estimated one in selection.
-        """
-        estimates = self.state.get('estimates', {})
-        est = estimates.get(market_id)
-        if est is None or official not in OUTCOMES:
-            return
-        if official == est['outcome']:
-            del estimates[market_id]
-            return
-        old, new = est['effects'][est['outcome']], est['effects'][official]
-        delta = {k: str(number(new.get(k, '0')) - number(old.get(k, '0'))) for k in set(old) | set(new)}
-        cash = number(delta['cash'])
-        if cash < 0 and number(self.account.state['free']) < -cash:
-            return  # Retried once enough free capital is back.
-        self.account.transfer('free', cash)
-        day = self.state['days'].get(est['day'])
-        if day is None or day.get('version') != VERSION:
-            day = self.stats(now)
-        else:
-            day['estimated_settlements'] = max(0, day['estimated_settlements'] - 1)
-        self.apply(delta, day, est['cell'])
-        day['settlement_corrections'] = day.get('settlement_corrections', 0) + 1
-        del estimates[market_id]
-        summary = copy.deepcopy(est['summary'])
-        value = lambda key: number(delta.get(key, '0'))
-        summary.update(outcome=official, estimated=False, corrected=True, corrected_from=est['outcome'],
-                       pnl=str(number(summary['pnl']) + value('market|pnl')), as60=str(number(summary['as60']) + value('market|as60')))
-        for bucket, values in summary['shadow'].items():
-            for name in values:
-                values[name] = str(number(values[name]) + value(f'shadow|{bucket}|{name}'))
-        self.account.event('maker_settlement_correction', now)
-        self.audit('market_summary', market_id, now, summary)
-        self.audit('settlement_correction', market_id, now, dict(estimated=est['outcome'], official=official, cash=str(cash),
-                                                                 day=est['day'], pnl=str(value('market|pnl'))))
-
-    def pending_estimates(self, now):
-        """Proxy-settled markets still waiting for an official result (dropped after three days)."""
-        estimates = self.state.setdefault('estimates', {})
-        for market_id in [k for k, v in estimates.items() if v['at'] < now - 3 * 86400000]:
-            del estimates[market_id]
-        return list(estimates)
 
     # ----- lifecycle, selection, reporting -----------------------------------------
     def restart(self, now):
@@ -1596,10 +1432,6 @@ class RecordedFeed:
                     b = dict(b)
                     b['exchange_at'] = b['exchange_at'].timestamp() * 1000 if b['exchange_at'] else None
                     latest[b['token_id']] = b
-                # Recorder liveness: a writer that is behind ages every book, so quiet books stop counting as current.
-                cur.execute('SELECT max(received_at) AS at FROM qd_polymarket_observer_books')
-                feed = cur.fetchone()
-                m.feed_at = feed['at'].timestamp() * 1000 if feed and feed['at'] else None
                 for market in markets.values():
                     m.step(market, [latest.get(market[k]) for k in ('yesAssetId', 'noAssetId')], now, quoting)
                 active = {k: r for k, r in known.items() if not r['settled']}
@@ -1619,11 +1451,6 @@ class RecordedFeed:
                     if now >= row['spec']['t1'] * 1000 and all(row['caught_up']):
                         outcome, estimated = self.outcome(cur, row, now, m.official_wait(row['spec']))
                         m.settle(identity, outcome, now, estimated)
-                waiting = m.pending_estimates(now)
-                if waiting:
-                    cur.execute('SELECT market_id, official_outcome FROM qd_polymarket_observer_windows WHERE market_id = ANY(%s) AND official_outcome IS NOT NULL', (waiting,))
-                    for resolved in cur.fetchall():
-                        m.correct(resolved['market_id'], resolved['official_outcome'], now)
                 if m.review_due(now):
                     cur.execute("SELECT detail FROM qd_polymarket_maker_events WHERE account_id=%s AND strategy=%s AND event='market_summary' AND observed_at>=%s",
                                 (self.account_id, TAG, utc(now - (int(m.p.lookback_days) + 1) * 86400000)))
