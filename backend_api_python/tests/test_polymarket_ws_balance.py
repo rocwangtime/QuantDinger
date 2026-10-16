@@ -1,6 +1,7 @@
 """Measured group ownership, bounded churn, and subscription handover contracts."""
 import json
 import threading
+import time
 
 import pytest
 
@@ -12,6 +13,9 @@ def balancer(monkeypatch, owners, rates, count=4):
     """Groups ``k`` with assets ``ky``/``kn`` on ``owners[k]`` and measured ``rates``."""
     monkeypatch.setenv('POLYMARKET_OBSERVER_WS_REBALANCE_SECONDS', '1')
     monkeypatch.setenv('POLYMARKET_OBSERVER_WS_REBALANCE_MIN_SECONDS', '10')
+    monkeypatch.setenv('POLYMARKET_OBSERVER_WS_REBALANCE_CONFIRMATIONS', '1')
+    monkeypatch.setenv('POLYMARKET_OBSERVER_WS_REBALANCE_MIN_MSG_PER_S', '.1')
+    monkeypatch.setenv('POLYMARKET_OBSERVER_WS_GROUP_COOLDOWN_SECONDS', '0')
     b = RateBalancer(count)
     b.set_groups({k + side: k for k in owners for side in 'yn'})
     b.assignment = {a: owners[k] for a, k in b.groups.items()}
@@ -48,12 +52,12 @@ def test_plan_acts_only_outside_band(monkeypatch):
     b = balancer(monkeypatch, owners, dict(a=12, b=5, c=5, d=5))
     assert b.ideal(owners) == pytest.approx(2.4)
     assert b.plan(owners) is None
-    # An achievable target is reached even when the gain is under the band.
+    # A tiny gain in max/min is not a reason to churn near the peak lower bound.
     owners = dict(a=0, b=1, c=2, d=3, e=3, f=0)
     b = balancer(monkeypatch, owners, dict(a=10, b=10, c=10, d=4, e=1, f=1))
     assert max(b.loads(owners)) / min(b.loads(owners)) > b.target
     final = settle(b, owners)
-    assert max(b.loads(final)) / min(b.loads(final)) <= b.target
+    assert final == owners
 
 
 def test_unavoidable_hot_group_does_not_churn(monkeypatch):
@@ -137,6 +141,9 @@ def connected_manager(monkeypatch, markets, owners, rates):
     from types import SimpleNamespace
     monkeypatch.setenv('POLYMARKET_OBSERVER_WS_REBALANCE_SECONDS', '1')
     monkeypatch.setenv('POLYMARKET_OBSERVER_WS_REBALANCE_MIN_SECONDS', '10')
+    monkeypatch.setenv('POLYMARKET_OBSERVER_WS_REBALANCE_CONFIRMATIONS', '1')
+    monkeypatch.setenv('POLYMARKET_OBSERVER_WS_REBALANCE_MIN_MSG_PER_S', '.1')
+    monkeypatch.setenv('POLYMARKET_OBSERVER_WS_GROUP_COOLDOWN_SECONDS', '0')
     monkeypatch.setattr(observer, '_STOP', threading.Event())
     monkeypatch.setattr(observer, '_DAILY_STATS', DailyStats())
     monkeypatch.setattr(observer, '_PIPELINE', None)
@@ -165,19 +172,20 @@ def connected_manager(monkeypatch, markets, owners, rates):
     return m, sent
 
 
-def test_reconnect_checks_before_periodic_deadline(monkeypatch):
+def test_reconnect_does_not_force_short_biased_sample(monkeypatch):
     from types import SimpleNamespace
     markets = [dict(id=str(i), yesAssetId=f'{i}y', noAssetId=f'{i}n') for i in range(8)]
     m, _ = connected_manager(monkeypatch, markets, {f'market:{i}': 0 for i in range(8)},
                              {f'market:{i}': 10 for i in range(8)})
     m.balancer.interval = 60
     m.balancer.last_check = 1
-    monkeypatch.setattr(observer, 'time', SimpleNamespace(monotonic=lambda: 1))
+    monkeypatch.setattr(observer, 'time', SimpleNamespace(process_time=time.process_time, monotonic=lambda: 1))
     m.tick()
     assert m.balancer.last_rebalance == float('-inf')
     m.reconnect_pending = True
     m.tick()
-    assert m.balancer.last_rebalance == 1
+    assert m.balancer.last_rebalance == float('-inf')
+    assert m.balancer.last_check == 1
 
 
 def test_manager_retains_market_locality_on_connected_tick(monkeypatch):
@@ -188,7 +196,7 @@ def test_manager_retains_market_locality_on_connected_tick(monkeypatch):
     m.reconnect_pending = True
     for state in m.states.values():
         state.update(thread=SimpleNamespace(is_alive=lambda: True), ping_at=float('inf'))
-    monkeypatch.setattr(observer, 'time', SimpleNamespace(monotonic=lambda: 1))
+    monkeypatch.setattr(observer, 'time', SimpleNamespace(process_time=time.process_time, monotonic=lambda: 1))
     m.tick()
     assert m.balancer.assignment['a'] == m.balancer.assignment['b']
     assert not m.stats.days
@@ -202,7 +210,7 @@ def test_manager_applies_weighted_whole_group_rebalance_and_cooldown(monkeypatch
     m, sent = connected_manager(monkeypatch, markets, owners, rates)
     b = m.balancer
     clock = [1]
-    monkeypatch.setattr(observer, 'time', SimpleNamespace(monotonic=lambda: clock[0]))
+    monkeypatch.setattr(observer, 'time', SimpleNamespace(process_time=time.process_time, monotonic=lambda: clock[0]))
     before = b.loads()
     m.tick()
     assert max(b.loads()) / min(b.loads()) < max(before) / min(before)
@@ -234,6 +242,7 @@ def test_swaps_escape_single_move_local_minimum(monkeypatch):
     b = balancer(monkeypatch, owners, {str(i): w for i, w in enumerate(weights)})
     b.trigger = b.target = 1
     b.threshold = 0
+    b.min_gain = 0
     final = settle(b, owners)
     assert b.loads(final) == [9] * 4
 

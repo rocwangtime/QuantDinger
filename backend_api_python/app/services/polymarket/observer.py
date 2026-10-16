@@ -932,11 +932,17 @@ class ReceiveQueue:
         self.resync = Event()
         self.epoch = 0
         self.resyncs = 0
+        self.delivery_gap = False
         self.lag_seconds = 0
         self.lock_wait_seconds = 0
         self.queue_wait_seconds = 0
         self.dropped = 0
         self.high_water = 0
+        self.received_frames = self.received_bytes = 0
+        self.callback_max_seconds = self.parse_max_seconds = 0
+        self.metric_at = time.monotonic()
+        self.metric_frames = self.metric_bytes = 0
+        self.receive_rate = self.byte_rate = 0
         self.invalid = Event()
 
     def put(self, raw):
@@ -953,6 +959,7 @@ class ReceiveQueue:
                 return True
             except Full:
                 self.epoch += 1
+                self.delivery_gap = True
                 self.resync.set()
                 self.dropped += 1
                 return False
@@ -994,12 +1001,23 @@ def read_ahead_app(base):
                 return
             frames = getattr(app.sock, 'frame_buffer', None)
             raw = getattr(app.sock, '_recv', None)
-            if not (callable(raw) and hasattr(frames, 'recv_buffer')):
-                frames = None
-            else:
-                frames.recv = lambda _size: raw(READ_AHEAD_BYTES)
             sock = app.sock.sock
             pending = getattr(sock, 'pending', None)
+            app.read_ahead_active = False
+            if not (callable(raw) and hasattr(frames, 'recv_buffer')):
+                # Use the library's SSL-aware dispatcher if its internal API
+                # changes. Do not silently keep half of the custom read path.
+                return base.create_dispatcher(app, self.ping_timeout, is_ssl=callable(pending)).read(
+                    sock, read_callback, check_callback)
+            app.read_ahead_active = True
+            app.read_calls = app.read_bytes = 0
+
+            def buffered_recv(_size):
+                data = raw(READ_AHEAD_BYTES)
+                app.read_calls += 1
+                app.read_bytes += len(data)
+                return data
+            frames.recv = buffered_recv
             sel = selectors.DefaultSelector()
             sel.register(sock, selectors.EVENT_READ)
             try:
@@ -1020,6 +1038,19 @@ def read_ahead_app(base):
     return App
 
 
+def socket_pending_bytes(app):
+    """Linux encrypted TCP receive backlog; None when unsupported/disconnected."""
+    try:
+        import array
+        import fcntl
+        import termios
+        pending = array.array('i', [0])
+        fcntl.ioctl(app.sock.sock.fileno(), termios.FIONREAD, pending, True)
+        return pending[0]
+    except (ImportError, AttributeError, OSError, ValueError):
+        return None
+
+
 class MarketConnections:
     """Own independent public receive threads and per-socket subscription sets."""
     def __init__(self):
@@ -1028,6 +1059,8 @@ class MarketConnections:
         self.balancer = RateBalancer(self.count)
         self.stats = _DAILY_STATS
         self.reconnect_pending = False
+        self.sample_unavailable = set()
+        self.cpu_at, self.cpu_seconds = time.monotonic(), time.process_time()
         self.closed = False
         self.markets = []
 
@@ -1064,6 +1097,7 @@ class MarketConnections:
         pipeline_lock = _PIPELINE.lock if _PIPELINE else RLock()
         with pipeline_lock:
             old = self.balancer.assignment
+            old_owners = self.balancer.current_owners()
             moved = any(a in assignment and assignment[a] != i for a, i in old.items())
             changed = {a for a in old.keys() | assignment.keys() if old.get(a) != assignment.get(a)}
             if _PIPELINE:
@@ -1086,7 +1120,9 @@ class MarketConnections:
                                                    for a in assets if a in changed or a in activated}
             with self.balancer.lock:
                 self.balancer.assignment = dict(assignment)
-                self.balancer.owners.update(self.balancer.current_owners())
+                new_owners = self.balancer.current_owners()
+                self.balancer.owners.update(new_owners)
+                self.balancer.applied(old_owners, new_owners, time.monotonic())
             for operation in ('unsubscribe', 'subscribe'):
                 for index, commands in changes.items():
                     state = self.states[index]
@@ -1184,10 +1220,15 @@ class MarketConnections:
                     raw, received_at, epoch = inbox.queue.get(timeout=.2)
                     inbox.queue_wait_seconds = (datetime.now(timezone.utc) - received_at).total_seconds()
                     inbox.lag_seconds = inbox.queue_wait_seconds
+                    if inbox.queue_wait_seconds > 1:
+                        inbox.delivery_gap = True
                 except Empty:
                     continue
                 try:
+                    parsing_at = time.monotonic()
                     event = json.loads(raw) if isinstance(raw, (str, bytes, bytearray)) else raw
+                    inbox.parse_max_seconds = max(inbox.parse_max_seconds, time.monotonic() - parsing_at)
+                    self.balancer.receive(event, index)
                     self.stats.message(index)
                     if _PIPELINE:
                         # Recheck generation under the same lock used for invalidation.
@@ -1226,16 +1267,17 @@ class MarketConnections:
         def received(_sock, raw):
             if raw in ('PONG', b'PONG'):
                 return
-            # Parse once here (C json); count before the FIFO so a backlog
-            # cannot hide load. The worker reuses the parsed event.
-            try:
-                event = json.loads(raw)
-            except ValueError:
-                return
-            self.balancer.receive(event, index)
-            inbox.put(event)
+            # No JSON, rate-balancer lock or Pipeline lock on the socket reader.
+            # Raw ingress totals remain accurate even when the FIFO overflows;
+            # group rates are sampled only across healthy drain windows below.
+            began = time.monotonic()
+            inbox.received_frames += 1
+            inbox.received_bytes += len(raw)
+            inbox.put(raw)
+            inbox.callback_max_seconds = max(inbox.callback_max_seconds, time.monotonic() - began)
 
         def failed(_sock, error):
+            inbox.delivery_gap = True
             state['connected'] = False
             slow = 'slow consumer' in str(error).lower() or 'slow_consumer' in str(error).lower()
             if not slow or not state.get('slow_error'):
@@ -1246,6 +1288,7 @@ class MarketConnections:
                 state['slow_error'] = True
 
         def closed(_sock, code=None, reason=None):
+            inbox.delivery_gap = True
             state['connected'] = False
             counted = state.pop('slow_error', False)
             _LOG.info('Polymarket WS close shard=%s code=%s slow_consumer=%s', index, code, 'slow consumer' in str(reason).lower() or 'slow_consumer' in str(reason).lower())
@@ -1277,22 +1320,36 @@ class MarketConnections:
         if self.closed or _STOP.is_set():
             return
         now = time.monotonic()
-        # Sample ingress rates per group; move whole groups only, at most
-        # REBALANCE_MAX_GROUPS per round, with hysteresis and a cooldown.
+        # Group attribution runs off-reader. Freeze measurements/plans during
+        # outages, overflow or backlog, plus one full recovery window; never
+        # move a hot group because incomplete delivery made its rate look low.
         balancer = self.balancer
-        # A cold start (no prior, nothing measured) samples once after 20 s.
         first = not balancer.measured and not balancer.rates
-        if (self.reconnect_pending or now - balancer.last_check >= balancer.interval
+        unhealthy = set()
+        for state in self.states.values():
+            inbox = state.get('inbox')
+            bad = not state['connected'] or (inbox and (
+                inbox.delivery_gap or inbox.invalid.is_set() or inbox.resync.is_set() or
+                (inbox.queue.qsize() and inbox.lag_seconds > 1)))
+            if inbox:
+                inbox.delivery_gap = False
+            if bad:
+                unhealthy.update(balancer.groups[a] for a in state['assets'] if a in balancer.groups)
+        self.sample_unavailable.update(unhealthy)
+        if (now - balancer.last_check >= balancer.interval
                 or first and now - balancer.last_check >= min(20, balancer.interval)):
             balancer.last_check = now
-            balancer.sample(now)
+            previous_unavailable = set(balancer.unavailable)
+            balancer.sample(now, self.sample_unavailable)
             owners = balancer.current_owners()
-            if (self.markets and balancer.measured and now - balancer.last_rebalance >= balancer.minimum
+            if (not self.sample_unavailable and not previous_unavailable and self.markets and balancer.measured
                     and set(owners) >= {balance_key(m) for m in self.markets}):
-                target = balancer.plan(owners)
+                target = balancer.plan(owners, now)
                 if target:
                     self.apply_assignment(self.assignment_for(target))
-                    balancer.last_rebalance = now
+            else:
+                balancer.pressure, balancer.pressure_samples = None, 0
+            self.sample_unavailable.clear()
         self.reconnect_pending = False
         for index, state in self.states.items():
             if state.get('inbox') and state['inbox'].invalid.is_set() and state['socket']:
@@ -1311,16 +1368,35 @@ class MarketConnections:
                     state['connected'] = False
                     state['socket'].close()
                     _ws_error(exc)
+        for state in self.states.values():
+            inbox = state.get('inbox')
+            if inbox and now > inbox.metric_at:
+                elapsed = now - inbox.metric_at
+                inbox.receive_rate = (inbox.received_frames - inbox.metric_frames) / elapsed
+                inbox.byte_rate = (inbox.received_bytes - inbox.metric_bytes) / elapsed
+                inbox.metric_frames, inbox.metric_bytes = inbox.received_frames, inbox.received_bytes
+                inbox.metric_at = now
+        cpu_now = time.process_time()
+        cpu_cores = (cpu_now - self.cpu_seconds) / (now - self.cpu_at) if now > self.cpu_at else 0
+        self.cpu_at, self.cpu_seconds = now, cpu_now
         with _LOCK:
             STATUS.setdefault('rebalance_count', 0)
             STATUS.update(self.balancer.metrics())
+            STATUS.update(ws_process_cpu_cores=cpu_cores, ws_gil_switch_ms=sys.getswitchinterval() * 1000)
             STATUS['ws_shard_assets'] = [len(self.states.get(i, {}).get('assets', [])) for i in range(self.count)]
             STATUS['ws_receive_queues'] = {
                 i: dict(depth=s['inbox'].queue.qsize(), drops=s.get('receive_drops', 0) + s['inbox'].dropped,
                         high_water=s['inbox'].high_water, capacity=s['inbox'].queue.maxsize,
                         resyncs=s['inbox'].resyncs, lag_seconds=s['inbox'].lag_seconds,
                         queue_wait_seconds=s['inbox'].queue_wait_seconds,
-                        lock_wait_seconds=s['inbox'].lock_wait_seconds)
+                        lock_wait_seconds=s['inbox'].lock_wait_seconds,
+                        receive_rate=s['inbox'].receive_rate, receive_bytes_per_second=s['inbox'].byte_rate,
+                        received_frames=s['inbox'].received_frames, received_bytes=s['inbox'].received_bytes,
+                        callback_max_seconds=s['inbox'].callback_max_seconds,
+                        parse_max_seconds=s['inbox'].parse_max_seconds,
+                        tcp_pending_bytes=socket_pending_bytes(s.get('socket')),
+                        read_ahead_active=getattr(s.get('socket'), 'read_ahead_active', False),
+                        read_calls=getattr(s.get('socket'), 'read_calls', 0))
                 for i, s in self.states.items() if 'inbox' in s}
             STATUS['ws_shards'] = self.count
             STATUS['ws_connected'] = sum(bool(s['connected']) for s in self.states.values())
