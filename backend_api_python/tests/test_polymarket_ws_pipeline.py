@@ -1,6 +1,7 @@
 """Receive isolation, throttles, bounded persistence and lifecycle behavior."""
 import json
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 
 from app.services.polymarket import observer
@@ -483,19 +484,169 @@ def test_elastic_receive_fifo_keeps_deltas():
     assert q.queue.maxsize == 8 and not q.invalid.is_set()
 
 
-def test_weighted_market_placement_reduces_hot_shard_and_keeps_pairs():
+def test_prior_weights_place_cold_start_and_keep_pairs():
     markets = [market(str(i)) for i in range(16)]
-    initial = observer.shard_markets(markets, 4)
-    previous = {a: i for i, group in initial.items() for a in observer.subscription_assets(group)}
-    rates = {a: (7 if owner == 3 else 1) for a, owner in previous.items()}
-    groups = observer.shard_markets(markets, 4, previous, rates)
+    rates = {f'market:{i}': (7 if i < 4 else 1) for i in range(16)}
+    groups = observer.shard_markets(markets, 4, rates=rates)
     target = {a: i for i, group in groups.items() for a in observer.subscription_assets(group)}
-    loads = [sum(rates[a] for a in target if target[a] == i) for i in range(4)]
-    assert max(loads) / min(loads) < 2
-    assert set(target) == set(previous)
+    loads = [sum(rates['market:' + m['id']] for m in groups[i]) for i in range(4)]
+    assert loads == [10] * 4
+    assert set(target) == set(observer.subscription_assets(markets))
     for m in markets:
         assert target[m['yesAssetId']] == target[m['noAssetId']]
 
+
+def updown(asset, interval, window):
+    ident = f'{asset}-{interval}-{window}'
+    return market(ident, market_type='up_down', asset=asset, interval=interval)
+
+
+def test_series_windows_share_a_shard_across_rollovers(monkeypatch):
+    sent = []
+    monkeypatch.setattr(observer, '_PIPELINE', None)
+    monkeypatch.setattr(observer, '_STOP', threading.Event())
+    manager = observer.MarketConnections()
+    monkeypatch.setattr(manager, 'tick', lambda: None)
+    series = [('BTC', '5m'), ('ETH', '5m'), ('BTC', '15m'), ('SOL', '5m')]
+    catalogue = [updown(a, i, w) for a, i in series for w in (0, 1)] + [market('yn')]
+    manager.sync(catalogue)
+    owner = {key: manager.balancer.owners[key] for key in manager.balancer.owners}
+    assert len(set(owner.values())) == 4
+    for a, i in series:
+        shards = {manager.balancer.assignment[x] for w in (0, 1)
+                  for x in observer.subscription_assets([updown(a, i, w)])}
+        assert shards == {owner[f'up_down:{a}:{i}']}
+
+    class Socket:
+        def __init__(self, index):
+            self.index = index
+
+        def send(self, raw):
+            sent.append((self.index, json.loads(raw)))
+    for index, state in manager.states.items():
+        state.update(connected=True, socket=Socket(index))
+    rebalances = observer.STATUS.get('rebalance_count', 0)
+    # Window 0 expires, 1 is current, 2 appears: only that series' shard changes.
+    rolled = [updown(a, i, w) for a, i in series for w in ((1, 2) if a == 'BTC' and i == '5m' else (0, 1))]
+    manager.sync(rolled + [market('yn')])
+    shard = owner['up_down:BTC:5m']
+    assert {index for index, _ in sent} == {shard}
+    assert sent == [(shard, dict(assets_ids=['BTC-5m-0n', 'BTC-5m-0y'], operation='unsubscribe')),
+                    (shard, dict(assets_ids=['BTC-5m-2n', 'BTC-5m-2y'], operation='subscribe'))]
+    assert observer.STATUS.get('rebalance_count', 0) == rebalances
+    assert manager.balancer.owners == owner
+
+
+def test_receive_counts_at_ingress_parses_once_and_skips_utf8_scan(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+    sockets = []
+    stop = threading.Event()
+
+    class Socket:
+        def __init__(self, url, **callbacks):
+            self.url, self.callbacks = url, callbacks
+            sockets.append(self)
+
+        def run_forever(self, **kwargs):
+            self.kwargs = kwargs
+            self.callbacks['on_open'](self)
+            stop.wait(3)
+
+        def send(self, raw):
+            pass
+
+        def close(self):
+            stop.set()
+
+    monkeypatch.setitem(sys.modules, 'websocket', SimpleNamespace(WebSocketApp=Socket))
+    monkeypatch.setattr(observer, '_STOP', threading.Event())
+    monkeypatch.setenv('POLYMARKET_OBSERVER_WS_URL', 'ws://127.0.0.1:9/ws/market')
+    monkeypatch.setenv('POLYMARKET_OBSERVER_WS_SHARDS', '1')
+    monkeypatch.setenv('POLYMARKET_OBSERVER_WS_RECEIVE_QUEUE_MAX', '2')
+    monkeypatch.setenv('POLYMARKET_OBSERVER_WS_RECEIVE_QUEUE_CEILING', '2')
+    p = observer.Pipeline()
+    p.set_markets([market()])
+    monkeypatch.setattr(observer, '_PIPELINE', p)
+    m = observer.MarketConnections()
+    parsed = []
+    loads = observer.json.loads
+    monkeypatch.setattr(observer.json, 'loads', lambda raw, **kw: parsed.append(raw) or loads(raw, **kw))
+    with p.lock:  # The worker is blocked: only ingress sees these frames.
+        m.sync([market()])
+        for _ in range(100):
+            if hasattr(sockets[0], 'kwargs'):
+                break
+            time.sleep(.01)
+        assert sockets[0].url == 'ws://127.0.0.1:9/ws/market'
+        assert sockets[0].kwargs['skip_utf8_validation'] is True
+        receive = sockets[0].callbacks['on_message']
+        frame = json.dumps(dict(event_type='price_change', price_changes=[
+            dict(asset_id='ay', side='BUY', price='.4', size='1'),
+            dict(asset_id='an', side='SELL', price='.6', size='1')])).encode()
+        for _ in range(10):
+            receive(sockets[0], frame)
+        receive(sockets[0], b'PONG')
+        receive(sockets[0], b'\xff\xfe not utf-8')
+        inbox = m.states[0]['inbox']
+        assert m.balancer.pending == {'market:a': 10}  # FIFO rejected most of them.
+        assert inbox.dropped >= 8
+        assert len(parsed) == 11  # One parse per data frame, none for PONG.
+        assert isinstance(inbox.queue.queue[0][0], dict)
+    m.close()
+
+
+def test_read_ahead_reader_drains_batched_frames_with_few_syscalls(monkeypatch):
+    import base64
+    import hashlib
+    import socket
+    import struct
+    import websocket
+    from websocket import _core
+
+    server = socket.socket()
+    server.bind(('127.0.0.1', 0))
+    server.listen(1)
+    frames = [json.dumps(dict(event_type='book', asset_id=str(i), bids=[], asks=[])).encode() for i in range(300)]
+
+    def serve():
+        conn, _ = server.accept()
+        request = b''
+        while b'\r\n\r\n' not in request:
+            request += conn.recv(4096)
+        key = next(line.split(b':', 1)[1].strip() for line in request.split(b'\r\n')
+                   if line.lower().startswith(b'sec-websocket-key'))
+        accept = base64.b64encode(hashlib.sha1(key + b'258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest())
+        conn.sendall(b'HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n'
+                     b'Sec-WebSocket-Accept: ' + accept + b'\r\n\r\n')
+        conn.sendall(b''.join(struct.pack('!BB', 0x81, 126) + struct.pack('!H', len(f)) + f
+                              if len(f) > 125 else struct.pack('!BB', 0x81, len(f)) + f for f in frames))
+        done.wait(5)
+        conn.close()
+
+    done = threading.Event()
+    threading.Thread(target=serve, daemon=True).start()
+    calls = []
+    recv = _core.recv
+    monkeypatch.setattr(_core, 'recv', lambda sock, size: calls.append(size) or recv(sock, size))
+    received = []
+
+    def message(app, raw):
+        received.append(raw)
+        if len(received) == len(frames):
+            done.set()
+    app = observer.read_ahead_app(websocket.WebSocketApp)(
+        f'ws://127.0.0.1:{server.getsockname()[1]}', on_message=message)
+    thread = threading.Thread(target=lambda: app.run_forever(skip_utf8_validation=True), daemon=True)
+    thread.start()
+    # The stock select-per-frame loop would wait for more data after the first
+    # read-ahead batch; draining delivers everything without new bytes arriving.
+    assert done.wait(3)
+    app.close()
+    thread.join(3)
+    server.close()
+    assert received == frames
+    assert len([size for size in calls if size == observer.READ_AHEAD_BYTES]) < len(frames) / 10
 
 
 def test_hard_overflow_recovers_snapshots_on_same_socket(monkeypatch):
