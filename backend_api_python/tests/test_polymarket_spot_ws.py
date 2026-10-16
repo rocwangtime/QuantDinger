@@ -395,12 +395,13 @@ class Cursor:
 def test_proxy_settlement_accepts_websocket_samples(source):
     mk = market()
     start, end = (datetime.fromisoformat(mk[k]) for k in ('eventStartTime', 'endDate'))
-    row = dict(market=mk, spec=dict(tie=0))
+    row = dict(market=mk, spec=maker.mm.parse_rules(mk))
+    after = end.timestamp() * 1000 + 1  # Past the final print, no official-result wait.
     samples = [dict(market_id='42', reference_source=source, reference_observed_at=start, reference_price='60000'),
                dict(market_id='42', reference_source='api.binance.com', reference_observed_at=end, reference_price='59999')]
-    assert maker.RecordedFeed.outcome(Cursor(samples), row) == ('Down', True)
+    assert maker.RecordedFeed.outcome(Cursor(samples), row, after) == ('Down', True)
     samples[0]['reference_source'] = 'unavailable'
-    assert maker.RecordedFeed.outcome(Cursor(samples), row) == (None, False)
+    assert maker.RecordedFeed.outcome(Cursor(samples), row, after) == (None, False)
     at = start.replace(tzinfo=timezone.utc)
     rows = [dict(observed_at=at, reference_observed_at=at, reference_price='60000.02', reference_source=source)]
     assert backtest.proxy(rows, at) == Decimal('60000.02')
