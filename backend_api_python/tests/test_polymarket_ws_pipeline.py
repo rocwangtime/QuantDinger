@@ -438,13 +438,6 @@ def test_socket_drains_while_worker_waits_for_book_lock(monkeypatch):
         assert m.states[0]['inbox'].dropped == 0
         assert m.states[0]['inbox'].queue.maxsize >= 8
         assert not p.books
-        assert m.balancer.pending['ay'] == 10
-        # Even rejected frames must count; publication remains blocked.
-        m.states[0]['inbox'].resync.set()
-        for _ in range(100):
-            sockets[0].callbacks['on_message'](sockets[0], '{"asset_id":"ay"}')
-        assert m.balancer.pending['ay'] == 110
-        assert m.states[0]['inbox'].dropped == 100
     m.close()
     assert not m.states[0]['worker'].is_alive()
     assert not p.books

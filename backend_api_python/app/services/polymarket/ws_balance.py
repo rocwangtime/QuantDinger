@@ -36,8 +36,6 @@ class RateBalancer:
         self.count = count
         self.lock = threading.RLock()
         self.assignment, self.rates, self.pending = {}, {}, {}
-        self.seen, self.measured = set(), set()
-        self.max_moves = int(setting('REBALANCE_MAX_ASSETS', 8, 2))
         self.sample_at = time.monotonic()
         self.last_check = self.sample_at
         self.last_rebalance = float('-inf')
@@ -49,8 +47,6 @@ class RateBalancer:
     def set_assets(self, assignment):
         with self.lock:
             # Applied ownership is changed only after wire updates succeed.
-            self.seen.intersection_update(assignment)
-            self.measured.intersection_update(assignment)
             self.rates = {a: self.rates.get(a, 0) for a in assignment}
             self.pending = {a: self.pending.get(a, 0) for a in assignment}
 
@@ -60,39 +56,10 @@ class RateBalancer:
         except (ValueError, TypeError, AttributeError):
             return
         with self.lock:
-            assets = {a for a in assets if self.assignment.get(a) == shard}
             for asset in assets:
-                self.seen.add(asset)
-                self.pending[asset] = self.pending.get(asset, 0) + 1 / len(assets)
-
-    def ready(self):
-        with self.lock:
-            return bool(self.rates) and set(self.rates) <= self.measured
-
-    def limit_moves(self, target, markets):
-        """Apply improving whole-market steps within a hard asset churn budget."""
-        result = dict(self.assignment)
-        remaining = [{a for a in (m['yesAssetId'], m['noAssetId'])
-                      if a in result and result[a] != target[a]} for m in markets]
-        remaining = [group for group in remaining if group]
-        used = 0
-        while remaining:
-            candidates = []
-            for group in remaining:
-                if used + len(group) > self.max_moves:
-                    continue
-                candidate = dict(result)
-                candidate.update({a: target[a] for a in group})
-                candidates.append((self.imbalance(self.loads(candidate)), sorted(group), candidate, group))
-            if not candidates:
-                break
-            score, _, candidate, group = min(candidates, key=lambda row: (row[0], row[1]))
-            if score >= self.imbalance(self.loads(result)):
-                break
-            result = candidate
-            used += len(group)
-            remaining.remove(group)
-        return result
+                # Count a frame once per token and ignore handover duplicates.
+                if self.assignment.get(asset) == shard:
+                    self.pending[asset] = self.pending.get(asset, 0) + 1
 
     def loads(self, assignment):
         loads = [0.0] * self.count
@@ -114,15 +81,10 @@ class RateBalancer:
             if elapsed > 0:
                 alpha = 1 - math.exp(-math.log(2) * elapsed / self.half_life)
                 for asset in self.rates:
-                    rate = self.pending.get(asset, 0) / elapsed
-                    if asset not in self.measured and self.rates[asset] == 0:
-                        self.rates[asset] = rate
-                    else:
-                        self.rates[asset] += alpha * (rate - self.rates[asset])
-                self.measured.update(self.seen)
+                    self.rates[asset] += alpha * (self.pending.get(asset, 0) / elapsed - self.rates[asset])
                 self.pending = {}
                 self.sample_at = now
-            if not self.ready() or now - self.last_rebalance < self.minimum:
+            if now - self.last_rebalance < self.minimum:
                 return None
             old = self.imbalance(self.loads(self.assignment))
             if old <= self.threshold:
@@ -157,7 +119,7 @@ class RateBalancer:
             result = dict(self.assignment)
             remaining = {a for a in target if target[a] != result[a]}
             loads = self.loads(result)
-            while remaining and sum(result[a] != self.assignment[a] for a in result) < self.max_moves:
+            while remaining:
                 def moved_loads(asset):
                     moved = list(loads)
                     moved[result[asset]] -= self.rates.get(asset, 0)
@@ -175,9 +137,7 @@ class RateBalancer:
         with self.lock:
             loads = self.loads(self.assignment)
             return dict(ws_shard_loads=loads, ws_load_imbalance=self.imbalance(loads),
-                        ws_rebalance_hysteresis=self.threshold,
-                        ws_rate_unobserved_assets=len(set(self.rates) - self.measured),
-                        ws_rebalance_max_assets=self.max_moves, ws_last_rebalance_monotonic=(
+                        ws_rebalance_hysteresis=self.threshold, ws_last_rebalance_monotonic=(
                             self.last_rebalance if math.isfinite(self.last_rebalance) else None))
 
 
