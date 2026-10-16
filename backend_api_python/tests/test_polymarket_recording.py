@@ -240,3 +240,90 @@ def test_freshness_metrics_separate_idle_age_from_arrival_lag():
     assert 15000 <= metrics['book_age_p95_ms'] < 16000
     assert 14000 <= metrics['book_receipt_age_p95_ms'] < 15000
     assert metrics['book_arrival_lag_p95_ms'] == 10000
+
+
+CHAINLINK = 'https://data.chain.link/streams/btc-usd-twap-60s-streams'
+BINANCE = 'https://www.binance.com/en/trade/BTC_USDT'
+
+
+def cell(asset, interval, source=CHAINLINK, identity=None):
+    seconds = {'5m': 300, '15m': 900, '1h': 3600, '4h': 14400, '1d': 86400}[interval]
+    tag = identity or f'{asset}{interval}'
+    return dict(market(resolutionSource=source), id=tag, conditionId='c' + tag, yesAssetId=tag + 'u',
+                noAssetId=tag + 'd', asset=asset, interval=interval,
+                endDate=(NOW + timedelta(seconds=seconds)).isoformat())
+
+
+def scope_env(monkeypatch, assets=None, intervals=None):
+    for name, value in (('ASSETS', assets), ('INTERVALS', intervals)):
+        if value is None:
+            monkeypatch.delenv(f'POLYMARKET_OBSERVER_RECORDING_{name}', raising=False)
+        else:
+            monkeypatch.setenv(f'POLYMARKET_OBSERVER_RECORDING_{name}', value)
+
+
+@pytest.mark.parametrize(('assets', 'intervals'), [(None, None), ('', ''), (' ', ' , ')])
+def test_default_recording_scope_is_unchanged(monkeypatch, assets, intervals):
+    scope_env(monkeypatch, assets, intervals)
+    assert recording.recording_scope() == (('BTC', 'ETH'), ('5m', '15m'))
+    recorded = {(a, i) for a in ('BTC', 'ETH', 'SOL', 'XRP') for i in ('5m', '15m', '1h', '4h', '1d')
+                if recording.scoped(cell(a, i))}
+    assert recorded == {('BTC', '5m'), ('BTC', '15m'), ('ETH', '5m'), ('ETH', '15m')}
+    assert recording.scoped(dict(id='y', market_type='yes_no')) and recording.scoped(dict(id='y'))
+    assert recording.Recorder().metrics({})['recording_scope'] == dict(assets=['BTC', 'ETH'], intervals=['5m', '15m'])
+
+
+def test_recording_scope_normalizes_and_drops_unknown_names(monkeypatch):
+    scope_env(monkeypatch, 'sol, doge,BTC,sol', '1H,2h, 1d ,5m')
+    assert recording.recording_scope() == (('SOL', 'BTC'), ('1h', '1d', '5m'))
+    scope_env(monkeypatch, 'DOGE', '5m')
+    assert recording.recording_scope() == ((), ('5m',))  # Visible in status, never widened silently.
+    assert not recording.scoped(cell('BTC', '5m'))
+    assert recording.scoped(dict(id='y', market_type='yes_no'))
+
+
+def test_default_scope_skips_hourly_books_trades_and_windows(monkeypatch):
+    scope_env(monkeypatch)
+    monkeypatch.setattr(observer, 'opportunity', lambda *args: None)
+    p = observer.Pipeline()
+    p.set_markets([cell('BTC', '1h', BINANCE), cell('SOL', '5m')])
+    assert not [item for item in p.queue.take(500) if item[1] == 'window']
+    for token in ('BTC1hu', 'SOL5mu'):
+        p.receive(json.dumps(book(token)))
+        p.receive(json.dumps(dict(event_type='last_trade_price', asset_id=token, price='.5', size='1', side='BUY')))
+    p.evaluate(10)
+    assert not p.recording.pending
+    assert not [item for item in p.queue.take(500) if item[1] in {'book', 'trade'}]
+
+
+def test_configured_scope_records_every_cell_with_rule_settlement_window(monkeypatch):
+    scope_env(monkeypatch, 'BTC,ETH,SOL,XRP', '5m,15m,1h,4h,1d')
+    monkeypatch.setattr(observer, 'opportunity', lambda *args: None)
+    markets = [cell('BTC', '5m'), cell('SOL', '15m'), cell('BTC', '1h', BINANCE), cell('XRP', '4h'),
+               cell('ETH', '1d', BINANCE), cell('ETH', '1h', ''), cell('XRP', '1d', '')]
+    p = observer.Pipeline()
+    p.set_markets(markets)
+    windows = {item[0]: item[2][0][1] for item in p.queue.take(500) if item[1] == 'window'}
+    assert set(windows) == {m['id'] for m in markets}
+    # Chainlink TWAP rules 60 s, Binance candles 0; unreadable rules fall back by label.
+    assert {k: v[-1] for k, v in windows.items()} == {
+        'BTC5m': 60, 'SOL15m': 60, 'BTC1h': 0, 'XRP4h': 60, 'ETH1d': 0, 'ETH1h': 0, 'XRP1d': 0}
+    assert windows['BTC1h'][:9] == ('BTC1h', 'cBTC1h', 'BTC', '1h', NOW.isoformat(),
+                                    (NOW + timedelta(hours=1)).isoformat(), None, 'BTC1hu', 'BTC1hd')
+    for m in markets:
+        p.receive(json.dumps(book(m['yesAssetId'], timestamp=str(int(NOW.timestamp() * 1000)))))
+        p.receive(json.dumps(dict(event_type='last_trade_price', asset_id=m['noAssetId'], price='.5', size='1', side='SELL')))
+    p.evaluate(10)
+    queued = p.queue.take(5000)
+    assert {item[0] for item in queued if item[1] == 'book'} == {m['yesAssetId'] for m in markets}
+    assert {item[0] for item in queued if item[1] == 'trade'} == {m['noAssetId'] for m in markets}
+    p.set_markets(markets)  # Unchanged catalogue: no duplicate window registration.
+    assert not [item for item in p.queue.take(500) if item[1] == 'window']
+
+
+@pytest.mark.parametrize(('source', 'interval', 'expected'), [
+    (CHAINLINK, '5m', 60), (CHAINLINK, '4h', 60), (BINANCE, '1h', 0), (BINANCE, '1d', 0),
+    (BINANCE, '15m', 0), ('', '5m', 60), ('', '15m', 60), ('', '4h', 60), ('', '1h', 0), ('', '1d', 0),
+])
+def test_settlement_window_follows_rules_then_label(source, interval, expected):
+    assert recording.settlement_window(cell('BTC', interval, source)) == expected

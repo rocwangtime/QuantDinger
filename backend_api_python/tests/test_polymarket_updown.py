@@ -98,6 +98,24 @@ def test_rollover_drops_expired_adds_new_tokens_and_caps(monkeypatch):
     assert observer.subscription_assets(second) == ['123', '456']
 
 
+
+def test_discovery_requests_published_series_slugs_for_every_cell(monkeypatch):
+    monkeypatch.delenv('POLYMARKET_OBSERVER_UPDOWN_ASSETS', raising=False)
+    monkeypatch.delenv('POLYMARKET_OBSERVER_UPDOWN_INTERVALS', raising=False)
+    requested = []
+
+    class Client:
+        def _json(self, method, url, **kwargs):
+            requested.append(kwargs['params']['slug'])
+            return []
+
+    assert updown.discover(Client(), {}, now=NOW) == ([], [])
+    assert len(requested) == 20
+    # Gamma publishes SOL hourly/daily as "solana-"; every other series uses the ticker.
+    assert {'solana-up-or-down-hourly', 'solana-up-or-down-daily', 'sol-up-or-down-5m', 'sol-up-or-down-15m',
+            'sol-up-or-down-4h', 'btc-up-or-down-hourly', 'eth-up-or-down-daily', 'xrp-up-or-down-hourly'} <= set(requested)
+    assert not {'sol-up-or-down-hourly', 'sol-up-or-down-daily'} & set(requested)
+
 def test_disabled_by_default(monkeypatch):
     monkeypatch.delenv('POLYMARKET_OBSERVER_UPDOWN_ENABLED', raising=False)
     monkeypatch.delenv('POLYMARKET_OBSERVER_ENABLED', raising=False)

@@ -47,6 +47,9 @@ def snapshot():
         if metrics["last_message_at"] is None:
             metrics.pop("last_message_at")
         result.update(metrics)
+    provider = _REFERENCE
+    if hasattr(provider, 'metrics'):  # Spot WebSocket composite only.
+        result.update(provider.metrics())
     return result
 
 
@@ -301,7 +304,7 @@ def _market_loop():
     yes_markets = []
     yes_refresh = 0
     if updown.enabled():
-        _REFERENCE = updown.ReferencePrices()
+        _REFERENCE = updown.reference_provider()
         _REFERENCE.start()
     backoff = 5
     ws_failures = 0
@@ -666,11 +669,11 @@ class Pipeline:
         if self.recording.enabled:
             for market in markets:
                 if (market['id'] not in previous and market.get('market_type') == 'up_down'
-                        and recording.scoped(market)):
+                        and recording.scoped(market, self.recording.scope)):
                     self.queue.put(market['id'], 'window', [(recording.WINDOW_SQL, (
                         market['id'], market['conditionId'], market['asset'], market['interval'],
                         market['eventStartTime'], market['endDate'], market.get('price_to_beat'),
-                        market['yesAssetId'], market['noAssetId']))])
+                        market['yesAssetId'], market['noAssetId'], recording.settlement_window(market)))])
         for identity in previous - self.markets.keys():
             self.capture(identity, 'observation', lambda: _end_episode(identity, datetime.now(timezone.utc)))
 

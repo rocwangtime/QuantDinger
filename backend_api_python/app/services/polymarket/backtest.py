@@ -11,6 +11,8 @@ from uuid import uuid4
 from app.utils.db import get_db_connection
 
 VERSION = "late_window_v1"
+# Mirrors updown.BINANCE_SOURCES (REST, then WebSocket hosts) without importing a network client.
+BINANCE_SOURCES = ("api.binance.com", "data-api.binance.vision", "stream.binance.com", "data-stream.binance.vision")
 MAX_ROWS = 100000
 
 
@@ -66,7 +68,7 @@ def proxy(rows, at):
             break
         observed = row.get("reference_observed_at")
         if (
-            row.get("reference_source") in ("api.binance.com", "data-api.binance.vision")
+            row.get("reference_source") in BINANCE_SOURCES
             and observed
             and observed <= row["observed_at"]
             and 0 <= (at - observed).total_seconds() <= 10
