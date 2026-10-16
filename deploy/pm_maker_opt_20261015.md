@@ -1,5 +1,7 @@
 # Polymarket paper maker optimization — 2026-10-15
 
+> 已由 v3 公允价做市取代，见 `deploy/pm_maker_v3_20261016.md`；本文参数表中的 maker 参数在 v3 中不再读取。
+
 分支基于 `f4c68a5`，本次以 `git revert -m 1 f4c68a5` 回退 PR #63；observer 和 ws pipeline 测试已核对与 `dac13bf` 完全一致，保留 PR #64 做市逻辑。分支：`feat/pm-maker-opt-20261015`。
 仅改纸面账户、虚拟 maker、参数示例和测试；未改实盘、PAPER_AUTO、钱包、签名，无密钥写入。未合并、未部署。无需前端变更：纸面账户现有状态接口返回 maker 配置、筛选历史和收益元数据。
 

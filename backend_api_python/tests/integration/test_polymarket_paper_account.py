@@ -118,60 +118,64 @@ def test_retention_bounded_preserves_open_capital_evidence(isolated):
     assert len(account_api.reports(day=p.day_key(now))) == 0
 
 
-def test_maker_atomic_shared_ledger_reports_restart_and_retry(isolated, monkeypatch):
-    # Ledger fixture assumes the original .99 quote budget.
-    monkeypatch.setenv("POLYMARKET_PAPER_MAKER_TIME_DISCOUNT", "0")
-    from app.services.polymarket.maker import Maker, RecordedFeed
-    from tests.test_polymarket_maker import NOW, market as maker_market, books as maker_books, print_
+def test_maker_atomic_shared_ledger_reports_restart_and_retry(isolated):
+    from app.services.polymarket.maker import Maker, RecordedFeed, TAG
+    from tests.test_polymarket_maker import NOW, admit, market as maker_market, books as maker_books, print_
     a = p.Account({'taker_enabled': True})
     m = Maker(a)
-    m.quote(maker_market(), maker_books(), 60000, NOW)
-    m.trade('42', 0, print_(size='3'), NOW + 100)
-    m.trade('42', 1, print_('down', size='2'), NOW + 100)
+    admit(m, 'BTC:5m')
+    m.observe_spot('BTC', '60000', NOW, NOW)
+    m.step(maker_market(), maker_books(), NOW)
+    m.prints('42', 0, [print_('up', price='.48', size='1')], NOW + 400)  # Through print: all 10 Up at .49.
+    m.prints('42', 1, [print_('down', price='.49', size='104', at=NOW + 450)], NOW + 500)  # 100 queued ahead.
     events = list(a.maker_changed)
     store = p.Store()
-    store.save(a, NOW + 100)
+    store.save(a, NOW + 500)
     # Ambiguous commit retry uses stable event IDs and overwrites daily state.
     a.maker_changed = events
-    store.save(a, NOW + 100)
+    store.save(a, NOW + 500)
     restored = store.load(a.config)
-    assert restored.equity() == number('5000.02')
-    assert number(restored.state['positions']) == number('.49')
-    RecordedFeed(restored)  # Restart releases only outstanding reservations.
+    assert restored.equity() == number('5000.08')
+    assert number(restored.state['positions']) == number('2.94')
+    assert number(restored.state['locked']) == number('2.94')  # Down remainder still resting.
+    feed = RecordedFeed(restored)  # Restart: virtual orders stay fillable until the cancel lands.
+    row = feed.maker.state['markets']['42']
+    assert row['orders'] and all(o['cancel_at'] is not None for o in row['orders'])
+    feed.maker.finalize(row, max(o['cancel_at'] for o in row['orders']) + 2000)
     assert number(restored.state['locked']) == 0
-    assert number(restored.state['positions']) == number('.49')
-    m = Maker(restored)
-    m.settle('42', 'Down', NOW + 300000)
-    store.save(restored, NOW + 300000)
+    assert number(restored.state['positions']) == number('2.94')
+    feed.maker.settle('42', 'Down', NOW + 420000)
+    store.save(restored, NOW + 420000)
     report = account_api.reports(day=p.day_key(NOW))[0]
     assert report['attempted'] == report['filled'] == 0  # taker counters isolated
-    assert report['maker']['paired_sets'] == '2'
-    assert number(report['maker']['net_pnl']) == number('-.47')
-    assert report['maker']['estimated_rebate'] is None
-    assert number(report['maker']['rebate_scenario_only']) > 0
-    assert report['maker']['net_pnl_including_estimated_rebate'] == report['maker']['net_pnl']
-    assert number(report['maker']['net_pnl_per_completed_set']) == number('.01')
+    maker = report['maker']
+    assert maker['strategy'] == TAG and maker['paired_sets'] == '4.00000000'
+    assert number(maker['net_pnl']) == number('-2.86') == number(maker['decomposed_pnl'])
+    assert maker['estimated_rebate'] is None and number(maker['rebate_scenario_only']) > 0
+    assert maker['net_pnl_including_estimated_rebate'] == maker['net_pnl']
+    assert number(maker['net_pnl_per_completed_set']) == number('.02')
     with isolated() as db:
         cur = db.cursor()
-        cur.execute("SELECT count(*) AS n FROM qd_polymarket_maker_events WHERE event='fill'")
+        cur.execute("SELECT count(*) AS n FROM qd_polymarket_maker_events WHERE event='fill' AND strategy=%s", (TAG,))
         assert cur.fetchone()['n'] == 2
+        cur.execute("SELECT count(*) AS n FROM qd_polymarket_maker_events WHERE event='market_summary'")
+        assert cur.fetchone()['n'] == 1
         cur.execute('SELECT count(*) AS n FROM qd_polymarket_paper_ledger WHERE abs(free+locked+positions-equity) > 0.000001')
         assert cur.fetchone()['n'] == 0
         cur.execute('SELECT state FROM qd_polymarket_paper_accounts')
-        assert number(cur.fetchone()['state']['free']) == number('4999.53')
+        assert number(cur.fetchone()['state']['free']) == number('4997.14')
         cur.close()
 
 
 def test_recorded_maker_feed_prints_official_and_proxy_settlement(isolated, monkeypatch):
-    # Preserve the recorded .48 through-price fixture; defaults are tested separately.
-    monkeypatch.setenv("POLYMARKET_PAPER_MAKER_TIME_DISCOUNT", "0")
     import json
     import threading
     from types import SimpleNamespace
     from app.services.polymarket import maker, observer
     from tests.test_polymarket_maker import NOW, market as maker_market
     monkeypatch.setattr('app.utils.db.get_db_connection', isolated)
-    reference = SimpleNamespace(get=lambda asset: dict(price='60000', observed_at=p.utc(NOW).isoformat()))
+    clock = dict(now=NOW)
+    reference = SimpleNamespace(get=lambda asset: dict(price='60000', observed_at=p.utc(clock['now']).isoformat()))
     monkeypatch.setattr(observer, '_REFERENCE', reference)
     market_ = maker_market()
     pipeline = SimpleNamespace(lock=threading.Lock(), markets={'42': market_})
@@ -181,33 +185,32 @@ def test_recorded_maker_feed_prints_official_and_proxy_settlement(isolated, monk
         cur.execute((Path(__file__).parents[2] / 'migrations/20261014_polymarket_recording.sql').read_text())
         for token in ('42u', '42d'):
             cur.execute("INSERT INTO qd_polymarket_observer_books VALUES (%s,'42',%s,%s,%s,'ws',%s::jsonb,%s::jsonb)",
-                (str(uuid4()), token, p.utc(NOW), p.utc(NOW), json.dumps([dict(price='.50', size='4')]), json.dumps([dict(price='.51', size='10')])))
+                (str(uuid4()), token, p.utc(NOW), p.utc(NOW), json.dumps([dict(price='.49', size='100')]), json.dumps([dict(price='.51', size='100')])))
         cur.execute("INSERT INTO qd_polymarket_observer_windows(market_id,condition_id,asset,interval,start_time,end_time,official_outcome) VALUES ('42','c','BTC','5m',%s,%s,'Down')", (market_['eventStartTime'], market_['endDate']))
         db.commit()
         cur.close()
     a = p.Account({'taker_enabled': True})
     feed = maker.RecordedFeed(a)
     feed.poll(pipeline, NOW)
-    assert a.state['maker']['markets']['42']['quotes']
+    row = a.state['maker']['markets']['42']
+    # Cold-start priors: BTC 5m is pre-open only, at probation size.
+    assert sorted((o['side'], o['price'], o['size']) for o in row['orders'] if o['kind'] == 'live') == [(0, '0.49', '5.00'), (1, '0.49', '5.00')]
+    assert a.state['maker']['selection']['reviewed'] == p.day_key(NOW)
     with isolated() as db:
         cur = db.cursor()
-        cur.execute("INSERT INTO qd_polymarket_observer_trades VALUES (%s,'42','42u',.48,3,'SELL',%s,%s,NULL)", (str(uuid4()), p.utc(NOW + 100), p.utc(NOW + 100)))
+        cur.execute("INSERT INTO qd_polymarket_observer_trades VALUES (%s,'42','42u',.48,3,'SELL',%s,%s,NULL)", (str(uuid4()), p.utc(NOW + 300), p.utc(NOW + 300)))
         db.commit()
         cur.close()
-    feed.poll(pipeline, NOW + 200)
-    feed.poll(pipeline, NOW + 300)
-    assert a.state['maker']['markets']['42']['qty'][0] == '3'
-    p.Store().save(a, NOW + 300)
-    # A late-window mark can remain pending when the market is settled.
-    feed.maker.state['markets']['42']['marks'][0]['due'] = NOW + 265000
-    feed.poll(pipeline, NOW + 300000)
+    clock['now'] = NOW + 400
+    feed.poll(pipeline, NOW + 400)
+    feed.poll(pipeline, NOW + 500)  # Re-reading the lookback window never double fills.
+    assert row['qty'][0] == '5.00000000'
+    p.Store().save(a, NOW + 500)
+    clock['now'] = NOW + 420001
+    feed.poll(pipeline, NOW + 420001)
     assert feed.maker.stats(NOW)['estimated_settlements'] == 0
-    assert a.equity() == number('4998.53')
-    assert feed.maker.state['markets']['42']['settled']
-    pipeline.markets = {}
-    feed.poll(pipeline, NOW + 400000)
+    assert a.equity() == number('4997.55')
     assert '42' not in feed.maker.state['markets']
-    assert feed.maker.stats(NOW)['mark_missing'] == 1
     # A second run with no official outcome can use recorded Binance boundaries.
     with isolated() as db:
         cur = db.cursor()
@@ -217,13 +220,16 @@ def test_recorded_maker_feed_prints_official_and_proxy_settlement(isolated, monk
         db.commit()
         cur.close()
     b = p.Account({'taker_enabled': True})
+    clock['now'] = NOW
     mf = maker.RecordedFeed(b)
-    mf.maker.quote(market_, [dict(bids=[dict(price='.5', size='4')], asks=[dict(price='.51', size='10')], exchange_at=NOW)] * 2, 60000, NOW)
-    from tests.test_polymarket_maker import print_
-    mf.maker.trade('42', 0, print_(size='1'), NOW + 100)
-    mf.poll(pipeline, NOW + 300000)
+    mf.poll(pipeline, NOW)
+    clock['now'] = NOW + 400
+    mf.poll(pipeline, NOW + 400)
+    assert b.state['maker']['markets']['42']['qty'][0] == '5.00000000'
+    clock['now'] = NOW + 420001
+    mf.poll(pipeline, NOW + 420001)
     assert mf.maker.stats(NOW)['estimated_settlements'] == 1
-    assert b.equity() == number('5000.51')
+    assert b.equity() == number('5002.55')
 
 
 def test_maker_evidence_failure_rolls_back_account_and_ledger(isolated):
@@ -233,7 +239,9 @@ def test_maker_evidence_failure_rolls_back_account_and_ledger(isolated):
     store = p.Store()
     store.save(a, NOW)
     m = Maker(a)
-    m.quote(maker_market(), maker_books(), 60000, NOW)
+    m.observe_spot('BTC', '60000', NOW, NOW)
+    m.step(maker_market(), maker_books(), NOW)
+    assert number(a.state['locked']) > 0
     with isolated() as db:
         cur = db.cursor()
         cur.execute('DROP TABLE qd_polymarket_maker_events')

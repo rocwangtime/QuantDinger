@@ -320,7 +320,9 @@ class Store:
                     del maker.state['days'][day]
                     continue
                 at = int(timestamp(day + 'T12:00:00Z').timestamp() * 1000)
-                account.daily(at)['maker'] = maker.report(at)
+                report = maker.report(at, current=day == day_key(now))
+                if report is not None:
+                    account.daily(at)['maker'] = report
         state = public(account.state)
         with get_db_connection() as db:
             cur = db.cursor()
@@ -339,7 +341,7 @@ class Store:
                         cur.execute('INSERT INTO qd_polymarket_paper_legs(trade_id,role,detail) VALUES (%s,%s,%s::jsonb) ON CONFLICT(trade_id,role) DO UPDATE SET detail=EXCLUDED.detail', (trade['id'], leg['role'], json.dumps(detail)))
                 for event in getattr(account, 'maker_changed', []):
                     cur.execute('INSERT INTO qd_polymarket_maker_events(id,account_id,strategy,market_id,observed_at,event,detail) VALUES (%s,%s,%s,%s,%s,%s,%s::jsonb) ON CONFLICT(id) DO NOTHING',
-                        (event['id'], self.account_id, 'maker_complete_set_v1', event['market_id'], utc(event['at']), event['event'], json.dumps(public(event['detail']), default=str)))
+                        (event['id'], self.account_id, event.get('strategy', 'maker_complete_set_v1'), event['market_id'], utc(event['at']), event['event'], json.dumps(public(event['detail']), default=str)))
                 if 'maker' in state:
                     cur.execute('DELETE FROM qd_polymarket_maker_events WHERE account_id=%s AND observed_at<%s', (self.account_id, utc(now - account.config['retention_days'] * 86400000)))
                 for day, stats in state['days'].items():
@@ -469,8 +471,7 @@ class Runtime:
                     last_save = now
                 self.stop_event.wait(.025)
             if maker_feed:
-                for row in maker_feed.maker.state['markets'].values():
-                    maker_feed.maker.cancel(row, int(time.time() * 1000))
+                maker_feed.maker.shutdown(int(time.time() * 1000))
             store.save(account, int(time.time() * 1000))
         except Exception as exc:
             self.error = str(exc)[:160]
