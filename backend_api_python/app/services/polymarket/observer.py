@@ -987,6 +987,9 @@ class MarketConnections:
             return
         assignments = shard_markets(markets, self.count, self.balancer.assignment, self.balancer.rates)
         assignment = {a: i for i, group in assignments.items() for a in subscription_assets(group)}
+        # Catalogue changes must not move retained owners using partial samples
+        # or bypass the periodic rebalance churn budget.
+        assignment.update({a: shard for a, shard in self.balancer.assignment.items() if a in assignment})
         self.balancer.set_assets(assignment)
         self.apply_assignment(assignment)
         self.tick()
@@ -1122,7 +1125,6 @@ class MarketConnections:
                 try:
                     event = json.loads(raw)
                     self.stats.message(index)
-                    self.balancer.receive(event, index)
                     if _PIPELINE:
                         # Recheck generation under the same lock used for invalidation.
                         waiting_at = time.monotonic()
@@ -1159,6 +1161,8 @@ class MarketConnections:
 
         def received(_sock, raw):
             if raw != 'PONG':
+                # Count ingress before FIFO rejection or worker lock waits.
+                self.balancer.receive(raw, index)
                 inbox.put(raw)
 
         def failed(_sock, error):
@@ -1204,12 +1208,17 @@ class MarketConnections:
         # and a cooldown to avoid turning load balancing into reconnect churn.
         due = self.reconnect_pending or now - self.balancer.last_check >= self.balancer.interval
         self.balancer.propose(now, self.reconnect_pending)
-        if due and self.markets and now - self.balancer.last_rebalance >= self.balancer.minimum:
+        if due and self.markets and self.balancer.ready() and now - self.balancer.last_rebalance >= self.balancer.minimum:
             groups = shard_markets(self.markets, self.count, self.balancer.assignment, self.balancer.rates)
             target = {a: i for i, group in groups.items() for a in subscription_assets(group)}
+            target = self.balancer.limit_moves(target, self.markets)
             old = self.balancer.imbalance(self.balancer.loads(self.balancer.assignment))
             new = self.balancer.imbalance(self.balancer.loads(target))
-            if old - new > self.balancer.threshold:
+            loads = self.balancer.loads(self.balancer.assignment)
+            # Complete bounded steps toward the 2:1 safety band even when the
+            # remaining improvement is smaller than ordinary churn hysteresis.
+            outside_band = max(loads) >= 2 * min(loads)
+            if old - new > self.balancer.threshold or (outside_band and old > new + 1e-9):
                 self.apply_assignment(target)
                 self.balancer.last_rebalance = now
         self.reconnect_pending = False
