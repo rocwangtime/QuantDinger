@@ -235,3 +235,69 @@ def test_catalogue_owner_moves_count_once_and_wire_failure_is_local(monkeypatch)
     assert next(iter(m.stats.days.values()))['rebalance_count'] == 1
     m.apply_assignment(dict(a=0, b=2))
     assert observer.STATUS['rebalance_count'] == 1
+
+
+def test_ingress_meter_counts_dropped_frames_without_worker_or_json(monkeypatch):
+    from types import SimpleNamespace
+    q = observer.ReceiveQueue(2)
+    q.sample_at = 0
+    # Same object for sample storage and FIFO, no JSON work on the callback path.
+    monkeypatch.setattr(observer, 'json', SimpleNamespace(loads=lambda *_: pytest.fail('receive parsed JSON')))
+    for _ in range(3000):
+        q.put('{"asset_id":"a"}')
+    total, samples = q.measure(1)
+    assert total == 3000 and q.receive_rate == 3000
+    assert len(samples) == 2048
+    assert q.queue.qsize() == 2 and q.dropped == 2998
+    assert q.measure(2) == (0, [])
+    b = RateBalancer(4)
+    b.assignment = {'a': 2}
+    b.sample_received(2, total, samples)
+    assert b.pending == {'a': 3000}
+
+
+def test_multi_asset_frames_conserve_message_cost():
+    b = RateBalancer(4)
+    b.assignment = dict(a=2, b=2, c=1)
+    frame = json.dumps([dict(asset_id='a'), dict(asset_id='a'), dict(asset_id='b')])
+    b.sample_received(2, 100, [frame])
+    assert b.pending == dict(a=50, b=50)
+    # Malformed, control and nonowner frames have no attributable cost.
+    b.sample_received(2, 4, ['oops', 'null', '{}', '{"asset_id":"c"}'])
+    assert sum(b.pending.values()) == 100
+
+
+def test_actual_ingress_rebalances_reported_shard_shape_without_consumption(monkeypatch):
+    from types import SimpleNamespace
+    m, sent = manager(monkeypatch)
+    monkeypatch.setattr(observer, '_PIPELINE', None)
+    monkeypatch.setattr(observer, 'time', SimpleNamespace(monotonic=lambda: 1))
+    m.markets = [dict(id=str(i), yesAssetId=f'{i}y', noAssetId=f'{i}n') for i in range(16)]
+    initial = {a: i // 4 for i, market in enumerate(m.markets)
+               for a in observer.subscription_assets([market])}
+    b = balancer(monkeypatch, initial, {a: 0 for a in initial})
+    b.pending = {}
+    m.balancer = b
+    rates = [444, 597, 1300, 122]
+    for index, state in m.states.items():
+        state.update(assets=[a for a in initial if initial[a] == index],
+                     thread=SimpleNamespace(is_alive=lambda: True), ping_at=float('inf'))
+        q = state['inbox'] = observer.ReceiveQueue(2)
+        q.sample_at = 0
+        markets = m.markets[index * 4:index * 4 + 4]
+        for n in range(rates[index]):
+            market = markets[n % 4]
+            q.put(json.dumps(dict(event_type='price_change', price_changes=[
+                dict(asset_id=market['yesAssetId']), dict(asset_id=market['noAssetId'])])))
+    m.tick()
+    old, new = b.loads(initial), b.loads(b.assignment)
+    assert old[2] / sum(old) == pytest.approx(1300 / sum(rates))
+    assert b.imbalance(new) < .25
+    assert observer.STATUS['ws_receive_queues'][2]['receive_rate'] == 1300
+    assert observer.STATUS['ws_top_market_loads'][0]['rate'] > 0
+    assert sent and all(command['operation'] in {'subscribe', 'unsubscribe'} for _, command in sent)
+    for market in m.markets:
+        assert b.assignment[market['yesAssetId']] == b.assignment[market['noAssetId']]
+    assert all(not state['inbox'].invalid.is_set() for state in m.states.values())
+    # No processing was needed for rate measurement, even at FIFO hard limits.
+    assert all(not row['shard_msg_totals'] for row in m.stats.days.values())
