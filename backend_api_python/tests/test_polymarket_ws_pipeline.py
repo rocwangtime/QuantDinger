@@ -280,7 +280,7 @@ def test_shards_dynamic_subscription_ping_and_independent_reconnect(monkeypatch)
     monkeypatch.setattr(observer, 'STATUS', dict(observer.STATUS))
     monkeypatch.setenv('POLYMARKET_OBSERVER_WS_SHARDS', '2')
     clock = [100]
-    monkeypatch.setattr(observer, 'time', SimpleNamespace(monotonic=lambda: clock[0]))
+    monkeypatch.setattr(observer, 'time', SimpleNamespace(process_time=time.process_time, monotonic=lambda: clock[0]))
     sockets = []
     class Socket:
         def __init__(self, url, **callbacks):
@@ -537,7 +537,7 @@ def test_series_windows_share_a_shard_across_rollovers(monkeypatch):
     assert manager.balancer.owners == owner
 
 
-def test_receive_counts_at_ingress_parses_once_and_skips_utf8_scan(monkeypatch):
+def test_reader_never_parses_or_waits_on_balancer_and_pipeline(monkeypatch):
     import sys
     from types import SimpleNamespace
     sockets = []
@@ -563,17 +563,17 @@ def test_receive_counts_at_ingress_parses_once_and_skips_utf8_scan(monkeypatch):
     monkeypatch.setattr(observer, '_STOP', threading.Event())
     monkeypatch.setenv('POLYMARKET_OBSERVER_WS_URL', 'ws://127.0.0.1:9/ws/market')
     monkeypatch.setenv('POLYMARKET_OBSERVER_WS_SHARDS', '1')
-    monkeypatch.setenv('POLYMARKET_OBSERVER_WS_RECEIVE_QUEUE_MAX', '2')
-    monkeypatch.setenv('POLYMARKET_OBSERVER_WS_RECEIVE_QUEUE_CEILING', '2')
+    monkeypatch.setenv('POLYMARKET_OBSERVER_WS_RECEIVE_QUEUE_MAX', '20')
+    monkeypatch.setenv('POLYMARKET_OBSERVER_WS_RECEIVE_QUEUE_CEILING', '20')
     p = observer.Pipeline()
     p.set_markets([market()])
     monkeypatch.setattr(observer, '_PIPELINE', p)
     m = observer.MarketConnections()
     parsed = []
     loads = observer.json.loads
-    monkeypatch.setattr(observer.json, 'loads', lambda raw, **kw: parsed.append(raw) or loads(raw, **kw))
-    with p.lock:  # The worker is blocked: only ingress sees these frames.
-        m.sync([market()])
+    monkeypatch.setattr(observer.json, 'loads', lambda raw, **kw: parsed.append((threading.current_thread().name, raw)) or loads(raw, **kw))
+    m.sync([market()])
+    with p.lock, m.balancer.lock:  # Both downstream locks can be held while receiving.
         for _ in range(100):
             if hasattr(sockets[0], 'kwargs'):
                 break
@@ -589,10 +589,17 @@ def test_receive_counts_at_ingress_parses_once_and_skips_utf8_scan(monkeypatch):
         receive(sockets[0], b'PONG')
         receive(sockets[0], b'\xff\xfe not utf-8')
         inbox = m.states[0]['inbox']
-        assert m.balancer.pending == {'market:a': 10}  # FIFO rejected most of them.
-        assert inbox.dropped >= 8
-        assert len(parsed) == 11  # One parse per data frame, none for PONG.
-        assert isinstance(inbox.queue.queue[0][0], dict)
+        assert inbox.received_frames == 11  # Includes malformed payload; excludes PONG.
+        assert inbox.received_bytes == 10 * len(frame) + len(b'\xff\xfe not utf-8')
+        assert inbox.dropped == 0
+        assert isinstance(inbox.queue.queue[0][0], bytes)
+        assert all(name != threading.current_thread().name for name, _ in parsed if _ == frame)
+    for _ in range(100):
+        if len([raw for _, raw in parsed if raw == frame]) == 10 and inbox.queue.empty():
+            break
+        time.sleep(.01)
+    assert len([raw for _, raw in parsed if raw == frame]) == 10
+    assert m.balancer.pending == {'market:a': 10}
     m.close()
 
 
@@ -805,3 +812,21 @@ def test_shard_lock_wait_measures_time_before_publication():
     thread.join(1)
     assert inbox.lock_wait_seconds >= .02
     assert inbox.lag_seconds >= inbox.lock_wait_seconds
+
+
+def test_read_ahead_falls_back_to_ssl_aware_library_dispatcher():
+    from types import SimpleNamespace
+    calls = []
+
+    class Base:
+        def create_dispatcher(self, timeout, dispatcher=None, is_ssl=False, handleDisconnect=None):
+            calls.append((timeout, is_ssl))
+            return SimpleNamespace(read=lambda *args: calls.append('read'))
+
+    app = observer.read_ahead_app(Base)()
+    # A future library exposes no compatible frame_buffer/_recv API.
+    app.sock = SimpleNamespace(sock=SimpleNamespace(pending=lambda: 0))
+    dispatcher = app.create_dispatcher(1)
+    dispatcher.read(None, lambda: None, lambda: None)
+    assert calls == [(1, True), 'read']
+    assert app.read_ahead_active is False

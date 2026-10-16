@@ -52,9 +52,9 @@ def ratio(loads):
 class RateBalancer:
     """Ingress frame rates per balance group and bounded whole-group moves.
 
-    Receive callbacks count every frame before it is queued, so a backlog cannot
-    hide load. A frame's cost of one message is split between the owned assets it
-    carries, so shard loads add up to frames per second.
+    Workers attribute parsed frames to groups; socket callbacks independently
+    count raw frames/bytes. Samples spanning backlog, loss or recovery are frozen
+    by the manager. One frame's cost is split between its owned assets.
     """
     def __init__(self, count):
         self.count = count
@@ -65,11 +65,18 @@ class RateBalancer:
         self.last_check = self.sample_at
         self.last_rebalance = float('-inf')
         self.interval = setting('REBALANCE_SECONDS', 60, 1)
-        self.minimum = setting('REBALANCE_MIN_SECONDS', 60, 1)
+        self.minimum = setting('REBALANCE_MIN_SECONDS', 120, 1)
         self.threshold = setting('REBALANCE_HYSTERESIS', .1, 0)
+        self.group_cooldown = setting('GROUP_COOLDOWN_SECONDS', 300, 0)
+        self.confirmations = int(setting('REBALANCE_CONFIRMATIONS', 2, 1))
+        self.min_gain = setting('REBALANCE_MIN_MSG_PER_S', 10, 0)
+        self.hot_rate = setting('HOT_GROUP_MSG_PER_S', 100, 0)
+        self.hot_share = setting('HOT_GROUP_SHARE', .15, 0)
+        self.moved_at, self.unavailable, self.dedicated = {}, set(), set()
+        self.pressure, self.pressure_samples = None, 0
         self.trigger = setting('REBALANCE_RATIO', 1.5, 1)
         self.target = setting('REBALANCE_TARGET_RATIO', 2, 1)
-        self.max_moves = int(setting('REBALANCE_MAX_GROUPS', 4, 1))
+        self.max_moves = int(setting('REBALANCE_MAX_GROUPS', 8, 1))
         self.half_life = setting('RATE_HALF_LIFE_SECONDS', 30, 1)
 
     def set_groups(self, groups, now=None):
@@ -77,11 +84,18 @@ class RateBalancer:
         with self.lock:
             now = time.monotonic() if now is None else now
             self.groups = dict(groups)
+            live = set(groups.values())
+            # Bound catalogue history; series keys survive replacement of windows.
+            for values in (self.rates, self.owners, self.since, self.moved_at, self.pending):
+                for key in values.keys() - live:
+                    del values[key]
+            self.measured.intersection_update(live)
+            self.dedicated.intersection_update(live)
             for key in set(groups.values()):
                 self.since.setdefault(key, now)
 
     def receive(self, event, shard):
-        """Count one frame at ingress. ``event`` is parsed JSON or raw text."""
+        """Attribute one drained frame. ``event`` is parsed JSON or raw text."""
         if isinstance(event, (str, bytes, bytearray)):
             try:
                 event = json.loads(event)
@@ -103,14 +117,19 @@ class RateBalancer:
                 if key is not None:
                     self.pending[key] = self.pending.get(key, 0) + share
 
-    def sample(self, now):
+    def sample(self, now, unavailable=()):
         """Fold counts since the last sample into per-group EWMA msg/s."""
         with self.lock:
             elapsed = now - self.sample_at
             if elapsed <= 0:
                 return False
             counts, self.pending = self.pending, {}
+            blocked = self.unavailable | set(unavailable)
+            self.unavailable = set(unavailable)
             for key in set(self.groups.values()):
+                # Never interpret an outage/backlog (or partial recovery window) as quiet traffic.
+                if key in blocked:
+                    continue
                 # A group that appeared mid-window is measured from its start.
                 window = min(elapsed, now - self.since.get(key, self.sample_at))
                 if window < min(elapsed, self.interval) / 2:
@@ -164,86 +183,104 @@ class RateBalancer:
             loads[shard] += self.weight(key)
         return owners
 
-    def search(self, owners, budget, movable=None):
-        """Greedy whole-group moves or swaps, each lowering (max/min, sum of squares).
+    def hot_groups(self, owners):
+        """Reserve at least one shared shard; isolate dominant measured groups."""
+        total = sum(self.weight(k) for k in owners)
+        threshold = max(self.hot_rate, total * self.hot_share)
+        candidates = [k for k in owners if k in self.measured and
+                      self.weight(k) >= threshold * (1 - self.threshold if k in self.dedicated else 1)]
+        self.dedicated = set(sorted(candidates, key=lambda k: (-self.weight(k), k))[:max(0, self.count - 1)])
+        return self.dedicated
 
-        Only steps touching the heaviest or lightest shard can lower the ratio,
-        so candidates are moves off the heaviest, moves onto the lightest and
-        swaps with either; the squared term breaks ties toward even loads.
-        Returns (owners, loads, moved keys); at most ``budget`` groups move.
+    def isolation_cost(self, owners, hot):
+        # The load sharing a dominant group's connection. Counting a hot/hot
+        # collision twice makes separating two dominant groups the first move.
+        return sum(self.weight(other) for key in hot for other in owners
+                   if other != key and owners[other] == owners[key])
+
+    def search(self, owners, budget, movable=None):
+        """Bounded moves/swaps minimizing hot co-tenancy, peak, then squares.
+
+        Idle connections are valid. Raising the minimum by moving cold traffic
+        onto a saturated connection is never a goal. Each group moves at most
+        once per plan, and at most ``budget`` distinct groups change owner.
         """
         owners = dict(owners)
-        weights = {k: self.weight(k) for k in owners}
-        loads = [0.0] * self.count
-        for key, shard in owners.items():
-            loads[shard] += weights[key]
         movable = sorted(owners if movable is None else movable)
+        hot = self.hot_groups(owners)
         moved = set()
 
-        def score(values):
-            return min(ratio(values), 1e6), round(sum(v * v for v in values), 6)
-
-        def shifted(a, b, delta):
-            trial = list(loads)
-            trial[a] -= delta
-            trial[b] += delta
-            return trial
+        def score(layout):
+            values = self.loads(layout)
+            return (round(self.isolation_cost(layout, hot), 6), round(max(values), 6),
+                    round(sum(v * v for v in values), 6))
 
         while len(moved) < budget:
-            hi = max(range(self.count), key=lambda i: (loads[i], -i))
-            lo = min(range(self.count), key=lambda i: (loads[i], i))
-            best, best_score = None, score(loads)
-            members = {i: [k for k in movable if owners[k] == i] for i in range(self.count)}
-            for key in movable:
-                a = owners[key]
-                for b in (range(self.count) if a == hi else (lo,)):
-                    if b != a and score(trial := shifted(a, b, weights[key])) < best_score:
-                        best, best_score = ((key, b),), score(trial)
+            best, best_score = None, score(owners)
+            available = [k for k in movable if k not in moved]
+            for key in available:
+                for shard in range(self.count):
+                    if shard == owners[key]:
+                        continue
+                    trial = dict(owners, **{key: shard})
+                    value = score(trial)
+                    if value < best_score:
+                        best, best_score = {key: shard}, value
             if len(moved) + 2 <= budget:
-                for a in {hi, lo}:
-                    for key in members[a]:
-                        for b in range(self.count):
-                            if b == a:
-                                continue
-                            for other in members[b]:
-                                trial = shifted(a, b, weights[key] - weights[other])
-                                if score(trial) < best_score:
-                                    best, best_score = ((key, b), (other, a)), score(trial)
+                for i, key in enumerate(available):
+                    for other in available[i + 1:]:
+                        if owners[key] == owners[other]:
+                            continue
+                        change = {key: owners[other], other: owners[key]}
+                        value = score({**owners, **change})
+                        if value < best_score:
+                            best, best_score = change, value
             if best is None:
                 break
-            for key, shard in best:
-                loads[owners[key]] -= weights[key]
-                loads[shard] += weights[key]
-                owners[key] = shard
-                moved.add(key)
-        return owners, loads, moved
+            owners.update(best)
+            moved.update(best)
+        return owners, self.loads(owners), moved
 
     def ideal(self, keys):
-        """Max/min ratio of an unconstrained layout: the yardstick for acting."""
-        owners, loads = {}, [0.0] * self.count
-        weights = {k: self.weight(k) for k in keys}
-        for key in sorted(keys, key=lambda k: (-weights[k], k)):
-            shard = min(range(self.count), key=lambda i: (loads[i], i))
-            owners[key] = shard
-            loads[shard] += weights[key]
-        return ratio(self.search(owners, len(owners))[1])
+        """Legacy ratio diagnostic; a large value need not mean overload."""
+        return ratio(self.loads(self.place(keys, {})))
 
-    def plan(self, owners):
-        """Up to REBALANCE_MAX_GROUPS whole-group moves, or None.
+    def applied(self, old, new, now):
+        moved = {k for k in new if k in old and old[k] != new[k]}
+        if moved:
+            self.last_rebalance = now
+            self.moved_at.update({k: now for k in moved})
+            self.pressure, self.pressure_samples = None, 0
 
-        Acts when the heaviest/lightest ratio exceeds REBALANCE_RATIO and is
-        worse than the achievable ratio by REBALANCE_HYSTERESIS, or above
-        REBALANCE_TARGET_RATIO while the target is achievable. An indivisible
-        hot group therefore never causes churn. Unmeasured groups stay put.
+    def plan(self, owners, now=None):
+        """Require sustained, meaningful improvement and global/per-group cooldown.
+
+        The physical lower bound is max(largest indivisible group, total/N).
+        Once the peak is within hysteresis of that bound and hot connections
+        are isolated, a high max/min ratio provides no reason to migrate.
         """
+        now = time.monotonic() if now is None else now
         before = self.loads(owners)
-        if not any(before) or ratio(before) <= self.trigger:
+        hot = self.hot_groups(owners)
+        bound = max([sum(before) / self.count, *(self.weight(k) for k in owners)])
+        isolation = self.isolation_cost(owners, hot)
+        if (not any(before) or (isolation <= max(1e-6, self.min_gain) and
+                max(before) <= bound * (1 + self.threshold))):
+            self.pressure, self.pressure_samples = None, 0
             return None
-        ideal = self.ideal(owners)
-        if ratio(before) <= min(ideal * (1 + self.threshold), max(self.target, ideal * 1.02)):
+        pressure = (max(range(self.count), key=lambda i: before[i]), frozenset(hot))
+        self.pressure_samples = self.pressure_samples + 1 if pressure == self.pressure else 1
+        self.pressure = pressure
+        if self.pressure_samples < self.confirmations or now - self.last_rebalance < self.minimum:
             return None
-        target, loads, moved = self.search(owners, self.max_moves, [k for k in owners if k in self.measured])
-        if not moved or ratio(loads) >= min(ratio(before), 1e6) * .99:
+        movable = [k for k in owners if k in self.measured and k not in self.unavailable
+                   and now - self.moved_at.get(k, float('-inf')) >= self.group_cooldown]
+        target, loads, moved = self.search(owners, self.max_moves, movable)
+        peak_gain = max(before) - max(loads)
+        isolation_gain = isolation - self.isolation_cost(target, hot)
+        if not moved or (peak_gain < max(self.min_gain, max(before) * self.threshold)
+                         and (isolation_gain <= 1e-6 or
+                              isolation_gain < max(self.min_gain, isolation * self.threshold))):
             return None
         return target
 
@@ -255,6 +292,13 @@ class RateBalancer:
                         ws_load_ratio=ratio(loads) if math.isfinite(ratio(loads)) else None,
                         ws_rebalance_hysteresis=self.threshold, ws_rebalance_ratio=self.trigger,
                         ws_rebalance_target_ratio=self.target,
+                        ws_peak_lower_bound=max([sum(loads) / self.count,
+                                                 *(self.weight(k) for k in self.current_owners())]),
+                        ws_hot_groups=sorted(self.hot_groups(self.current_owners())),
+                        ws_hot_co_tenant_msg_per_s=self.isolation_cost(
+                            self.current_owners(), self.hot_groups(self.current_owners())),
+                        ws_rebalance_pressure_samples=self.pressure_samples,
+                        ws_group_cooldown_seconds=self.group_cooldown,
                         ws_group_rates={k: round(v, 3) for k, v in sorted(
                             self.rates.items(), key=lambda kv: -kv[1]) if k in live},
                         ws_unmeasured_groups=len(live - self.measured),

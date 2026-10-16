@@ -1,0 +1,80 @@
+00:40:05
+health 200
+health/ready 200
+health/workers 200
+MEV|{ "cancel" : 122, "fill" : 1, "market_summary" : 2, "place" : 124, "settlement" : 2, "shadow_fills" : 1 }
+L|[59.61180974448651, 1019.529543229229, 190.953320547285, 500.76056220447714] rb=1 ratio=17.102811466372657 unmeas=0 assets=[16, 12, 10, 10]
+K|book_age_p95_ms=31645.48 reconnect_count=0 slow_consumer_count=0 book_arrival_lag_p95_ms=156.309 book_receipt_age_p95_ms=31512.564000000002
+
+WSCONN|4
+SLOW|0
+00:41:59
+health 200
+health/ready 200
+health/workers 200
+MEV|{ "cancel" : 182, "fill" : 1, "market_summary" : 2, "place" : 182, "settlement" : 2, "shadow_fills" : 1 }
+L|[89.12849277563183, 295.3400877203351, 165.09300821784177, 378.2888459945043] rb=3 ratio=4.244308797488499 unmeas=0 assets=[32, 8, 4, 4]
+K|book_age_p95_ms=14596.674 reconnect_count=0 slow_consumer_count=0 book_arrival_lag_p95_ms=144.214 book_receipt_age_p95_ms=14453.731
+
+WSCONN|4
+SLOW|0
+00:43:52
+health 200
+health/ready 200
+health/workers 200
+MEV|{ "cancel" : 182, "fill" : 1, "market_summary" : 3, "place" : 182, "settlement" : 3, "shadow_fills" : 1 }
+L|[51.51411950633658, 262.5615691901142, 51.652985818377275, 67.21165946918872] rb=5 ratio=5.096885508405466 unmeas=0 assets=[34, 2, 10, 2]
+K|book_age_p95_ms=14311.666000000001 reconnect_count=0 slow_consumer_count=0 book_arrival_lag_p95_ms=447.50600000000003 book_receipt_age_p95_ms=14168.85
+
+WSCONN|4
+SLOW|0
+00:45:46
+health 200
+health/ready 200
+health/workers 200
+MEV|{ "cancel" : 271, "fill" : 1, "market_summary" : 4, "place" : 274, "settlement" : 4, "shadow_fills" : 2 }
+L|[97.492055429759, 231.43209729207769, 118.34463129655192, 92.80469445644808] rb=7 ratio=2.493754207667646 unmeas=0 assets=[36, 2, 8, 2]
+K|book_age_p95_ms=26626.251 reconnect_count=2 slow_consumer_count=2 book_arrival_lag_p95_ms=155.90599999999998 book_receipt_age_p95_ms=26501.324
+
+WSCONN|6
+SLOW|2
+00:54:55
+health 200
+health/ready 200
+health/workers 200
+MEV|{ "cancel" : 1101, "fill" : 3, "market_summary" : 9, "place" : 1103, "settlement" : 9, "shadow_fills" : 7 }
+L|[0.0, 0.0, 0.0, 0.0] rb=0 ratio= unmeas= assets=[12, 12, 12, 12]
+K|book_age_p95_ms=16862.604 reconnect_count=0 slow_consumer_count=0 book_arrival_lag_p95_ms=10871.034 book_receipt_age_p95_ms=5991.570000000001
+
+WSCONN|4
+SLOW|0
+00:56:48
+health 200
+health/ready 200
+health/workers 200
+MEV|{ "cancel" : 1149, "fill" : 3, "market_summary" : 10, "place" : 1152, "settlement" : 10, "shadow_fills" : 8 }
+L|[162.54494950745504, 490.1761702178352, 1829.2845103471705, 31.843643058646446] rb=1 ratio= unmeas= assets=[2, 2, 42, 2]
+K|book_age_p95_ms=35095.123 reconnect_count=0 slow_consumer_count=0 book_arrival_lag_p95_ms=1434.472 book_receipt_age_p95_ms=34764.257
+
+WSCONN|4
+SLOW|0
+00:58:42
+health 200
+health/ready 200
+health/workers 200
+MEV|{ "cancel" : 1174, "fill" : 3, "market_summary" : 10, "place" : 1176, "settlement" : 10, "shadow_fills" : 8 }
+L|[1895.2779262018446, 354.23644824113387, 248.77045415690262, 744.6793326328302] rb=2 ratio= unmeas= assets=[2, 2, 42, 2]
+K|book_age_p95_ms=25215.983 reconnect_count=0 slow_consumer_count=0 book_arrival_lag_p95_ms=174.63500000000002 book_receipt_age_p95_ms=25041.347999999998
+
+WSCONN|4
+SLOW|0
+01:00:36
+health 200
+health/ready 200
+health/workers 200
+MEV|{ "cancel" : 1174, "fill" : 3, "market_summary" : 11, "place" : 1176, "settlement" : 11, "shadow_fills" : 9 }
+L|[1616.601340008629, 80.25261546408566, 77.32882424319156, 888.7612304431423] rb=2 ratio= unmeas= assets=[2, 2, 42, 2]
+K|book_age_p95_ms=27276.27 reconnect_count=0 slow_consumer_count=0 book_arrival_lag_p95_ms=166.08700000000002 book_receipt_age_p95_ms=27110.183
+
+WSCONN|4
+SLOW|0

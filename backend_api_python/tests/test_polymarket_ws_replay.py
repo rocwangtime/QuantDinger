@@ -13,6 +13,7 @@ import json
 import os
 import random
 import threading
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -32,14 +33,14 @@ def distribution():
     return replay.load_rates(path) if os.path.exists(path) else replay.synthetic_rates()
 
 
-def simulate(monkeypatch, seconds=7200, prior=False, seed=3):
+def simulate(monkeypatch, seconds=7200, prior=False, seed=3, synthetic=False):
     monkeypatch.setattr(observer, '_STOP', threading.Event())
     monkeypatch.setattr(observer, '_DAILY_STATS', DailyStats())
     monkeypatch.setattr(observer, '_PIPELINE', None)
     monkeypatch.setattr(observer, 'STATUS', dict(observer.STATUS, rebalance_count=0))
     clock = [0.0]
-    monkeypatch.setattr(observer, 'time', SimpleNamespace(monotonic=lambda: clock[0]))
-    rates = distribution()
+    monkeypatch.setattr(observer, 'time', SimpleNamespace(process_time=time.process_time, monotonic=lambda: clock[0]))
+    rates = replay.synthetic_rates() if synthetic else distribution()
     schedule = replay.Schedule(rates, 0.0, 1.0)
     rng = random.Random(seed)
     m = observer.MarketConnections()
@@ -87,23 +88,24 @@ def simulate(monkeypatch, seconds=7200, prior=False, seed=3):
             for (yes, no), (yes_rate, no_rate) in flows.items():
                 if yes in m.balancer.assignment:
                     loads[m.balancer.assignment[yes]] += yes_rate + no_rate
-            ratios.append((clock[0], max(loads) / min(loads), loads))
+            bound = max(sum(loads) / m.count, max(sum(v) for v in flows.values()))
+            ratios.append((clock[0], max(loads) / bound, loads))
     assert not closed
     return ratios, moves, m
 
 
-def test_cold_start_converges_within_five_minutes_and_stays_within_two(monkeypatch):
+def test_measured_cold_start_reaches_physical_peak_bound(monkeypatch):
     ratios, moves, m = simulate(monkeypatch)
-    steady = [r for t, r, _ in ratios if t >= 300]
-    assert max(steady) <= 2, [x for x in ratios if x[0] >= 300 and x[1] > 2][:3]
+    steady = [r for t, r, _ in ratios if t >= 600]
+    assert max(steady) <= 1.1, [x for x in ratios if x[0] >= 600 and x[1] > 1.1][:3]
     # Rollovers never move a series; later rounds only absorb rate noise.
-    assert sum(1 for t, _ in moves if t >= 300) <= 6
+    assert sum(1 for t, _ in moves if t >= 600) <= 6
     assert all(count <= 4 * m.balancer.max_moves for _, count in moves)
 
 
 def test_restart_with_persisted_group_rates_is_balanced_immediately(monkeypatch):
     ratios, moves, _ = simulate(monkeypatch, seconds=1800, prior=True)
-    assert max(r for _, r, _ in ratios) <= 2
+    assert max(r for _, r, _ in ratios) <= 1.1
     assert len(moves) <= 2
 
 
@@ -111,3 +113,19 @@ def test_restart_with_persisted_group_rates_is_balanced_immediately(monkeypatch)
 def test_noise_does_not_cause_rebalance_churn(monkeypatch, seed):
     _, moves, _ = simulate(monkeypatch, seconds=3600, prior=True, seed=seed)
     assert len(moves) <= 3
+
+
+def test_real_file_uses_msg_per_s_and_does_not_invent_market_names():
+    rates = distribution()
+    assert rates['source'] == 'pm_ws_asset_rates_20261016.json'
+    assert len(rates['markets']) == 28
+    ordered = sorted((m['rate'] for m in rates['markets']), reverse=True)
+    assert ordered[:3] == pytest.approx([367.434, 148.030, 114.782])
+    assert sum(ordered) == pytest.approx(681.792, abs=.02)
+    assert all('series' not in m for m in rates['markets'])
+
+
+def test_series_rollovers_and_noise_keep_peak_and_churn_bounded(monkeypatch):
+    peaks, moves, _ = simulate(monkeypatch, seconds=7200, synthetic=True)
+    assert max(p for t, p, _ in peaks if t >= 600) <= 1.15
+    assert sum(t >= 600 for t, _ in moves) <= 4

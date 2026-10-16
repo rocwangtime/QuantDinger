@@ -7,8 +7,8 @@ frames at per-asset rates taken from a measured distribution file. Up/Down serie
 roll over on an accelerated clock: the current window expires, the next window
 becomes hot and a new next window appears, so asset ids change exactly as in
 production. The server closes a connection with "slow consumer" when its unsent
-backlog exceeds --slow-bytes, which is how the public feed treats a reader that
-falls behind.
+backlog exceeds --slow-bytes, a model of a bounded publisher queue. The actual public server
+queue capacity and implementation are not documented.
 
 The client side is the real observer: MarketConnections, websocket-client,
 receive queues, shard workers, Pipeline (recording on, database stubbed) and the
@@ -22,6 +22,7 @@ Prints one JSON report: per-shard server-side msg/s, max/min ratio, slow-consume
 closes, reconnects, rebalances and book freshness p95 sampled once per second.
 """
 import argparse
+from collections import deque
 import asyncio
 import base64
 import hashlib
@@ -31,6 +32,7 @@ import multiprocessing
 import os
 import random
 import socket
+import ssl
 import struct
 import sys
 import threading
@@ -80,7 +82,7 @@ def load_rates(path):
                 for k, v in rows.items()]
 
     def rate(row):
-        for name in ('rate', 'msg_per_sec', 'msgs_per_sec', 'msg_s', 'rate_per_sec', 'per_second', 'mps'):
+        for name in ('rate', 'msg_per_s', 'msg_per_sec', 'msgs_per_sec', 'msg_s', 'rate_per_sec', 'per_second', 'mps'):
             if row.get(name) is not None:
                 return float(row[name])
         if row.get('count') is not None and row.get('seconds'):
@@ -108,6 +110,8 @@ def load_rates(path):
         entry['rates'].append(rate(row))
     markets, windows = [], {}
     for key, entry in grouped.items():
+        if not all(math.isfinite(v) and v >= 0 for v in entry['rates']):
+            raise ValueError(f'invalid rate for market {key}')
         total = sum(entry['rates'])
         parsed = series(entry['slug'])
         if entry['series']:
@@ -229,11 +233,48 @@ def book_payload(asset, now_ms, rng, levels=40):
                 timestamp=str(now_ms), hash=hashlib.sha1(f'{asset}{now_ms}'.encode()).hexdigest())
 
 
-def serve(port, spec, t0, scale, slow_bytes, book_share, pair_share, seed, report, stop_at):
+def serve(port, spec, t0, scale, slow_bytes, book_share, pair_share, seed, report, stop_at,
+          bandwidth_kib=0, slow_frames=256, tls_cert=None, tls_key=None):
     rng = random.Random(seed)
     schedule = Schedule(spec, t0, scale)
     clients = {}
-    stats = dict(slow_consumer=0, closes=0, connections=0, sent={}, max_buffer={}, subscribed={})
+    stats = dict(slow_consumer=0, closes=0, connections=0, sent={}, offered={}, wire_bytes={},
+                 max_buffer={}, max_queue_frames=0, subscribed={})
+
+    async def finish_close(writer):
+        try:
+            await asyncio.wait_for(writer.drain(), .2)
+        except (TimeoutError, ConnectionError, OSError):
+            pass
+        finally:
+            writer.close()
+
+    def enqueue(state, data, counted=True):
+        if state['closed']:
+            return
+        key = state['shard']
+        if counted:
+            stats['offered'][key] = stats['offered'].get(key, 0) + 1
+        buffered = state['queued_bytes'] + state['writer'].transport.get_write_buffer_size()
+        if buffered + len(data) > slow_bytes or len(state['outbox']) >= slow_frames:
+            stats['slow_consumer'] += 1
+            print(f'close at={time.monotonic() - t0:.3f}s shard={key} queued={len(state["outbox"])} bytes={buffered}', file=sys.stderr)
+            state['closed'] = True
+            state['outbox'].clear()
+            state['writer'].write(close_frame(1013, 'slow consumer: send buffer full'))
+            asyncio.create_task(finish_close(state['writer']))
+            return
+        if not bandwidth_kib:
+            state['writer'].write(data)
+            stats['wire_bytes'][key] = stats['wire_bytes'].get(key, 0) + len(data)
+            if counted:
+                stats['sent'][key] = stats['sent'].get(key, 0) + 1
+            stats['max_buffer'][key] = max(stats['max_buffer'].get(key, 0), buffered + len(data))
+            return
+        state['outbox'].append((data, counted))
+        state['queued_bytes'] += len(data)
+        stats['max_queue_frames'] = max(stats['max_queue_frames'], len(state['outbox']))
+        stats['max_buffer'][key] = max(stats['max_buffer'].get(key, 0), buffered + len(data))
 
     async def handle(reader, writer):
         sock = writer.get_extra_info('socket')
@@ -248,8 +289,11 @@ def serve(port, spec, t0, scale, slow_bytes, book_share, pair_share, seed, repor
         stats['connections'] += 1
         path = request.split(b' ', 2)[1].decode()
         shard = path.split('shard=', 1)[1].split('&')[0] if 'shard=' in path else str(ident)
-        state = dict(writer=writer, assets=set(), id=ident, shard=shard, closed=False)
+        state = dict(writer=writer, assets=set(), id=ident, shard=shard, closed=False,
+                     outbox=deque(), queued_bytes=0, credit=0)
         clients[ident] = state
+        stats['sent'].setdefault(shard, 0)
+        stats['wire_bytes'].setdefault(shard, 0)
         try:
             while True:
                 opcode, data = await read_frame(reader)
@@ -258,7 +302,7 @@ def serve(port, spec, t0, scale, slow_bytes, book_share, pair_share, seed, repor
                 if opcode != 1:
                     continue
                 if data == b'PING':
-                    writer.write(frame('PONG'))
+                    enqueue(state, frame('PONG'), False)
                     continue
                 command = json.loads(data)
                 assets = [str(a) for a in command.get('assets_ids', [])]
@@ -269,7 +313,7 @@ def serve(port, spec, t0, scale, slow_bytes, book_share, pair_share, seed, repor
                 for asset in assets:
                     if asset not in state['assets']:
                         state['assets'].add(asset)
-                        writer.write(frame(json.dumps(book_payload(asset, now_ms, rng))))
+                        enqueue(state, frame(json.dumps(book_payload(asset, now_ms, rng))), False)
         except (asyncio.IncompleteReadError, ConnectionError, OSError):
             pass
         finally:
@@ -318,28 +362,38 @@ def serve(port, spec, t0, scale, slow_bytes, book_share, pair_share, seed, repor
                         for state in targets:
                             if state['closed']:
                                 continue
-                            state['writer'].write(data)
-                            key = state['shard']
-                            stats['sent'][key] = stats['sent'].get(key, 0) + 1
+                            enqueue(state, data)
             for state in list(clients.values()):
-                buffered = state['writer'].transport.get_write_buffer_size()
+                if state['closed']:
+                    continue
                 key = state['shard']
+                state['credit'] = (min(65536, state['credit'] + bandwidth_kib * 1024 * dt)
+                                   if bandwidth_kib else float('inf'))
+                while state['outbox'] and state['credit'] >= len(state['outbox'][0][0]):
+                    data, counted = state['outbox'].popleft()
+                    state['queued_bytes'] -= len(data)
+                    state['credit'] -= len(data)
+                    state['writer'].write(data)
+                    stats['wire_bytes'][key] = stats['wire_bytes'].get(key, 0) + len(data)
+                    if counted:
+                        stats['sent'][key] = stats['sent'].get(key, 0) + 1
+                buffered = state['queued_bytes'] + state['writer'].transport.get_write_buffer_size()
                 stats['max_buffer'][key] = max(stats['max_buffer'].get(key, 0), buffered)
                 stats['subscribed'][key] = len(state['assets'])
-                if buffered > slow_bytes and not state['closed']:
-                    stats['slow_consumer'] += 1
-                    state['closed'] = True
-                    state['writer'].write(close_frame(1008, 'slow consumer: send buffer full'))
-                    state['writer'].transport.abort()
-                    clients.pop(state['id'], None)
             if now - stats.get('reported', 0) < .5:
                 continue
             stats['reported'] = now
             report.put(('tick', dict(sent=dict(stats['sent']), slow_consumer=stats['slow_consumer'],
-                                     max_buffer=dict(stats['max_buffer']), connections=stats['connections'])))
+                                     max_buffer=dict(stats['max_buffer']), connections=stats['connections'],
+                                     wire_bytes=dict(stats['wire_bytes']), offered=dict(stats['offered']),
+                                     max_queue_frames=stats['max_queue_frames'])))
 
     async def main():
-        server = await asyncio.start_server(handle, '127.0.0.1', port)
+        context = None
+        if tls_cert:
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            context.load_cert_chain(tls_cert, tls_key)
+        server = await asyncio.start_server(handle, '127.0.0.1', port, ssl=context)
         report.put(('ready', port))
         async with server:
             await pump()
@@ -391,8 +445,10 @@ def run(args):
     sys.path.insert(0, args.code or ROOT)
     os.environ.setdefault('POLYMARKET_OBSERVER_UPDOWN_ENABLED', 'true')
     os.environ.setdefault('POLYMARKET_OBSERVER_RECORDING_ENABLED', 'true')
-    os.environ.setdefault('POLYMARKET_PAPER_ACCOUNT_ENABLED', 'false')
-    os.environ['POLYMARKET_OBSERVER_WS_URL'] = f'ws://127.0.0.1:{args.port}'
+    os.environ['POLYMARKET_PAPER_ACCOUNT_ENABLED'] = 'false'
+    os.environ['POLYMARKET_OBSERVER_WS_SHARDS'] = str(args.shards)
+    scheme = 'wss' if args.tls_cert else 'ws'
+    os.environ['POLYMARKET_OBSERVER_WS_URL'] = f'{scheme}://127.0.0.1:{args.port}'
     spec = load_rates(args.rates) if args.rates else synthetic_rates()
     for m in spec['markets']:
         m['rate'] *= args.scale
@@ -406,9 +462,19 @@ def run(args):
             # the baseline code hard-codes the public URL, so it is replaced here.
             index = sys._getframe(1).f_locals.get('index')
             super().__init__(f"{os.environ['POLYMARKET_OBSERVER_WS_URL']}/?shard={index}", **kwargs)
+
+        def run_forever(self, **kwargs):
+            if args.tls_cert:
+                kwargs['sslopt'] = {'cert_reqs': ssl.CERT_NONE, 'check_hostname': False}
+            return super().run_forever(**kwargs)
     websocket.WebSocketApp = Local
     observer.get_db_connection = NullDb
-    ws_balance.get_db_connection = NullDb
+    ws_balance.get_db_connection = recording.get_db_connection = NullDb
+    recording.References.run = lambda self: None
+
+    def offline_http(*args, **kwargs):
+        raise AssertionError('HTTP is disabled during offline replay')
+    observer.PublicClient._json = offline_http
     def busy():
         # Other CPU-bound threads (paper account, references, evaluator spikes)
         # contend for the same GIL as the socket readers in production.
@@ -425,7 +491,8 @@ def run(args):
     ctx = multiprocessing.get_context('spawn')
     report = ctx.Queue()
     server = ctx.Process(target=serve, args=(args.port, spec, t0, args.time_scale, args.slow_bytes,
-                                             args.book_share, args.pair_share, args.seed, report, stop_at),
+                                             args.book_share, args.pair_share, args.seed, report, stop_at,
+                                             args.bandwidth_kib, args.slow_frames, args.tls_cert, args.tls_key),
                          daemon=True)
     server.start()
     assert report.get(timeout=20)[0] == 'ready'
@@ -442,6 +509,8 @@ def run(args):
     connections.sync(markets)
     refresh = time.monotonic() + args.refresh / args.time_scale
     ages, lags, samples, last = [], [], [], None
+    peak_drops = peak_cpu = peak_callback = peak_tcp = 0
+    peaks, moves = [], []
     warm = t0 + args.warmup
     while time.monotonic() < t0 + args.seconds:
         time.sleep(1)
@@ -462,6 +531,12 @@ def run(args):
         if metrics.get('book_age_p95_ms') is not None:
             ages.append(metrics['book_age_p95_ms'])
         queues = observer.STATUS.get('ws_receive_queues', {})
+        peak_drops = max(peak_drops, sum(q['drops'] for q in queues.values()))
+        peak_cpu = max(peak_cpu, observer.STATUS.get('ws_process_cpu_cores', 0))
+        peak_callback = max(peak_callback, max((q.get('callback_max_seconds', 0) for q in queues.values()), default=0))
+        peak_tcp = max(peak_tcp, max((q.get('tcp_pending_bytes') or 0 for q in queues.values()), default=0))
+        if len(moves) == 0 or moves[-1][1] != observer.STATUS.get('rebalance_count', 0):
+            moves.append((round(now - t0, 1), observer.STATUS.get('rebalance_count', 0)))
         lags.append(max((q['lag_seconds'] for q in queues.values()), default=0))
         if last:
             samples.append((now, last['sent']))
@@ -483,6 +558,7 @@ def run(args):
         if sample[0] - begin[0] >= 30:
             loads = [(sample[1].get(k, 0) - begin[1].get(k, 0)) / (sample[0] - begin[0]) for k in shards]
             window_ratios.append(round(max(loads) / max(min(loads), 1e-9), 2))
+            peaks.append(round(max(loads), 1))
             if begin[0] >= t0 + args.settle:
                 steady.append(window_ratios[-1])
             begin = sample
@@ -494,6 +570,8 @@ def run(args):
     total = sum(m['rate'] for m in spec['markets'])
     result = dict(
         source=spec['source'], code=args.code or ROOT, scale=args.scale, seconds=args.seconds,
+        shards=args.shards, bandwidth_kib=args.bandwidth_kib, slow_frames=args.slow_frames,
+        gil_threads=args.gil_threads, switch_interval=sys.getswitchinterval(), tls=bool(args.tls_cert),
         input_msg_per_sec=round(total, 1),
         shard_msg_per_sec=[round(r, 1) for r in shard_rates],
         shard_max_min_ratio=round(max(shard_rates) / max(min(shard_rates), 1e-9), 3) if shard_rates else None,
@@ -506,6 +584,14 @@ def run(args):
         max_server_backlog_bytes=max(last['max_buffer'].values()) if last and last['max_buffer'] else None,
         book_age_p95_ms_p95=pct(ages, .95), book_age_p95_ms_max=ages[-1] if ages else None,
         receive_lag_s_p95=pct(lags, .95), receive_lag_s_max=lags[-1] if lags else None,
+        input_hottest_market_msg_per_s=max(m['rate'] for m in spec['markets']),
+        shard_peak_msg_per_s_30s=peaks, rebalance_timeline=moves,
+        server_wire_bytes=last.get('wire_bytes') if last else None,
+        server_offered_frames=last.get('offered') if last else None,
+        max_server_queue_frames=last.get('max_queue_frames') if last else None,
+        receive_drops=peak_drops, process_cpu_cores_max=peak_cpu,
+        callback_seconds_max=peak_callback, tcp_pending_bytes_max=peak_tcp,
+        reader_metrics=status.get('ws_receive_queues'),
         group_rates=status.get('ws_group_rates'),
         shard_assets=status.get('ws_shard_assets'), estimated_shard_loads=[
             round(x, 1) for x in status.get('ws_shard_loads', [])])
@@ -531,9 +617,18 @@ def main(argv=None):
     parser.add_argument('--slow-bytes', type=int, default=1 << 20)
     parser.add_argument('--book-share', type=float, default=.06)
     parser.add_argument('--pair-share', type=float, default=.5)
+    parser.add_argument('--tls-cert', help='local TLS replay certificate')
+    parser.add_argument('--tls-key', help='local TLS replay private key')
+    parser.add_argument('--shards', type=int, choices=range(1, 9), default=4)
+    parser.add_argument('--bandwidth-kib', type=float, default=0, help='per-connection modeled send capacity; 0 unlimited')
+    parser.add_argument('--slow-frames', type=int, default=256, help='modeled application send queue capacity')
     parser.add_argument('--port', type=int, default=0)
     parser.add_argument('--seed', type=int, default=7)
     args = parser.parse_args(argv)
+    if bool(args.tls_cert) != bool(args.tls_key):
+        parser.error('tls-cert and tls-key must be given together')
+    if args.seconds <= args.warmup + 2 or args.bandwidth_kib < 0 or args.slow_frames < 1:
+        parser.error('seconds must exceed warmup + 2; capacities must be nonnegative')
     if not args.port:
         with socket.socket() as probe:
             probe.bind(('127.0.0.1', 0))

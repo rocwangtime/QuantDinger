@@ -1,0 +1,80 @@
+{
+  "slow": 1,
+  "loads": [
+    146.54139651296515,
+    353.62742843274407,
+    335.5124165930825,
+    199.05810779285812
+  ],
+  "rates": {
+    "market:663583": 0.158,
+    "market:665374": 0.083,
+    "market:666861": 0.163,
+    "market:701553": 4.013,
+    "market:2176270": 0.556,
+    "market:2299952": 0.141,
+    "market:3128888": 0.382,
+    "market:3399459": 0.676,
+    "market:4118938": 2.204,
+    "market:4641065": 0.866,
+    "market:5170735": 1.073,
+    "market:5170739": 0.953,
+    "market:5447182": 3.585,
+    "market:5650402": 1.064,
+    "market:5686981": 0.81,
+    "market:5697537": 1.425,
+    "market:5697539": 1.118,
+    "market:5710779": 0.137,
+    "market:5715907": 0.42,
+    "market:5715908": 0.687,
+    "up_down:BTC:5m": 353.627,
+    "up_down:ETH:5m": 126.028,
+    "up_down:BTC:15m": 335.512,
+    "up_down:ETH:15m": 199.058
+  },
+  "queues": {
+    "0": {
+      "depth": 0,
+      "drops": 0,
+      "resyncs": 0,
+      "capacity": 2048,
+      "high_water": 481,
+      "lag_seconds": 0.000356,
+      "lock_wait_seconds": 6.312038749456406e-07,
+      "queue_wait_seconds": 0.000336
+    },
+    "1": {
+      "depth": 0,
+      "drops": 0,
+      "resyncs": 0,
+      "capacity": 2048,
+      "high_water": 804,
+      "lag_seconds": 0.000261,
+      "lock_wait_seconds": 4.6100467443466187e-07,
+      "queue_wait_seconds": 0.00025
+    },
+    "2": {
+      "depth": 0,
+      "drops": 0,
+      "resyncs": 0,
+      "capacity": 2048,
+      "high_water": 465,
+      "lag_seconds": 4.6e-05,
+      "lock_wait_seconds": 6.218906491994858e-07,
+      "queue_wait_seconds": 3.1e-05
+    },
+    "3": {
+      "depth": 0,
+      "drops": 0,
+      "resyncs": 0,
+      "capacity": 2048,
+      "high_water": 312,
+      "lag_seconds": 0.000257,
+      "lock_wait_seconds": 8.819624781608582e-07,
+      "queue_wait_seconds": 0.000236
+    }
+  },
+  "rebalances": 22,
+  "reconnects": 1,
+  "messages_per_second": 1141.8671916235546
+}
