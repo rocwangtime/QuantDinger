@@ -404,8 +404,9 @@ class Maker:
                     alpha = 1 - .5 ** (dt / halflife)
                     a[key] = (1 - alpha) * a[key] + alpha * r * r / dt
         a['at'], a['z'] = observed_ms, z
+        # Time-bounded, not count-bounded: a 4 Hz WebSocket feed must still cover the windows.
         horizon = observed_ms / 1000 - max(180.0, p.sigma_short_window_s + 10)
-        a['samples'] = [s for s in a['samples'] if s[0] >= horizon][-400:] + [[observed_ms / 1000, z]]
+        a['samples'] = [s for s in a['samples'] if s[0] >= horizon] + [[observed_ms / 1000, z]]
 
     def windows(self, row, t, a):
         """Realized (A_start, A_end) of the settlement averages, or None if uncovered."""
@@ -1455,7 +1456,7 @@ class RecordedFeed:
         # Recorded Binance observations nearest each boundary, no lookahead.
         values = []
         for boundary in (market['eventStartTime'], market['endDate']):
-            cur.execute("SELECT reference_price FROM qd_polymarket_observer_samples WHERE market_id=%s AND reference_source IN ('api.binance.com','data-api.binance.vision') AND reference_observed_at<=%s AND reference_observed_at>=%s::timestamptz - INTERVAL '10 seconds' ORDER BY reference_observed_at DESC LIMIT 1", (identity, boundary, boundary))
+            cur.execute("SELECT reference_price FROM qd_polymarket_observer_samples WHERE market_id=%s AND reference_source IN ('api.binance.com','data-api.binance.vision','stream.binance.com','data-stream.binance.vision') AND reference_observed_at<=%s AND reference_observed_at>=%s::timestamptz - INTERVAL '10 seconds' ORDER BY reference_observed_at DESC LIMIT 1", (identity, boundary, boundary))
             sample = cur.fetchone()
             values.append(number(sample['reference_price']) if sample else None)
         if any(v is None for v in values):

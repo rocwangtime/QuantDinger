@@ -47,6 +47,9 @@ def snapshot():
         if metrics["last_message_at"] is None:
             metrics.pop("last_message_at")
         result.update(metrics)
+    provider = _REFERENCE
+    if hasattr(provider, 'metrics'):  # Spot WebSocket composite only.
+        result.update(provider.metrics())
     return result
 
 
@@ -301,7 +304,7 @@ def _market_loop():
     yes_markets = []
     yes_refresh = 0
     if updown.enabled():
-        _REFERENCE = updown.ReferencePrices()
+        _REFERENCE = updown.reference_provider()
         _REFERENCE.start()
     backoff = 5
     ws_failures = 0
