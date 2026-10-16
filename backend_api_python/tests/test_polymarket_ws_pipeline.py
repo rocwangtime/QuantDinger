@@ -1,6 +1,8 @@
 """Receive isolation, throttles, bounded persistence and lifecycle behavior."""
 import json
 import threading
+
+import pytest
 from datetime import datetime, timedelta, timezone
 
 from app.services.polymarket import observer
@@ -382,10 +384,11 @@ def test_rest_fallback_uses_same_ordered_writer_queue(monkeypatch):
 def test_receive_queue_overflow_requests_snapshot_without_disconnect():
     q = observer.ReceiveQueue(2)
     assert q.put('first') and q.put('second')
-    assert not q.put('overflow')
+    assert q.put('overflow')
     assert q.resync.is_set() and not q.invalid.is_set()
     assert q.dropped == 1 and q.high_water == 2
-    assert not q.put('late') and q.dropped == 2
+    assert q.put('late') and q.dropped == 2
+    assert [row[0] for row in q.lost] == ['first', 'second']
     q.discard()
     assert q.queue.empty() and q.dropped == 4
 
@@ -498,7 +501,8 @@ def test_weighted_market_placement_reduces_hot_shard_and_keeps_pairs():
 
 
 
-def test_hard_overflow_recovers_snapshots_on_same_socket(monkeypatch):
+@pytest.mark.parametrize('rest_failure', [False, True])
+def test_hard_overflow_recovers_snapshots_on_same_socket(monkeypatch, rest_failure):
     import sys
     from types import SimpleNamespace
     opened, stopped, subscribed = threading.Event(), threading.Event(), threading.Event()
@@ -517,12 +521,21 @@ def test_hard_overflow_recovers_snapshots_on_same_socket(monkeypatch):
             operations.append(payload.get('operation'))
             if payload.get('operation') == 'subscribe':
                 self.callbacks['on_message'](self, json.dumps(dict(
-                    event_type='book', asset_id='ay', bids=[], asks=[dict(price='.6', size='3')])))
+                    event_type='price_change', price_changes=[dict(
+                        asset_id='ay', side='SELL', price='.99', size='999')])))
                 subscribed.set()
         def close(self):
             stopped.set()
 
     monkeypatch.setitem(sys.modules, 'websocket', SimpleNamespace(WebSocketApp=Socket))
+    rest_calls = []
+    def rest(client, method, url, **kwargs):
+        rest_calls.append(kwargs['json'])
+        assert threading.current_thread().name == 'polymarket-book-0'
+        if rest_failure:
+            raise ValueError('offline REST failure')
+        return [dict(asset_id='ay', bids=[], asks=[dict(price='.55', size='5')])]
+    monkeypatch.setattr(observer.PublicClient, '_json', rest)
     monkeypatch.setattr(observer, '_STOP', threading.Event())
     monkeypatch.setenv('POLYMARKET_OBSERVER_WS_SHARDS', '1')
     monkeypatch.setenv('POLYMARKET_OBSERVER_WS_RECEIVE_QUEUE_MAX', '2')
@@ -543,29 +556,47 @@ def test_hard_overflow_recovers_snapshots_on_same_socket(monkeypatch):
         with p.lock:
             m.sync([market()])
             assert opened.wait(1)
+            feed(p, market())
             for _ in range(10):
                 sockets[0].callbacks['on_message'](sockets[0], json.dumps(dict(
                     event_type='price_change', price_changes=[dict(asset_id='ay', side='SELL', price='.4', size='999')])))
             assert m.states[0]['inbox'].resync.is_set()
-        assert subscribed.wait(1) and applied.wait(1)
+        assert subscribed.wait(1)
+        # Drain a post-subscribe delta before sending the authoritative WS book.
+        # REST must remain a full isolated snapshot, never absorb that delta.
+        import time
+        deadline = time.monotonic() + 1
+        while m.states[0]['inbox'].queue.qsize() and time.monotonic() < deadline:
+            stopped.wait(.01)
+        with p.lock:
+            assert 'ay' in m.states[0]['inbox'].awaiting
+            if rest_failure:
+                assert 'ay' not in p.books
+            else:
+                assert p.books['ay']['asks'] == {'.55': '5'}
+        sockets[0].callbacks['on_message'](sockets[0], json.dumps(dict(
+            event_type='book', asset_id='ay', bids=[], asks=[dict(price='.6', size='3')])))
+        assert applied.wait(1)
         assert len(sockets) == 1 and not stopped.is_set()
         assert operations == [None, 'unsubscribe', 'subscribe']
+        assert rest_calls == [[{'token_id': 'ay'}]]
         assert p.books['ay']['asks'] == {'.6': '3'}
-        assert 'an' not in p.books
+        assert 'an' in p.books  # Unaffected outcome survives targeted recovery.
         assert not m.states[0]['inbox'].invalid.is_set()
         assert m.states[0]['inbox'].resyncs == 1
     finally:
         m.close()
 
 
-def test_popped_frame_from_before_overflow_cannot_repopulate_book():
+def test_explicit_generation_invalidation_rejects_popped_frame():
     p = observer.Pipeline()
     p.set_markets([market()])
     inbox = observer.ReceiveQueue(1)
     assert inbox.put('old')
     _, _, old_epoch = inbox.queue.get_nowait()
     assert inbox.put('queued')
-    assert not inbox.put('gap')
+    assert inbox.put('gap')
+    inbox.epoch += 1  # Explicit connection generation invalidation, not a queue gap.
     inbox.discard()
     inbox.resync.clear()
     p.receive(dict(event_type='book', asset_id='ay', bids=[], asks=[]), {'ay'},
@@ -654,3 +685,130 @@ def test_shard_lock_wait_measures_time_before_publication():
     thread.join(1)
     assert inbox.lock_wait_seconds >= .02
     assert inbox.lag_seconds >= inbox.lock_wait_seconds
+
+
+def test_worker_compaction_preserves_levels_deletes_snapshots_and_timestamps():
+    at = datetime.now(timezone.utc)
+    frames = [
+        (dict(event_type='book', asset_id='a', bids=[dict(price='.1', size='1')], asks=[]), at),
+        (dict(event_type='price_change', timestamp=1, price_changes=[
+            dict(asset_id='a', side='BUY', price='.2', size='2'),
+            dict(asset_id='b', side='SELL', price='.8', size='8')]), at),
+        (dict(event_type='price_change', timestamp=2, price_changes=[
+            dict(asset_id='a', side='BUY', price='.1', size='0'),
+            dict(asset_id='a', side='BUY', price='.2', size='3')]), at + timedelta(seconds=1)),
+    ]
+    expected = {'b': {'bids': {}, 'asks': {}}}
+    actual = {'b': {'bids': {}, 'asks': {}}}
+    for event, _ in frames:
+        observer.ws_apply_event(event, expected)
+    compacted = observer.merge_frames(frames)
+    for event, _ in compacted:
+        observer.ws_apply_event(event, actual)
+    assert actual == expected
+    assert actual['a']['bids'] == {'.2': '3'}
+    assert len(compacted) == 4
+    assert compacted[1][1] == at + timedelta(seconds=1)
+    reset = dict(event_type='book', asset_id='a', bids=[], asks=[])
+    result = observer.merge_frames(frames + [(reset, at)])
+    assert [e for e, _ in result if 'a' in observer.event_assets(e)] == [reset]
+
+
+@pytest.mark.parametrize('asset_count', [1, 48])
+def test_sustained_2500_messages_per_second_no_slow_consumer(monkeypatch, asset_count):
+    """Offline WS callback replay, real parser/worker/Pipeline, no public I/O."""
+    import sys
+    import time
+    from types import SimpleNamespace
+    stopped, opened = threading.Event(), threading.Event()
+    sockets = []
+
+    class Socket:
+        def __init__(self, url, **callbacks):
+            self.callbacks = callbacks
+            sockets.append(self)
+        def run_forever(self, **kwargs):
+            self.callbacks['on_open'](self)
+            opened.set()
+            stopped.wait(15)
+        def send(self, raw):
+            pass
+        def close(self):
+            stopped.set()
+
+    monkeypatch.setitem(sys.modules, 'websocket', SimpleNamespace(WebSocketApp=Socket))
+    monkeypatch.setattr(observer, '_STOP', threading.Event())
+    monkeypatch.setattr(observer, '_DAILY_STATS', observer.DailyStats())
+    monkeypatch.setenv('POLYMARKET_OBSERVER_WS_SHARDS', '1')
+    monkeypatch.setenv('POLYMARKET_OBSERVER_WS_RECEIVE_QUEUE_MAX', '2048')
+    monkeypatch.setenv('POLYMARKET_OBSERVER_WS_RECEIVE_QUEUE_CEILING', '2048')
+    monkeypatch.setattr(observer.PublicClient, '_json', lambda *a, **k: (_ for _ in ()).throw(
+        AssertionError('unexpected REST during sustained replay')))
+    p = observer.Pipeline()
+    markets = [market(str(i)) for i in range(max(1, asset_count // 2))]
+    assets = observer.subscription_assets(markets)[:asset_count]
+    p.set_markets(markets)
+    monkeypatch.setattr(observer, '_PIPELINE', p)
+    original_receive = p.receive
+    def delayed_receive(*args, **kwargs):
+        # A serial per-frame consumer at this cost cannot sustain 2500/s.
+        if threading.current_thread().name == 'polymarket-book-0':
+            time.sleep(.003)
+        return original_receive(*args, **kwargs)
+    monkeypatch.setattr(p, 'receive', delayed_receive)
+    m = observer.MarketConnections()
+    original_loads = observer.json.loads
+    producer_id = threading.get_ident()
+    def loads(raw, *args, **kwargs):
+        assert threading.get_ident() != producer_id, 'receive callback parsed JSON'
+        return original_loads(raw, *args, **kwargs)
+    try:
+        m.sync(markets)
+        assert opened.wait(1)
+        for item in markets:
+            feed(p, item)
+        callback = sockets[0].callbacks['on_message']
+        monkeypatch.setattr(observer.json, 'loads', loads)
+        started = time.monotonic()
+        count = 10000
+        for first in range(0, count, 25):
+            for i in range(first, first + 25):
+                callback(sockets[0], json.dumps(dict(event_type='price_change', timestamp=1700000000000+i,
+                    price_changes=[dict(asset_id=assets[i % asset_count], side='BUY', price='.3', size=str(i+1))])))
+            deadline = started + (first + 25) / 2500
+            stopped.wait(max(0, deadline - time.monotonic()))
+        elapsed = time.monotonic() - started
+        deadline = time.monotonic() + 3
+        expected = {assets[i % asset_count]: str(i+1) for i in range(count)}
+        def caught_up():
+            with p.lock:
+                return all(p.books[a]['bids'].get('.3') == size for a, size in expected.items())
+        while not caught_up() and time.monotonic() < deadline:
+            stopped.wait(.01)
+        inbox = m.states[0]['inbox']
+        assert count / elapsed >= 2000
+        assert caught_up()
+        assert not inbox.invalid.is_set() and not stopped.is_set()
+        assert inbox.dropped == inbox.resyncs == 0
+        assert p.messages < count // 2  # Repeated levels are compacted before publication.
+        assert len(sockets) == 1
+        assert sum(row['slow_consumer_count'] for row in m.stats.days.values()) == 0
+        assert sum(row['reconnect_count'] for row in m.stats.days.values()) == 0
+        print(f'replay assets={asset_count} messages={count} rate={count/elapsed:.1f}/s high_water={inbox.high_water} '
+              f'lag={inbox.lag_seconds:.6f}s drops={inbox.dropped} slow_consumer=0 reconnect=0')
+    finally:
+        m.close()
+
+
+def test_loss_journal_remains_bounded_without_parsing_on_receive(monkeypatch):
+    q = observer.ReceiveQueue(2)
+    def forbidden(*args):
+        raise AssertionError('receive parsed JSON')
+    monkeypatch.setattr(observer.json, 'loads', forbidden)
+    for i in range(3000):
+        assert q.put(str(i))
+    assert q.queue.qsize() == 2
+    assert len(q.lost) == q.lost.maxlen == 1024
+    assert q.lost_unknown and q.resync.is_set() and not q.invalid.is_set()
+    assert [q.queue.get_nowait()[0] for _ in range(2)] == ['2998', '2999']
+    assert q.dropped == 2998

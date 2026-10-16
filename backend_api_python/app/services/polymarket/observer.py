@@ -14,10 +14,10 @@ from datetime import datetime, timezone
 
 from app.utils.db import get_db_connection
 from .account_history import max_pair_skew_ms, pair_rejection
-from .client import PublicClient
+from .client import PublicClient, CLOB
 from .engine import number, sweep
 from . import updown, recording
-from .ws_balance import RateBalancer, DailyStats
+from .ws_balance import RateBalancer, DailyStats, event_assets
 
 STATUS = {"enabled": False, "running": False, "mode": "stopped", "connected": False, "markets_subscribed": 0,
           "last_message_at": None, "rebalance_count": 0, "reconnect_count": 0, "ws_connections": 0, "slow_consumer_count": 0, "last_error": None, "started_at": None}
@@ -689,7 +689,7 @@ class Pipeline:
                     inbox.lock_wait_seconds = time.monotonic() - waiting_at
                     if owned is not None and hasattr(inbox, "activated"):
                         owned = {a for a in owned if received >= inbox.activated.get(a, received)}
-                if inbox and (inbox.invalid.is_set() or inbox.resync.is_set() or
+                if inbox and (inbox.invalid.is_set() or
                               (epoch is not None and epoch != inbox.epoch)):
                     return
                 if inbox:
@@ -923,13 +923,52 @@ def shard_markets(markets, count, previous=None, rates=None):
     return {i: group for i, group in result.items() if group}
 
 
+def merge_frames(frames):
+    """Worker-only compaction: snapshots reset an asset; deltas retain each level.
+
+    Keep receipt and exchange timestamps per asset. Never treat a final delta as
+    a complete book, or combine different assets under one timestamp.
+    """
+    pending = {}
+    def add(event, received):
+        if isinstance(event, list):
+            for item in event:
+                add(item, received)
+            return
+        if not isinstance(event, dict):
+            return
+        payload = event.get('payload') or event
+        kind = event.get('event_type') or event.get('type')
+        if kind == 'book':
+            for asset in event_assets(event):
+                pending[asset] = {None: (dict(event, event_type='book'), received)}
+        elif kind == 'price_change':
+            for row in payload.get('price_changes', payload.get('priceChanges', [])):
+                asset = str(row.get('asset_id') or row.get('assetId') or '')
+                if not asset:
+                    continue
+                entries = pending.setdefault(asset, {})
+                key = (str(row.get('side')), str(row.get('price')))
+                # Reinsert overwritten levels to retain receipt-time order for
+                # paper history, with O(1) work per update rather than scans.
+                entries.pop(key, None)
+                entries[key] = (dict(event_type='price_change', price_changes=[row],
+                                     timestamp=payload.get('timestamp', event.get('timestamp'))), received)
+    for event, received in frames:
+        add(event, received)
+    return [entry for entries in pending.values() for entry in entries.values()]
+
+
 class ReceiveQueue:
-    """Elastic bounded FIFO; a gap requests snapshots on the existing socket."""
+    """Raw FIFO: evict oldest at capacity, journal gaps for worker recovery."""
     def __init__(self, maximum, ceiling=None):
         self.queue = Queue(maximum)
         self.ceiling = max(maximum, ceiling or maximum)
         self.lock = RLock()
         self.resync = Event()
+        self.lost = deque(maxlen=max(1024, self.ceiling))
+        self.lost_unknown = False
+        self.awaiting = set()
         self.epoch = 0
         self.resyncs = 0
         self.lag_seconds = 0
@@ -941,7 +980,7 @@ class ReceiveQueue:
 
     def put(self, raw):
         with self.lock:
-            if self.invalid.is_set() or self.resync.is_set():
+            if self.invalid.is_set():
                 self.dropped += 1
                 return False
             if self.queue.full() and self.queue.maxsize < self.ceiling:
@@ -952,10 +991,17 @@ class ReceiveQueue:
                 self.high_water = max(self.high_water, self.queue.qsize())
                 return True
             except Full:
-                self.epoch += 1
                 self.resync.set()
+                try:
+                    lost = self.queue.get_nowait()
+                    if len(self.lost) == self.lost.maxlen:
+                        self.lost_unknown = True
+                    self.lost.append(lost)
+                except Empty:
+                    pass
                 self.dropped += 1
-                return False
+                self.queue.put_nowait((raw, datetime.now(timezone.utc), self.epoch))
+                return True
 
     def discard(self):
         while True:
@@ -1093,26 +1139,66 @@ class MarketConnections:
         def process_frames():
             while not self.closed and state.get('inbox') is inbox and not inbox.invalid.is_set():
                 if inbox.resync.is_set():
-                    # Serialize gap recovery with publication. Never reuse a book
-                    # assembled across a missing delta; request fresh full books.
-                    pipeline_lock = _PIPELINE.lock if _PIPELINE else RLock()
-                    with pipeline_lock, inbox.lock:
-                        if inbox.invalid.is_set() or state.get('inbox') is not inbox:
-                            break
-                        inbox.discard()
-                        if _PIPELINE:
-                            for asset in state['assets']:
+                    # Identify lost assets off the socket thread. An exhausted
+                    # loss journal conservatively recovers the whole shard.
+                    with inbox.lock:
+                        lost = list(inbox.lost)
+                        inbox.lost.clear()
+                        unknown = inbox.lost_unknown
+                        inbox.lost_unknown = False
+                        inbox.resync.clear()
+                    affected = set(state['assets']) if unknown else set()
+                    for raw, _, _ in lost:
+                        try:
+                            affected.update(event_assets(json.loads(raw)))
+                        except (ValueError, TypeError):
+                            affected.update(state['assets'])
+                    affected.intersection_update(state['assets'])
+                    if _PIPELINE and affected:
+                        with _PIPELINE.lock:
+                            for asset in affected:
                                 _PIPELINE.books.pop(asset, None)
                                 _PIPELINE.recording.metadata.pop(asset, None)
                                 if _PIPELINE.paper_account:
                                     _PIPELINE.paper_account.history.assets.pop(asset, None)
+                        client = PublicClient()
+                        try:
+                            rows = client._json('POST', f'{CLOB}/books',
+                                                json=[{'token_id': a} for a in sorted(affected)])
+                            received = datetime.now(timezone.utc)
+                            with _PIPELINE.lock:
+                                if inbox.invalid.is_set() or state.get('inbox') is not inbox:
+                                    return
+                                for row in rows:
+                                    asset = str(row.get('asset_id'))
+                                    if asset in affected and asset in state['assets']:
+                                        _PIPELINE.receive(dict(row, event_type='book'), {asset}, received)
+                                        if asset in _PIPELINE.recording.metadata:
+                                            exchange, receipt, _ = _PIPELINE.recording.metadata[asset]
+                                            _PIPELINE.recording.metadata[asset] = (exchange, receipt, 'rest')
+                            # REST cannot order overlapping WS deltas. Keep its
+                            # complete snapshot until a WS snapshot supplies the
+                            # ordering barrier; never apply overlapping deltas.
+                        except (ValueError, TypeError, AttributeError):
+                            _LOG.warning('Polymarket REST gap recovery failed shard=%s', index)
+                        finally:
+                            client.close()
+                    affected.intersection_update(state['assets'])
+                    if affected:
+                        inbox.awaiting.update(affected)
+                        with state['lock']:
+                            if inbox.invalid.is_set() or state.get('inbox') is not inbox:
+                                return
+                            sock.send(json.dumps(dict(assets_ids=sorted(affected), operation='unsubscribe')))
+                            with inbox.lock:
+                                if not hasattr(inbox, 'activated'):
+                                    inbox.activated = {}
+                                for asset in affected:
+                                    inbox.activated[asset] = datetime.now(timezone.utc)
+                            sock.send(json.dumps(dict(assets_ids=sorted(affected), operation='subscribe')))
                         inbox.resyncs += 1
-                    with state['lock']:
-                        sock.send(json.dumps(dict(assets_ids=state['assets'], operation='unsubscribe')))
-                        with inbox.lock:
-                            inbox.resync.clear()
-                        sock.send(json.dumps(dict(assets_ids=state['assets'], operation='subscribe')))
-                    _LOG.warning('Polymarket WS snapshot recovery shard=%s drops=%s', index, inbox.dropped)
+                        _LOG.warning('Polymarket WS asset recovery shard=%s assets=%s drops=%s',
+                                     index, len(affected), inbox.dropped)
                 try:
                     raw, received_at, epoch = inbox.queue.get(timeout=.2)
                     inbox.queue_wait_seconds = (datetime.now(timezone.utc) - received_at).total_seconds()
@@ -1120,17 +1206,46 @@ class MarketConnections:
                 except Empty:
                     continue
                 try:
-                    event = json.loads(raw)
-                    self.stats.message(index)
-                    self.balancer.receive(event, index)
+                    batch = [(raw, received_at, epoch)]
+                    for _ in range(511):
+                        try:
+                            batch.append(inbox.queue.get_nowait())
+                        except Empty:
+                            break
+                    frames = []
+                    for raw, received_at, epoch in batch:
+                        try:
+                            event = json.loads(raw)
+                        except (ValueError, TypeError):
+                            continue
+                        self.stats.message(index)
+                        self.balancer.receive(event, index)
+                        if epoch == inbox.epoch:
+                            frames.append((event, received_at))
+                    compacted = merge_frames(frames)
                     if _PIPELINE:
-                        # Recheck generation under the same lock used for invalidation.
                         waiting_at = time.monotonic()
                         with _PIPELINE.lock:
                             lock_wait = time.monotonic() - waiting_at
-                            valid = not inbox.invalid.is_set() and state.get('inbox') is inbox
-                            if valid:
-                                _PIPELINE.receive(event, frozenset(state['assets']), received_at, inbox, epoch)
+                            if inbox.resync.is_set():
+                                with inbox.lock:
+                                    for frame in batch:
+                                        if len(inbox.lost) == inbox.lost.maxlen:
+                                            inbox.lost_unknown = True
+                                        inbox.lost.append(frame)
+                                        inbox.dropped += 1
+                                continue
+                            if not inbox.invalid.is_set() and state.get('inbox') is inbox:
+                                for event, received_at in compacted:
+                                    assets = event_assets(event)
+                                    active = getattr(inbox, 'activated', {})
+                                    if any(received_at < active.get(a, received_at) for a in assets):
+                                        continue
+                                    if event.get('event_type') == 'book':
+                                        inbox.awaiting.difference_update(assets)
+                                    elif assets & inbox.awaiting:
+                                        continue
+                                    _PIPELINE.receive(event, frozenset(state['assets']), received_at, inbox, epoch)
                                 inbox.lock_wait_seconds = lock_wait
                 except (ValueError, TypeError, AttributeError):
                     continue
