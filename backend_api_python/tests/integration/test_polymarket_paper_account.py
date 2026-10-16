@@ -215,8 +215,10 @@ def test_recorded_maker_feed_prints_official_and_proxy_settlement(isolated, monk
     with isolated() as db:
         cur = db.cursor()
         cur.execute("UPDATE qd_polymarket_observer_windows SET official_outcome=NULL")
-        for at, price in ((market_['eventStartTime'], '60000'), (market_['endDate'], '60001')):
-            cur.execute("INSERT INTO qd_polymarket_observer_samples(market_id,reference_price,reference_source,reference_observed_at) VALUES ('42',%s,'api.binance.com',%s)", (price, at))
+        # One boundary from the REST reference, one from the spot WebSocket; a non-Binance row is ignored.
+        for at, price, source in ((market_['eventStartTime'], '60000', 'stream.binance.com'), (market_['endDate'], '60001', 'api.binance.com'),
+                                  (market_['endDate'], '1', 'unavailable')):
+            cur.execute("INSERT INTO qd_polymarket_observer_samples(market_id,reference_price,reference_source,reference_observed_at) VALUES ('42',%s,%s,%s)", (price, source, at))
         db.commit()
         cur.close()
     b = p.Account({'taker_enabled': True})

@@ -213,6 +213,11 @@ prices come from `api.binance.com/api/v3/ticker/price`, with
 including failed reads, and performs no HTTP in book callbacks. Stale or failed
 references are null and never replace order books or become a trading signal.
 These are USDT spot observations, not Chainlink USD/TWAP resolution prices.
+With `POLYMARKET_OBSERVER_SPOT_WS_ENABLED=true` (default false) the same slot is
+served from the public Binance `bookTicker` WebSocket (bid/ask midpoint, sources
+`stream.binance.com` / `data-stream.binance.vision`) while it is younger than
+`SPOT_WS_FRESH_MS`, with the REST worker still running as fallback; Binance
+settlement proxies accept all four sources (`deploy/pm_spot_ws_20261016.md`).
 No numeric price-to-beat was observed; an explicit market `priceToBeat`, if
 supplied, is stored without inferring it from spot. The original release deferred Chainlink collection: the [official RTDS migration guide](https://docs.polymarket.com/migrate/rtds-to-polybolt)
 deprecates the public price topics and requires authentication for replacement
