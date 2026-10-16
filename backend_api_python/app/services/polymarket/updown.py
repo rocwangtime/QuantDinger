@@ -25,6 +25,12 @@ def selections(name, defaults, allowed):
     return tuple(dict.fromkeys(x.strip() for x in os.getenv('POLYMARKET_OBSERVER_UPDOWN_' + name, ','.join(defaults)).split(',') if x.strip() in allowed))
 
 
+def series_slug(asset, interval):
+    """Gamma series slug; SOL hourly/daily series are published as "solana-"."""
+    name = 'solana' if asset == 'SOL' and interval in ('1h', '1d') else asset.lower()
+    return f"{name}-up-or-down-{ {'1h': 'hourly', '1d': 'daily'}.get(interval, interval)}"
+
+
 def timestamp(value):
     try:
         result = datetime.fromisoformat(str(value).replace('Z', '+00:00'))
@@ -93,7 +99,7 @@ def discover(client, series_cache, *, now=None):
     selected, excluded, conditions = [], [], set()
     for asset in assets:
         for interval in intervals:
-            slug = f"{asset.lower()}-up-or-down-{ {'1h': 'hourly', '1d': 'daily'}.get(interval, interval)}"
+            slug = series_slug(asset, interval)
             try:
                 if slug not in series_cache:
                     series = client._json('GET', 'https://gamma-api.polymarket.com/series', params={'slug': slug})

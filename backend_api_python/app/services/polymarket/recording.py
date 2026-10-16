@@ -16,14 +16,15 @@ from uuid import uuid4
 
 from app.utils.db import get_db_connection
 from .client import PublicClient, GAMMA
-from .updown import setting
+from .maker_model import parse_rules
+from .updown import ASSETS, INTERVALS, setting
 
 PREFIX = 'qd_polymarket_observer_'
 TABLES = ('books', 'trades', 'twap', 'windows', 'samples')
 BOOK_SQL = f"INSERT INTO {PREFIX}books(recording_id,market_id,token_id,exchange_at,received_at,source,bids,asks) VALUES (%s,%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb) ON CONFLICT DO NOTHING"
 TRADE_SQL = f"INSERT INTO {PREFIX}trades(recording_id,market_id,token_id,price,size,side,exchange_at,received_at,transaction_hash) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING"
 TWAP_SQL = f"INSERT INTO {PREFIX}twap(asset,window_seconds,exchange_at,received_at,price,source) VALUES (%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING"
-WINDOW_SQL = f"INSERT INTO {PREFIX}windows(market_id,condition_id,asset,interval,start_time,end_time,price_to_beat,up_token_id,down_token_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (market_id) DO UPDATE SET up_token_id=EXCLUDED.up_token_id,down_token_id=EXCLUDED.down_token_id WHERE (qd_polymarket_observer_windows.up_token_id,qd_polymarket_observer_windows.down_token_id) IS DISTINCT FROM (EXCLUDED.up_token_id,EXCLUDED.down_token_id)"
+WINDOW_SQL = f"INSERT INTO {PREFIX}windows(market_id,condition_id,asset,interval,start_time,end_time,price_to_beat,up_token_id,down_token_id,window_seconds) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (market_id) DO UPDATE SET up_token_id=EXCLUDED.up_token_id,down_token_id=EXCLUDED.down_token_id WHERE (qd_polymarket_observer_windows.up_token_id,qd_polymarket_observer_windows.down_token_id) IS DISTINCT FROM (EXCLUDED.up_token_id,EXCLUDED.down_token_id)"
 
 
 def flag(name, default=False):
@@ -84,9 +85,35 @@ def owned_events(event, owned):
     return event
 
 
-def scoped(market):
+def recording_scope():
+    """Up/Down assets and intervals whose books, trades and windows are recorded.
+
+    YES/NO markets are always recorded. Unset or empty keeps the original BTC/ETH
+    5m/15m scope; unknown names are dropped. Discovery (UPDOWN_*) still decides
+    which markets exist, so recording only narrows it.
+    """
+    def pick(name, default, allowed, case):
+        names = [case(x.strip()) for x in os.getenv('POLYMARKET_OBSERVER_RECORDING_' + name, '').split(',') if x.strip()]
+        return tuple(dict.fromkeys(v for v in names or default if v in allowed))
+    return pick('ASSETS', ('BTC', 'ETH'), ASSETS, str.upper), pick('INTERVALS', ('5m', '15m'), INTERVALS, str.lower)
+
+
+def scoped(market, scope=None):
+    assets, intervals = scope or recording_scope()
     return market.get('market_type', 'yes_no') == 'yes_no' or (
-        market.get('asset') in {'BTC', 'ETH'} and market.get('interval') in {'5m', '15m'})
+        market.get('asset') in assets and market.get('interval') in intervals)
+
+
+def settlement_window(market):
+    """Settlement averaging window from the rule text: Chainlink TWAP 60 s, Binance print 0.
+
+    Unreadable rules keep the label convention (1h/1d Binance candles), so a Binance
+    window is never joined to Chainlink TWAP ticks.
+    """
+    spec = parse_rules(market)
+    if spec:
+        return int(spec['w'])
+    return 0 if market.get('interval') in ('1h', '1d') else 60
 
 
 def top_five(book):
@@ -161,6 +188,7 @@ class Recorder:
     """Protected by Pipeline.lock; a bounded staging buffer precedes its writer."""
     def __init__(self):
         self.enabled = flag('RECORDING_ENABLED', True)
+        self.scope = recording_scope()
         self.metadata = {}
         self.last_books = {}
         self.pending = deque()
@@ -204,7 +232,7 @@ class Recorder:
                     self.invalid += 1
                     continue
                 market = markets.get(asset_markets.get(trade[0]))
-                if market and scoped(market) and (owned is None or trade[0] in owned):
+                if market and scoped(market, self.scope) and (owned is None or trade[0] in owned):
                     self.stage(trade[0], 'trade', TRADE_SQL, (str(uuid4()), market['id'], *trade))
 
     def books(self, books, markets, asset_markets, metadata, now):
@@ -215,7 +243,7 @@ class Recorder:
         for token, book in books.items():
             market = markets.get(asset_markets.get(token))
             meta = metadata.get(token)
-            if not market or not scoped(market) or not meta:
+            if not market or not scoped(market, self.scope) or not meta:
                 continue
             previous = self.last_books.get(token)
             if previous and now - previous[0] < interval:
@@ -272,6 +300,7 @@ class Recorder:
         def percentile(q, values=ages):
             return values[min(len(values) - 1, math.ceil(len(values) * q) - 1)] if values else None
         return dict(recording_enabled=self.enabled, recording_rows_per_minute=rates,
+                    recording_scope=dict(assets=list(self.scope[0]), intervals=list(self.scope[1])),
                     recording_retention_days=retention_days(),
                     recording_buffer_depth=len(self.pending), recording_dropped=self.dropped,
                     recording_invalid=self.invalid, book_age_p50_ms=percentile(.5),

@@ -627,9 +627,11 @@ Tables (all prefixed `qd_polymarket_observer_`):
 | `twap` | Asset, 60s lookback, exact exchange time, receive time, full-precision price, Chainlink provenance. Asset/lookback/exchange-time primary key and time index. |
 | `windows` | Market/condition, asset/interval, start/end, start TWAP (`price_to_beat`), settlement TWAP, their exact exchange times, computed/official outcome, nullable match, finality evidence and last check. End-time and pending-resolution indexes. |
 
-Books/trades/windows cover the existing YES/NO scope and BTC/ETH 5m/15m
-Up/Down scope (windows only apply to Up/Down). Discovery itself is unchanged;
-configure the existing Up/Down asset/interval allowlists for a narrow deployment.
+Books/trades/windows cover the existing YES/NO scope and, by default, the BTC/ETH
+5m/15m Up/Down scope (windows only apply to Up/Down). Since 2026-10-16
+`RECORDING_ASSETS` / `RECORDING_INTERVALS` widen the Up/Down part (see
+`deploy/pm_recording_scope_20261016.md`); they only narrow discovery, so the
+existing Up/Down asset/interval allowlists still decide which markets exist.
 The default recording flag is on, but the observer and Up/Down observer retain
 separate default-off gates. Books are sampled on top-five price **or size** changes,
 at most once per token per configured interval. Multiple updates during the
@@ -680,6 +682,8 @@ Existing Binance reference columns remain separate observations.
 | New observer suffix (`POLYMARKET_OBSERVER_`) | Default / bounds |
 | --- | --- |
 | `RECORDING_ENABLED` | true (observer itself remains disabled by default) |
+| `RECORDING_ASSETS` | BTC,ETH / any of BTC,ETH,SOL,XRP; unset or empty keeps the default |
+| `RECORDING_INTERVALS` | 5m,15m / any of 5m,15m,1h,4h,1d; unset or empty keeps the default |
 | `BOOK_MIN_INTERVAL_MS` | 1000 / 100–60000 |
 | `RECORDING_BUFFER_MAX` | 10000 / 1–100000 staging records, additional to existing writer queue |
 | `RECORDING_RETENTION_DAYS` | 7 / 1–365, depth/book snapshots |

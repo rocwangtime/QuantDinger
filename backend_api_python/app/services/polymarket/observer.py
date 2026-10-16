@@ -666,11 +666,11 @@ class Pipeline:
         if self.recording.enabled:
             for market in markets:
                 if (market['id'] not in previous and market.get('market_type') == 'up_down'
-                        and recording.scoped(market)):
+                        and recording.scoped(market, self.recording.scope)):
                     self.queue.put(market['id'], 'window', [(recording.WINDOW_SQL, (
                         market['id'], market['conditionId'], market['asset'], market['interval'],
                         market['eventStartTime'], market['endDate'], market.get('price_to_beat'),
-                        market['yesAssetId'], market['noAssetId']))])
+                        market['yesAssetId'], market['noAssetId'], recording.settlement_window(market)))])
         for identity in previous - self.markets.keys():
             self.capture(identity, 'observation', lambda: _end_episode(identity, datetime.now(timezone.utc)))
 

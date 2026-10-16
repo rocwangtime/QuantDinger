@@ -40,6 +40,21 @@ def test_rules_text_decides_source_window_and_tie():
     assert mm.parse_rules(dict(base, resolutionSource='', description='chainlink or binance')) is None
 
 
+
+def test_print_lag_only_for_one_minute_candle_closes():
+    daily = ('This market will resolve to "Up" if the "Close" price for the Binance 1 minute candle for '
+             'BTC/USDT Oct 15 \'26 12:00 in the ET timezone (noon) is lower than the final "Close" price '
+             'for the Oct 16 \'26 12:00 ET candle. If the final "Close" price for both of these candles is '
+             'exactly equal on Binance, this market will resolve 50-50.')
+    hourly = ('This market will resolve to "Up" if the close price is greater than or equal to the open price '
+              'for the BTC/USDT 1 hour candle that begins on the time and date specified in the title.')
+    assert mm.print_lag(dict(description=daily)) == 60
+    assert mm.print_lag(dict(description='Uses the Binance 1-minute candle close.')) == 60
+    assert mm.print_lag(dict(description=hourly)) == 0
+    assert mm.print_lag(dict(description='Chainlink BTC/USD TWAP data stream.')) == 0
+    assert mm.print_lag(dict(description='the 11 minute candle')) == 0
+    assert mm.print_lag({}) == 0
+
 @pytest.mark.parametrize('z', [-3.0, 0.0, 11.0, 50.0])
 def test_before_strike_window_fair_half_and_zero_toxicity_for_any_spot(z):
     s = spec()

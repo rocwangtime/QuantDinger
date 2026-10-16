@@ -445,3 +445,59 @@ def test_microprice_anchor_and_gap_switches_to_reduce():
     row = step(m, at=NOW + 300, bk=books(NOW + 300, up=book(bid='.51', ask='.53', at=NOW + 300)))
     assert row['phase'] == 'PREOPEN'
     assert math.isclose(row['decision']['M'], .52)
+
+
+class SettlementCursor:
+    """Answers RecordedFeed.outcome queries from fixed evidence; records what was asked."""
+    def __init__(self, official=None, prices=()):
+        self.official, self.prices, self.queries, self.result = official, list(prices), [], None
+
+    def execute(self, sql, params):
+        self.queries.append((sql, params))
+        if 'qd_polymarket_observer_windows' in sql:
+            self.result = dict(official_outcome=self.official)
+        else:
+            price = self.prices.pop(0) if self.prices else None
+            self.result = dict(reference_price=price) if price is not None else None
+
+    def fetchone(self):
+        return self.result
+
+
+def test_recorded_outcome_reads_hourly_candle_boundaries_from_the_market_samples():
+    from app.services.polymarket import maker_model as mm
+    from app.services.polymarket.maker import RecordedFeed
+    mk = hourly()
+    row = dict(market=mk, spec=mm.parse_rules(mk))
+    end = row['spec']['t1'] * 1000
+    cur = SettlementCursor(prices=['60000', '60000'])
+    assert RecordedFeed.outcome(cur, row, end) == ('Up', True)  # 1h rules: close >= open is Up.
+    samples = cur.queries[1:]
+    assert [params for _, params in samples] == [('77', b, b) for b in (mk['eventStartTime'], mk['endDate'])]
+    assert all('market_id=%s' in sql for sql, _ in samples)
+    assert RecordedFeed.outcome(SettlementCursor(official='Down', prices=['1', '2']), row, end) == ('Down', False)
+    assert RecordedFeed.outcome(SettlementCursor(prices=['60000']), row, end) == (None, False)
+
+
+def test_recorded_outcome_waits_for_daily_one_minute_candle_closes():
+    from app.services.polymarket import maker_model as mm
+    from app.services.polymarket.maker import RecordedFeed
+    rule = ('This market will resolve to "Up" if the "Close" price for the Binance 1 minute candle for BTC/USDT '
+            '12:00 in the ET timezone (noon) is lower than the final "Close" price for the next 12:00 ET candle. '
+            'If the final "Close" price for both of these candles is exactly equal on Binance, this market will resolve 50-50.')
+    mk = market('88', start=NOW - 86400000, duration=86400000, interval='1d', source=BINANCE, description=rule)
+    row = dict(market=mk, spec=mm.parse_rules(mk))
+    end = row['spec']['t1'] * 1000
+    assert row['spec']['tie'] == .5
+    for now in (end, end + 59999):
+        cur = SettlementCursor(prices=['60000', '60100'])
+        assert RecordedFeed.outcome(cur, row, now) == (None, False)
+        assert len(cur.queries) == 1  # Official result only; the closing print is not out yet.
+    cur = SettlementCursor(prices=['60000', '60100'])
+    assert RecordedFeed.outcome(cur, row, end + 60000) == ('Up', True)
+    prints = [utc(NOW - 86400000 + 60000), utc(NOW + 60000)]
+    assert [params for _, params in cur.queries[1:]] == [('BTC', at, at, at, at) for at in prints]
+    assert all('asset=%s' in sql and 'market_id' not in sql for sql, _ in cur.queries[1:])
+    assert RecordedFeed.outcome(SettlementCursor(prices=['60000', '60000']), row, end + 60000) == ('Tie', True)
+    assert RecordedFeed.outcome(SettlementCursor(prices=['60000', '59999']), row, end + 60000) == ('Down', True)
+    assert RecordedFeed.outcome(SettlementCursor(official='Up'), row, end) == ('Up', False)

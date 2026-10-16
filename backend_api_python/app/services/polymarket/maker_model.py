@@ -5,6 +5,7 @@ Times are epoch seconds unless a name ends in _ms.
 """
 import math
 import random
+import re
 from decimal import Decimal, ROUND_FLOOR
 
 from .updown import timestamp
@@ -36,6 +37,16 @@ def parse_rules(market):
     text = (str(market.get('description') or '') + ' ' + str(market.get('question') or '')).lower()
     tie = .5 if '50-50' in text or '50/50' in text else 1.0  # value of Up when X == K
     return dict(source=kind, w=60.0 if kind == 'chainlink' else 0.0, t0=t0, t1=t1, tie=tie)
+
+
+def print_lag(market):
+    """Seconds from a window boundary to its settlement print, from the rule text.
+
+    Daily Binance rules compare 1-minute candle closes at noon ET, a minute after
+    each boundary; hourly candle open/close and Chainlink streams print at them.
+    """
+    text = (str(market.get('description') or '') + ' ' + str(market.get('question') or '')).lower()
+    return 60 if re.search(r'\b1[ -]?minute candle', text) else 0
 
 
 def weight(spec, t):

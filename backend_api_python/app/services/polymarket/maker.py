@@ -1435,7 +1435,7 @@ class RecordedFeed:
                     m.prints(identity, index, batch[:self.LIMIT], now, complete=len(batch) <= self.LIMIT)
                 for identity, row in active.items():
                     if now >= row['spec']['t1'] * 1000 and all(row['caught_up']):
-                        outcome, estimated = self.outcome(cur, row)
+                        outcome, estimated = self.outcome(cur, row, now)
                         m.settle(identity, outcome, now, estimated)
                 if m.review_due(now):
                     cur.execute("SELECT detail FROM qd_polymarket_maker_events WHERE account_id=%s AND strategy=%s AND event='market_summary' AND observed_at>=%s",
@@ -1446,16 +1446,27 @@ class RecordedFeed:
         m.cleanup()
 
     @staticmethod
-    def outcome(cur, row):
+    def outcome(cur, row, now=None):
         market, identity = row['market'], row['market']['id']
         cur.execute('SELECT official_outcome FROM qd_polymarket_observer_windows WHERE market_id=%s', (identity,))
         resolution = cur.fetchone()
         if resolution and resolution['official_outcome']:
             return resolution['official_outcome'], False
-        # Recorded Binance observations nearest each boundary, no lookahead.
+        # Recorded Binance observations nearest each settlement print, no lookahead.
+        # Daily rules print a minute after each boundary, after this market's own
+        # samples stop: wait for the print, then read any same-asset sample.
+        lag = mm.print_lag(market) if (row['spec'] or {}).get('source') == 'binance' else 0
+        if lag and (now is None or now < (row['spec']['t1'] + lag) * 1000):
+            return None, False
         values = []
         for boundary in (market['eventStartTime'], market['endDate']):
-            cur.execute("SELECT reference_price FROM qd_polymarket_observer_samples WHERE market_id=%s AND reference_source IN ('api.binance.com','data-api.binance.vision') AND reference_observed_at<=%s AND reference_observed_at>=%s::timestamptz - INTERVAL '10 seconds' ORDER BY reference_observed_at DESC LIMIT 1", (identity, boundary, boundary))
+            if lag:
+                boundary = utc(timestamp(boundary).timestamp() * 1000 + lag * 1000)
+                where = "asset=%s AND observed_at>=%s::timestamptz - INTERVAL '10 seconds' AND observed_at<%s::timestamptz + INTERVAL '5 minutes'"
+                params = (market['asset'], boundary, boundary)
+            else:
+                where, params = 'market_id=%s', (identity,)
+            cur.execute(f"SELECT reference_price FROM qd_polymarket_observer_samples WHERE {where} AND reference_source IN ('api.binance.com','data-api.binance.vision') AND reference_observed_at<=%s AND reference_observed_at>=%s::timestamptz - INTERVAL '10 seconds' ORDER BY reference_observed_at DESC LIMIT 1", (*params, boundary, boundary))
             sample = cur.fetchone()
             values.append(number(sample['reference_price']) if sample else None)
         if any(v is None for v in values):
