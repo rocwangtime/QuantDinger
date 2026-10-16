@@ -113,3 +113,19 @@ def test_restart_with_persisted_group_rates_is_balanced_immediately(monkeypatch)
 def test_noise_does_not_cause_rebalance_churn(monkeypatch, seed):
     _, moves, _ = simulate(monkeypatch, seconds=3600, prior=True, seed=seed)
     assert len(moves) <= 3
+
+
+def test_real_file_uses_msg_per_s_and_does_not_invent_market_names():
+    rates = distribution()
+    assert rates['source'] == 'pm_ws_asset_rates_20261016.json'
+    assert len(rates['markets']) == 28
+    ordered = sorted((m['rate'] for m in rates['markets']), reverse=True)
+    assert ordered[:3] == pytest.approx([367.434, 148.030, 114.782])
+    assert sum(ordered) == pytest.approx(681.792, abs=.02)
+    assert all('series' not in m for m in rates['markets'])
+
+
+def test_series_rollovers_and_noise_keep_peak_and_churn_bounded(monkeypatch):
+    peaks, moves, _ = simulate(monkeypatch, seconds=7200, synthetic=True)
+    assert max(p for t, p, _ in peaks if t >= 600) <= 1.15
+    assert sum(t >= 600 for t, _ in moves) <= 4

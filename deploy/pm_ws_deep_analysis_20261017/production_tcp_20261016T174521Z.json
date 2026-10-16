@@ -1,0 +1,124 @@
+[
+  {
+    "sample_time": "Fri Oct 16 05:45:21 PM UTC 2026",
+    "tcp": [
+      {
+        "recv_q_bytes": 0,
+        "local_port": 53976,
+        "bytes_received": 499820010,
+        "rcv_space": 66575,
+        "rcv_ssthresh": 282465
+      },
+      {
+        "recv_q_bytes": 0,
+        "local_port": 58914,
+        "bytes_received": 171268556,
+        "rcv_space": 135765,
+        "rcv_ssthresh": 639268
+      },
+      {
+        "recv_q_bytes": 0,
+        "local_port": 57976,
+        "bytes_received": 298567,
+        "rcv_space": 20639,
+        "rcv_ssthresh": 130869
+      },
+      {
+        "recv_q_bytes": 0,
+        "local_port": 42992,
+        "bytes_received": 1055821,
+        "rcv_space": 76987,
+        "rcv_ssthresh": 534029
+      },
+      {
+        "recv_q_bytes": 0,
+        "local_port": 57706,
+        "bytes_received": 870746,
+        "rcv_space": 65670,
+        "rcv_ssthresh": 1245783
+      },
+      {
+        "recv_q_bytes": 0,
+        "local_port": 42994,
+        "bytes_received": 8550,
+        "rcv_space": 14480,
+        "rcv_ssthresh": 68175
+      },
+      {
+        "recv_q_bytes": 0,
+        "local_port": 58910,
+        "bytes_received": 280950709,
+        "rcv_space": 34287,
+        "rcv_ssthresh": 393551
+      },
+      {
+        "recv_q_bytes": 0,
+        "local_port": 57964,
+        "bytes_received": 368527303,
+        "rcv_space": 52805,
+        "rcv_ssthresh": 209742
+      }
+    ]
+  },
+  {
+    "sample_time": "Fri Oct 16 05:45:37 PM UTC 2026",
+    "tcp": [
+      {
+        "recv_q_bytes": 0,
+        "local_port": 53976,
+        "bytes_received": 499825734,
+        "rcv_space": 66575,
+        "rcv_ssthresh": 282465
+      },
+      {
+        "recv_q_bytes": 0,
+        "local_port": 58914,
+        "bytes_received": 171299881,
+        "rcv_space": 135765,
+        "rcv_ssthresh": 656546
+      },
+      {
+        "recv_q_bytes": 0,
+        "local_port": 57976,
+        "bytes_received": 298567,
+        "rcv_space": 20639,
+        "rcv_ssthresh": 130869
+      },
+      {
+        "recv_q_bytes": 0,
+        "local_port": 42992,
+        "bytes_received": 1055821,
+        "rcv_space": 76987,
+        "rcv_ssthresh": 534029
+      },
+      {
+        "recv_q_bytes": 0,
+        "local_port": 57706,
+        "bytes_received": 876575,
+        "rcv_space": 65670,
+        "rcv_ssthresh": 1245783
+      },
+      {
+        "recv_q_bytes": 0,
+        "local_port": 42994,
+        "bytes_received": 8550,
+        "rcv_space": 14480,
+        "rcv_ssthresh": 68175
+      },
+      {
+        "recv_q_bytes": 0,
+        "local_port": 58910,
+        "bytes_received": 280957633,
+        "rcv_space": 34287,
+        "rcv_ssthresh": 357670
+      },
+      {
+        "recv_q_bytes": 0,
+        "local_port": 57964,
+        "bytes_received": 368705955,
+        "rcv_space": 52805,
+        "rcv_ssthresh": 158820
+      }
+    ]
+  }
+]

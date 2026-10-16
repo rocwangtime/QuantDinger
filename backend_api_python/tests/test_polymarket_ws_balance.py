@@ -308,3 +308,150 @@ def test_catalogue_owner_moves_count_once_and_wire_failure_is_local(monkeypatch)
     assert next(iter(m.stats.days.values()))['rebalance_count'] == 1
     m.apply_assignment(dict(a=0, b=2))
     assert observer.STATUS['rebalance_count'] == 1
+
+
+def test_hot_connections_are_isolated_without_chasing_max_min(monkeypatch):
+    owners = dict(a=0, b=0, c=1, d=2, e=3)
+    b = balancer(monkeypatch, owners, dict(a=367.434, b=148.030, c=114.782, d=30, e=22))
+    final = settle(b, owners)
+    assert max(b.loads(final)) == pytest.approx(367.434)
+    assert b.hot_groups(final) == {'a', 'b', 'c'}
+    assert all(sum(shard == final[k] for shard in final.values()) == 1 for k in ('a', 'b', 'c'))
+    assert max(b.loads(final)) / min(b.loads(final)) > 7
+    assert b.plan(final) is None
+
+
+def test_rebalance_needs_sustained_pressure_and_real_gain(monkeypatch):
+    owners = {str(i): 0 for i in range(8)}
+    b = balancer(monkeypatch, owners, {k: 20 for k in owners})
+    b.confirmations = 2
+    assert b.plan(owners, 60) is None
+    assert b.plan(owners, 120) is not None
+    # A single spike that disappears resets the confirmation streak.
+    balanced = {k: int(k) % 4 for k in owners}
+    assert b.plan(balanced, 180) is None
+    assert b.plan(owners, 240) is None
+    # A 1% peak reduction does not pass the 10% actual-improvement band.
+    b.confirmations = 1
+    b.max_moves = 1
+    b.rates = {k: 100 if k == '0' else 1 for k in owners}
+    b.hot_rate = 1000
+    owners = {k: 0 if int(k) < 3 else int(k) % 3 + 1 for k in owners}
+    assert b.plan(owners, 300) is None
+
+
+def test_global_and_per_group_cooldowns_survive_rollover(monkeypatch):
+    owners = dict(a=0, b=0, c=1, d=1)
+    b = balancer(monkeypatch, owners, dict(a=300, b=200, c=100, d=80), count=2)
+    b.group_cooldown, b.minimum = 300, 120
+    b.applied(dict(a=1, b=1, c=0, d=0), owners, 0)
+    assert b.plan(owners, 119) is None
+    assert b.plan(owners, 120) is None  # All groups are still in their cooldown.
+    b.set_groups({k + 'new': k for k in owners}, 200)
+    b.assignment = {k + 'new': shard for k, shard in owners.items()}
+    assert b.plan(owners, 299) is None
+    assert b.plan(owners, 300) is not None
+
+
+def test_missing_delivery_and_partial_recovery_do_not_decay_hot_rate(monkeypatch):
+    b = balancer(monkeypatch, dict(hot=0, quiet=1), dict(hot=367, quiet=10), count=2)
+    b.since = dict(hot=0, quiet=0)
+    b.pending = {'quiet': 600}
+    b.sample(60, {'hot'})
+    assert b.rates['hot'] == 367
+    b.pending = dict(hot=100, quiet=600)  # Only part of a recovery window arrived.
+    b.sample(120)
+    assert b.rates['hot'] == 367
+    b.pending = dict(hot=60 * 367, quiet=600)
+    b.sample(180)
+    assert b.rates['hot'] == 367
+
+
+@pytest.mark.parametrize('count', [1, 4, 6, 8])
+def test_idle_connections_and_indivisible_hot_group_are_stable(monkeypatch, count):
+    owners = {'hot': 0, 'cold': min(1, count - 1)}
+    b = balancer(monkeypatch, owners, dict(hot=367, cold=1), count=count)
+    assert b.plan(owners) is None
+    assert b.metrics()['ws_peak_lower_bound'] == (368 if count == 1 else 367)
+
+
+def test_hot_classification_has_an_exit_band(monkeypatch):
+    owners = dict(a=0, b=1, c=2, d=3)
+    b = balancer(monkeypatch, owners, dict(a=101, b=99, c=99, d=99))
+    assert b.hot_groups(owners) == {'a'}
+    b.rates['a'] = 99
+    assert b.hot_groups(owners) == {'a'}
+    b.rates['a'] = 89
+    assert b.hot_groups(owners) == set()
+
+
+def test_retired_groups_do_not_accumulate_or_bias_unknown_weights(monkeypatch):
+    b = balancer(monkeypatch, dict(old=0, series=1), dict(old=10000, series=10))
+    b.pending = dict(old=30, series=20)
+    b.moved_at = dict(old=0, series=1)
+    b.set_groups({'new-window-y': 'series', 'new-market-y': 'new'})
+    assert b.rates == {'series': 10}
+    assert b.pending == {'series': 20}
+    assert b.moved_at == {'series': 1}
+    assert b.weight('new') == 10
+
+
+def test_slow_subscription_send_does_not_lock_retained_books_or_accept_early_target(monkeypatch):
+    from datetime import datetime, timezone
+    m, _ = manager(monkeypatch)
+    p = observer.Pipeline()
+    monkeypatch.setattr(observer, '_PIPELINE', p)
+    for i in (0, 1):
+        m.states[i]['inbox'] = observer.ReceiveQueue(20)
+    p.books['a'] = {'bids': {}, 'asks': {}}
+    entered, release = threading.Event(), threading.Event()
+
+    def slow_send(raw):
+        entered.set()
+        assert release.wait(3)
+    m.states[0]['socket'].send = slow_send
+    thread = threading.Thread(target=lambda: m.apply_assignment(dict(a=0, b=1)), daemon=True)
+    thread.start()
+    try:
+        assert entered.wait(1)
+        assert p.lock.acquire(timeout=.3), 'Network send holds the shared book lock'
+        try:
+            inbox = m.states[1]['inbox']
+            p.receive(dict(event_type='book', asset_id='b', bids=[], asks=[]),
+                      {'b'}, datetime.now(timezone.utc), inbox, inbox.epoch)
+            assert 'b' not in p.books  # Destination subscription has not been sent.
+            assert 'a' in p.books
+        finally:
+            p.lock.release()
+    finally:
+        release.set()
+        thread.join(2)
+    assert not thread.is_alive()
+    inbox = m.states[1]['inbox']
+    p.receive(dict(event_type='book', asset_id='b', bids=[], asks=[]),
+              {'b'}, datetime.now(timezone.utc), inbox, inbox.epoch)
+    assert 'b' in p.books
+
+
+def test_manager_freezes_plans_through_outage_and_recovery_window(monkeypatch):
+    from types import SimpleNamespace
+    markets = [dict(id=str(i), yesAssetId=f'{i}y', noAssetId=f'{i}n') for i in range(4)]
+    owners = {f'market:{i}': i for i in range(4)}
+    m, _ = connected_manager(monkeypatch, markets, owners, {k: 100 for k in owners})
+    b = m.balancer
+    b.since = {k: 0 for k in owners}
+    clock, calls = [1], []
+    monkeypatch.setattr(observer, 'time', SimpleNamespace(monotonic=lambda: clock[0]))
+    monkeypatch.setattr(b, 'plan', lambda owners, now: calls.append(now))
+    m.states[0]['connected'] = False
+    m.tick()
+    assert b.rates['market:0'] == 100
+    assert calls == []
+    m.states[0]['connected'] = True
+    clock[0] = 2
+    m.tick()
+    assert b.rates['market:0'] == 100
+    assert calls == []
+    clock[0] = 3
+    m.tick()
+    assert calls == [3]

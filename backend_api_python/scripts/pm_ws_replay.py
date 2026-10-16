@@ -258,10 +258,18 @@ def serve(port, spec, t0, scale, slow_bytes, book_share, pair_share, seed, repor
         buffered = state['queued_bytes'] + state['writer'].transport.get_write_buffer_size()
         if buffered + len(data) > slow_bytes or len(state['outbox']) >= slow_frames:
             stats['slow_consumer'] += 1
+            print(f'close at={time.monotonic() - t0:.3f}s shard={key} queued={len(state["outbox"])} bytes={buffered}', file=sys.stderr)
             state['closed'] = True
             state['outbox'].clear()
             state['writer'].write(close_frame(1013, 'slow consumer: send buffer full'))
             asyncio.create_task(finish_close(state['writer']))
+            return
+        if not bandwidth_kib:
+            state['writer'].write(data)
+            stats['wire_bytes'][key] = stats['wire_bytes'].get(key, 0) + len(data)
+            if counted:
+                stats['sent'][key] = stats['sent'].get(key, 0) + 1
+            stats['max_buffer'][key] = max(stats['max_buffer'].get(key, 0), buffered + len(data))
             return
         state['outbox'].append((data, counted))
         state['queued_bytes'] += len(data)
@@ -583,6 +591,7 @@ def run(args):
         max_server_queue_frames=last.get('max_queue_frames') if last else None,
         receive_drops=peak_drops, process_cpu_cores_max=peak_cpu,
         callback_seconds_max=peak_callback, tcp_pending_bytes_max=peak_tcp,
+        reader_metrics=status.get('ws_receive_queues'),
         group_rates=status.get('ws_group_rates'),
         shard_assets=status.get('ws_shard_assets'), estimated_shard_loads=[
             round(x, 1) for x in status.get('ws_shard_loads', [])])

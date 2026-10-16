@@ -52,9 +52,9 @@ def ratio(loads):
 class RateBalancer:
     """Ingress frame rates per balance group and bounded whole-group moves.
 
-    Receive callbacks count every frame before it is queued, so a backlog cannot
-    hide load. A frame's cost of one message is split between the owned assets it
-    carries, so shard loads add up to frames per second.
+    Workers attribute parsed frames to groups; socket callbacks independently
+    count raw frames/bytes. Samples spanning backlog, loss or recovery are frozen
+    by the manager. One frame's cost is split between its owned assets.
     """
     def __init__(self, count):
         self.count = count
@@ -72,11 +72,11 @@ class RateBalancer:
         self.min_gain = setting('REBALANCE_MIN_MSG_PER_S', 10, 0)
         self.hot_rate = setting('HOT_GROUP_MSG_PER_S', 100, 0)
         self.hot_share = setting('HOT_GROUP_SHARE', .15, 0)
-        self.moved_at, self.unavailable = {}, set()
+        self.moved_at, self.unavailable, self.dedicated = {}, set(), set()
         self.pressure, self.pressure_samples = None, 0
         self.trigger = setting('REBALANCE_RATIO', 1.5, 1)
         self.target = setting('REBALANCE_TARGET_RATIO', 2, 1)
-        self.max_moves = int(setting('REBALANCE_MAX_GROUPS', 4, 1))
+        self.max_moves = int(setting('REBALANCE_MAX_GROUPS', 8, 1))
         self.half_life = setting('RATE_HALF_LIFE_SECONDS', 30, 1)
 
     def set_groups(self, groups, now=None):
@@ -84,11 +84,18 @@ class RateBalancer:
         with self.lock:
             now = time.monotonic() if now is None else now
             self.groups = dict(groups)
+            live = set(groups.values())
+            # Bound catalogue history; series keys survive replacement of windows.
+            for values in (self.rates, self.owners, self.since, self.moved_at, self.pending):
+                for key in values.keys() - live:
+                    del values[key]
+            self.measured.intersection_update(live)
+            self.dedicated.intersection_update(live)
             for key in set(groups.values()):
                 self.since.setdefault(key, now)
 
     def receive(self, event, shard):
-        """Count one frame at ingress. ``event`` is parsed JSON or raw text."""
+        """Attribute one drained frame. ``event`` is parsed JSON or raw text."""
         if isinstance(event, (str, bytes, bytearray)):
             try:
                 event = json.loads(event)
@@ -179,9 +186,11 @@ class RateBalancer:
     def hot_groups(self, owners):
         """Reserve at least one shared shard; isolate dominant measured groups."""
         total = sum(self.weight(k) for k in owners)
+        threshold = max(self.hot_rate, total * self.hot_share)
         candidates = [k for k in owners if k in self.measured and
-                      self.weight(k) >= max(self.hot_rate, total * self.hot_share)]
-        return set(sorted(candidates, key=lambda k: (-self.weight(k), k))[:max(0, self.count - 1)])
+                      self.weight(k) >= threshold * (1 - self.threshold if k in self.dedicated else 1)]
+        self.dedicated = set(sorted(candidates, key=lambda k: (-self.weight(k), k))[:max(0, self.count - 1)])
+        return self.dedicated
 
     def isolation_cost(self, owners, hot):
         # The load sharing a dominant group's connection. Counting a hot/hot
@@ -197,7 +206,6 @@ class RateBalancer:
         once per plan, and at most ``budget`` distinct groups change owner.
         """
         owners = dict(owners)
-        weights = {k: self.weight(k) for k in owners}
         movable = sorted(owners if movable is None else movable)
         hot = self.hot_groups(owners)
         moved = set()
@@ -256,7 +264,7 @@ class RateBalancer:
         hot = self.hot_groups(owners)
         bound = max([sum(before) / self.count, *(self.weight(k) for k in owners)])
         isolation = self.isolation_cost(owners, hot)
-        if (not any(before) or (isolation < self.min_gain and
+        if (not any(before) or (isolation <= max(1e-6, self.min_gain) and
                 max(before) <= bound * (1 + self.threshold))):
             self.pressure, self.pressure_samples = None, 0
             return None
@@ -271,7 +279,8 @@ class RateBalancer:
         peak_gain = max(before) - max(loads)
         isolation_gain = isolation - self.isolation_cost(target, hot)
         if not moved or (peak_gain < max(self.min_gain, max(before) * self.threshold)
-                         and isolation_gain < max(self.min_gain, isolation * self.threshold)):
+                         and (isolation_gain <= 1e-6 or
+                              isolation_gain < max(self.min_gain, isolation * self.threshold))):
             return None
         return target
 
@@ -286,6 +295,8 @@ class RateBalancer:
                         ws_peak_lower_bound=max([sum(loads) / self.count,
                                                  *(self.weight(k) for k in self.current_owners())]),
                         ws_hot_groups=sorted(self.hot_groups(self.current_owners())),
+                        ws_hot_co_tenant_msg_per_s=self.isolation_cost(
+                            self.current_owners(), self.hot_groups(self.current_owners())),
                         ws_rebalance_pressure_samples=self.pressure_samples,
                         ws_group_cooldown_seconds=self.group_cooldown,
                         ws_group_rates={k: round(v, 3) for k, v in sorted(

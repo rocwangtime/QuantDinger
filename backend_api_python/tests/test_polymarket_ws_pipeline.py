@@ -812,3 +812,21 @@ def test_shard_lock_wait_measures_time_before_publication():
     thread.join(1)
     assert inbox.lock_wait_seconds >= .02
     assert inbox.lag_seconds >= inbox.lock_wait_seconds
+
+
+def test_read_ahead_falls_back_to_ssl_aware_library_dispatcher():
+    from types import SimpleNamespace
+    calls = []
+
+    class Base:
+        def create_dispatcher(self, timeout, dispatcher=None, is_ssl=False, handleDisconnect=None):
+            calls.append((timeout, is_ssl))
+            return SimpleNamespace(read=lambda *args: calls.append('read'))
+
+    app = observer.read_ahead_app(Base)()
+    # A future library exposes no compatible frame_buffer/_recv API.
+    app.sock = SimpleNamespace(sock=SimpleNamespace(pending=lambda: 0))
+    dispatcher = app.create_dispatcher(1)
+    dispatcher.read(None, lambda: None, lambda: None)
+    assert calls == [(1, True), 'read']
+    assert app.read_ahead_active is False

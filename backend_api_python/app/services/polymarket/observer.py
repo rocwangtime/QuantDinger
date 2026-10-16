@@ -5,6 +5,7 @@ import os
 import sys
 import threading
 import time
+from time import process_time
 from contextlib import contextmanager
 from collections import deque
 from itertools import groupby
@@ -1060,7 +1061,7 @@ class MarketConnections:
         self.stats = _DAILY_STATS
         self.reconnect_pending = False
         self.sample_unavailable = set()
-        self.cpu_at, self.cpu_seconds = time.monotonic(), time.process_time()
+        self.cpu_at, self.cpu_seconds = time.monotonic(), process_time()
         self.closed = False
         self.markets = []
 
@@ -1116,33 +1117,35 @@ class MarketConnections:
                     state['assets'] = assets
                     if state.get('inbox'):
                         activated = getattr(state['inbox'], 'activated', {})
-                        state['inbox'].activated = {a: (datetime.now(timezone.utc) if a in changed else activated[a])
+                        state['inbox'].activated = {a: (datetime.max.replace(tzinfo=timezone.utc) if a in changed else activated[a])
                                                    for a in assets if a in changed or a in activated}
             with self.balancer.lock:
                 self.balancer.assignment = dict(assignment)
                 new_owners = self.balancer.current_owners()
                 self.balancer.owners.update(new_owners)
                 self.balancer.applied(old_owners, new_owners, time.monotonic())
-            for operation in ('unsubscribe', 'subscribe'):
-                for index, commands in changes.items():
-                    state = self.states[index]
-                    with state['lock']:
-                        if state['connected'] and state['socket']:
-                            for command in commands:
-                                if command['operation'] == operation:
-                                    try:
-                                        if operation == 'subscribe' and state.get('inbox'):
-                                            for asset in command['assets_ids']:
-                                                state['inbox'].activated[asset] = datetime.now(timezone.utc)
-                                        state['socket'].send(json.dumps(command))
-                                    except Exception as exc:
-                                        # A real wire failure affects this socket only.
-                                        state['connected'] = False
-                                        if state.get('inbox'):
-                                            state['inbox'].invalid.set()
-                                        state['socket'].close()
-                                        _ws_error(exc)
-                                        break
+        # Subscription sends/close handshakes may block on the network. Ownership
+        # is already published; retained books must not wait behind that I/O.
+        for operation in ('unsubscribe', 'subscribe'):
+            for index, commands in changes.items():
+                state = self.states[index]
+                with state['lock']:
+                    if state['connected'] and state['socket']:
+                        for command in commands:
+                            if command['operation'] == operation:
+                                try:
+                                    if operation == 'subscribe' and state.get('inbox'):
+                                        for asset in command['assets_ids']:
+                                            state['inbox'].activated[asset] = datetime.now(timezone.utc)
+                                    state['socket'].send(json.dumps(command))
+                                except Exception as exc:
+                                    # A real wire failure affects this socket only.
+                                    state['connected'] = False
+                                    if state.get('inbox'):
+                                        state['inbox'].invalid.set()
+                                    state['socket'].close()
+                                    _ws_error(exc)
+                                    break
 
         if moved:
             self.balancer.last_rebalance = time.monotonic()
@@ -1328,7 +1331,7 @@ class MarketConnections:
         unhealthy = set()
         for state in self.states.values():
             inbox = state.get('inbox')
-            bad = not state['connected'] or (inbox and (
+            bad = (bool(state.get('socket')) and not state['connected']) or (inbox and (
                 inbox.delivery_gap or inbox.invalid.is_set() or inbox.resync.is_set() or
                 (inbox.queue.qsize() and inbox.lag_seconds > 1)))
             if inbox:
@@ -1376,7 +1379,7 @@ class MarketConnections:
                 inbox.byte_rate = (inbox.received_bytes - inbox.metric_bytes) / elapsed
                 inbox.metric_frames, inbox.metric_bytes = inbox.received_frames, inbox.received_bytes
                 inbox.metric_at = now
-        cpu_now = time.process_time()
+        cpu_now = process_time()
         cpu_cores = (cpu_now - self.cpu_seconds) / (now - self.cpu_at) if now > self.cpu_at else 0
         self.cpu_at, self.cpu_seconds = now, cpu_now
         with _LOCK:

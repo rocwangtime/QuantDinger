@@ -1,0 +1,70 @@
+=== 13:16:17
+health 200
+health/ready 200
+health/workers 200
+MEV|{}
+L|[493.2337658560756, 331.3619201830787, 859.4673661783015, 259.3220268759642] rb=1 assets=[12, 10, 6, 20]
+K|book_age_p95_ms=67019.787 reconnect_count=0 slow_consumer_count=0 book_arrival_lag_p95_ms=4758.2880000000005 book_receipt_age_p95_ms=66550.502
+
+WSCONN|4
+SLOW|0
+=== 13:17:41
+health 200
+health/ready 200
+health/workers 200
+MEV|{ "cancel" : 2, "market_summary" : 2, "place" : 2, "settlement" : 2 }
+L|[503.49333538454016, 266.7317317829569, 764.5155200332757, 215.06182264028047] rb=1 assets=[12, 10, 6, 20]
+K|book_age_p95_ms=68533.883 reconnect_count=0 slow_consumer_count=0 book_arrival_lag_p95_ms=267.98100000000005 book_receipt_age_p95_ms=68396.117
+
+WSCONN|4
+SLOW|0
+=== 13:19:04
+health 200
+health/ready 200
+health/workers 200
+MEV|{ "cancel" : 2, "market_summary" : 2, "place" : 2, "settlement" : 2 }
+L|[431.0169648690237, 203.7903095444036, 524.674360422118, 204.17034059738995] rb=2 assets=[10, 16, 6, 16]
+K|book_age_p95_ms=67296.791 reconnect_count=0 slow_consumer_count=0 book_arrival_lag_p95_ms=135.873 book_receipt_age_p95_ms=67210.877
+
+WSCONN|4
+SLOW|0
+=== 13:20:28
+health 200
+health/ready 200
+health/workers 200
+MEV|{ "cancel" : 2, "market_summary" : 3, "place" : 2, "settlement" : 3 }
+L|[435.18091498283343, 4.004817781385907, 0.5800483763569317, 177.83611217292204] rb=2 assets=[10, 16, 4, 18]
+K|book_age_p95_ms=10816.296 reconnect_count=0 slow_consumer_count=0 book_arrival_lag_p95_ms=163.907 book_receipt_age_p95_ms=10401.393
+
+WSCONN|4
+SLOW|0
+=== 13:21:52
+health 200
+health/ready 200
+health/workers 200
+MEV|{ "cancel" : 2, "market_summary" : 4, "place" : 2, "settlement" : 4, "shadow_fills" : 1 }
+L|[373.880856665873, 672.2186484333372, 216.0727783299159, 159.7367507964574] rb=3 assets=[10, 10, 6, 22]
+K|book_age_p95_ms=49931.312 reconnect_count=0 slow_consumer_count=0 book_arrival_lag_p95_ms=134.589 book_receipt_age_p95_ms=49803.171
+
+WSCONN|4
+SLOW|0
+=== 13:23:15
+health 200
+health/ready 200
+health/workers 200
+MEV|{ "cancel" : 2, "market_summary" : 5, "place" : 2, "settlement" : 5, "shadow_fills" : 2 }
+L|[365.496181950318, 707.2361628079435, 249.17248349391093, 164.561213581363] rb=3 assets=[10, 10, 6, 22]
+K|book_age_p95_ms=20274.829 reconnect_count=0 slow_consumer_count=0 book_arrival_lag_p95_ms=392.23 book_receipt_age_p95_ms=20139.178
+
+WSCONN|4
+SLOW|0
+=== 13:24:39
+health 200
+health/ready 200
+health/workers 200
+MEV|{ "cancel" : 2, "market_summary" : 6, "place" : 2, "settlement" : 6, "shadow_fills" : 3 }
+L|[449.56290646656004, 849.7023843611447, 263.4886970358649, 178.6747322690661] rb=4 assets=[8, 4, 6, 30]
+K|book_age_p95_ms=34651.034 reconnect_count=0 slow_consumer_count=0 book_arrival_lag_p95_ms=266.127 book_receipt_age_p95_ms=34494.573000000004
+
+WSCONN|4
+SLOW|0
