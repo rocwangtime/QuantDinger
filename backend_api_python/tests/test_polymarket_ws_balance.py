@@ -1,4 +1,4 @@
-"""Measured group ownership, bounded churn, and subscription handover contracts."""
+"""Measured token ownership, bounded churn, and subscription handover contracts."""
 import json
 import threading
 
@@ -8,87 +8,57 @@ from app.services.polymarket import observer
 from app.services.polymarket.ws_balance import DailyStats, RateBalancer
 
 
-def balancer(monkeypatch, owners, rates, count=4):
-    """Groups ``k`` with assets ``ky``/``kn`` on ``owners[k]`` and measured ``rates``."""
+def balancer(monkeypatch, assignment, rates):
     monkeypatch.setenv('POLYMARKET_OBSERVER_WS_REBALANCE_SECONDS', '1')
     monkeypatch.setenv('POLYMARKET_OBSERVER_WS_REBALANCE_MIN_SECONDS', '10')
-    b = RateBalancer(count)
-    b.set_groups({k + side: k for k in owners for side in 'yn'})
-    b.assignment = {a: owners[k] for a, k in b.groups.items()}
-    b.rates, b.measured = dict(rates), set(rates)
+    b = RateBalancer(4)
+    b.set_assets(assignment)
+    b.assignment = assignment.copy()
+    b.rates = rates.copy()
+    b.pending = rates.copy()  # One-second sample retains the supplied rates.
     b.sample_at = b.last_check = 0
     return b
 
 
-def settle(b, owners, rounds=10):
-    for _ in range(rounds):
-        target = b.plan(owners)
-        if not target:
-            return owners
-        assert sum(target[k] != owners[k] for k in target) <= b.max_moves
-        owners = target
-    raise AssertionError('planner did not converge')
+def test_largest_first_preserves_set_and_reduces_moves(monkeypatch):
+    assignment = {str(i): 0 for i in range(8)}
+    b = balancer(monkeypatch, assignment, {a: 10 for a in assignment})
+    target = b.propose(1)
+    assert set(target) == set(assignment)
+    assert b.loads(target) == [20] * 4
+    assert sum(target[a] != assignment[a] for a in target) == 6
+    assert b.metrics()['ws_load_imbalance'] == 4
 
 
-def test_plan_moves_whole_groups_within_budget(monkeypatch):
-    owners = {str(i): 0 for i in range(8)}
-    b = balancer(monkeypatch, owners, {k: 10 for k in owners})
-    final = settle(b, owners)
-    assert set(final) == set(owners)
-    assert b.loads(final) == [20] * 4
-    assert b.metrics()['ws_load_imbalance'] == 4  # Applied owners are unchanged.
+def test_hysteresis_and_minimum_interval(monkeypatch):
+    assignment = {'a': 0, 'b': 1, 'c': 2, 'd': 3}
+    b = balancer(monkeypatch, assignment, dict(a=10, b=10, c=10, d=11))
+    assert b.propose(1) is None
+    b.assignment = {a: 0 for a in assignment}
+    b.last_rebalance = 1
+    assert b.propose(2, reconnect=True) is None
+    assert b.propose(11, reconnect=True)
 
 
-def test_plan_acts_only_outside_band(monkeypatch):
-    # Within REBALANCE_RATIO nothing moves.
-    b = balancer(monkeypatch, dict(a=0, b=1, c=2, d=3), dict(a=10, b=10, c=10, d=14))
-    assert b.plan(dict(a=0, b=1, c=2, d=3)) is None
-    # 2.4 is the best possible layout: above the target, but nothing to gain.
-    owners = dict(a=0, b=1, c=2, d=3)
-    b = balancer(monkeypatch, owners, dict(a=12, b=5, c=5, d=5))
-    assert b.ideal(owners) == pytest.approx(2.4)
-    assert b.plan(owners) is None
-    # An achievable target is reached even when the gain is under the band.
-    owners = dict(a=0, b=1, c=2, d=3, e=3, f=0)
-    b = balancer(monkeypatch, owners, dict(a=10, b=10, c=10, d=4, e=1, f=1))
-    assert max(b.loads(owners)) / min(b.loads(owners)) > b.target
-    final = settle(b, owners)
-    assert max(b.loads(final)) / min(b.loads(final)) <= b.target
+def test_unavoidable_hot_token_does_not_churn(monkeypatch):
+    b = balancer(monkeypatch, {'a': 0}, {'a': 100})
+    assert b.propose(1) is None
 
 
-def test_unavoidable_hot_group_does_not_churn(monkeypatch):
-    owners = dict(a=0, b=1, c=2, d=3)
-    b = balancer(monkeypatch, owners, dict(a=100, b=1, c=1, d=1))
-    assert b.plan(owners) is None
-
-
-def test_ingress_cost_split_and_series_rate_survives_rollover(monkeypatch):
-    key = 'up_down:BTC:5m'
-    b = RateBalancer(2)
-    b.set_groups({'w0y': key, 'w0n': key, 'm1y': 'market:1', 'm1n': 'market:1'})
-    b.assignment = dict(w0y=0, w0n=0, m1y=1, m1n=1)
-    b.sample_at = 0
-    b.since = {key: 0, 'market:1': 0}
-    frame = dict(event_type='price_change', price_changes=[
-        dict(asset_id='w0y'), dict(asset_id='w0y'), dict(asset_id='w0n')])
-    for _ in range(30):
-        b.receive(frame, 0)
-    b.receive(json.dumps(frame), 1)  # A former owner's duplicate is ignored.
-    assert b.pending == {key: 30}
-    # The window expires before the sample; its frames still count for the series.
-    b.set_groups({'w1y': key, 'w1n': key, 'm1y': 'market:1', 'm1n': 'market:1'})
-    b.assignment = dict(w1y=0, w1n=0, m1y=1, m1n=1)
-    b.receive(dict(event_type='book', asset_id='w1y'), 0)
-    assert b.sample(1)
-    assert b.rates == {key: 31, 'market:1': 0}
-    assert b.sample(2) and 0 < b.rates[key] < 31
-
-
-@pytest.mark.parametrize('raw', ['oops', 'null', '[]', '{}', b'\xff\xfe'])
-def test_non_token_payloads_do_not_affect_rates(monkeypatch, raw):
-    b = balancer(monkeypatch, {'a': 0}, {'a': 0})
-    b.receive(raw, 0)
-    assert b.pending == {}
+def test_ewma_token_frames_include_unknown_book_and_decay(monkeypatch):
+    b = balancer(monkeypatch, {'a': 0, 'b': 1}, dict(a=0, b=0))
+    frame = json.dumps(dict(event_type='price_change', price_changes=[
+        dict(asset_id='a'), dict(asset_id='a'), dict(asset_id='b')]))
+    b.receive(frame, 0)
+    b.receive(frame, 1)
+    assert b.pending == dict(a=1, b=1)
+    b.propose(1)
+    first = b.rates['a']
+    assert 0 < first < 1 and first == b.rates['b']
+    b.propose(2)
+    assert b.rates['a'] < first
+    b.set_assets({'b': 1})
+    assert set(b.rates) == {'b'}
 
 
 def manager(monkeypatch):
@@ -132,59 +102,26 @@ def test_utc_counter_rollover_and_checkpoints(monkeypatch):
     assert stats.days['2026-10-13']['shard_msg_totals'] == {'3': 1}
 
 
-def connected_manager(monkeypatch, markets, owners, rates):
-    """MarketConnections with live fake sockets and measured group rates."""
-    from types import SimpleNamespace
-    monkeypatch.setenv('POLYMARKET_OBSERVER_WS_REBALANCE_SECONDS', '1')
-    monkeypatch.setenv('POLYMARKET_OBSERVER_WS_REBALANCE_MIN_SECONDS', '10')
-    monkeypatch.setattr(observer, '_STOP', threading.Event())
-    monkeypatch.setattr(observer, '_DAILY_STATS', DailyStats())
-    monkeypatch.setattr(observer, '_PIPELINE', None)
-    m = observer.MarketConnections()
-    sent = []
-
-    class Socket:
-        def __init__(self, index):
-            self.index = index
-
-        def send(self, raw):
-            sent.append((self.index, json.loads(raw)))
-
-        def close(self):
-            pytest.fail('balancing closed a socket')
-    m.markets = list(markets)
-    m.balancer.set_groups({a: observer.balance_key(x) for x in markets for a in observer.subscription_assets([x])})
-    assignment = {a: owners[observer.balance_key(x)] for x in markets for a in observer.subscription_assets([x])}
-    m.states = {i: dict(assets=[a for a in assignment if assignment[a] == i], socket=Socket(i), connected=True,
-                        lock=threading.RLock(), thread=SimpleNamespace(is_alive=lambda: True), ping_at=float('inf'))
-                for i in range(4)}
-    m.balancer.assignment = assignment
-    m.balancer.rates, m.balancer.measured = dict(rates), set(rates)
-    m.balancer.sample_at = m.balancer.last_check = 0
-    m.balancer.pending = {k: v for k, v in rates.items()}  # One-second sample keeps the rates.
-    return m, sent
+@pytest.mark.parametrize('raw', ['oops', 'null', '[]', '{}'])
+def test_non_token_payloads_do_not_affect_rates(monkeypatch, raw):
+    b = balancer(monkeypatch, {'a': 0}, {'a': 0})
+    b.receive(raw, 0)
+    assert b.pending == {'a': 0}
 
 
 def test_reconnect_checks_before_periodic_deadline(monkeypatch):
-    from types import SimpleNamespace
-    markets = [dict(id=str(i), yesAssetId=f'{i}y', noAssetId=f'{i}n') for i in range(8)]
-    m, _ = connected_manager(monkeypatch, markets, {f'market:{i}': 0 for i in range(8)},
-                             {f'market:{i}': 10 for i in range(8)})
-    m.balancer.interval = 60
-    m.balancer.last_check = 1
-    monkeypatch.setattr(observer, 'time', SimpleNamespace(monotonic=lambda: 1))
-    m.tick()
-    assert m.balancer.last_rebalance == float('-inf')
-    m.reconnect_pending = True
-    m.tick()
-    assert m.balancer.last_rebalance == 1
+    b = balancer(monkeypatch, {str(i): 0 for i in range(8)}, {str(i): 10 for i in range(8)})
+    b.interval = 60
+    b.last_check = 1
+    assert b.propose(1) is None
+    assert b.propose(1, reconnect=True)
 
 
 def test_manager_retains_market_locality_on_connected_tick(monkeypatch):
     from types import SimpleNamespace
     m, _ = manager(monkeypatch)
-    m.markets = [dict(id='m', yesAssetId='a', noAssetId='b')]
-    m.balancer.set_groups(dict(a='market:m', b='market:m'))
+    b = balancer(monkeypatch, dict(a=0, b=0), dict(a=10, b=10))
+    m.balancer = b
     m.reconnect_pending = True
     for state in m.states.values():
         state.update(thread=SimpleNamespace(is_alive=lambda: True), ping_at=float('inf'))
@@ -192,50 +129,6 @@ def test_manager_retains_market_locality_on_connected_tick(monkeypatch):
     m.tick()
     assert m.balancer.assignment['a'] == m.balancer.assignment['b']
     assert not m.stats.days
-
-
-def test_manager_applies_weighted_whole_group_rebalance_and_cooldown(monkeypatch):
-    from types import SimpleNamespace
-    markets = [dict(id=str(i), yesAssetId=f'{i}y', noAssetId=f'{i}n') for i in range(16)]
-    owners = {f'market:{i}': i % 4 for i in range(16)}
-    rates = {k: (7 if owner == 3 else 1) for k, owner in owners.items()}
-    m, sent = connected_manager(monkeypatch, markets, owners, rates)
-    b = m.balancer
-    clock = [1]
-    monkeypatch.setattr(observer, 'time', SimpleNamespace(monotonic=lambda: clock[0]))
-    before = b.loads()
-    m.tick()
-    assert max(b.loads()) / min(b.loads()) < max(before) / min(before)
-    assert b.last_rebalance == 1
-    assert next(iter(m.stats.days.values()))['rebalance_count'] == 1
-    moved = {a for _, command in sent for a in command['assets_ids']}
-    assert 0 < len(moved) <= 2 * b.max_moves
-    for market in markets:
-        assert b.assignment[market['yesAssetId']] == b.assignment[market['noAssetId']]
-    applied = dict(b.assignment)
-    # A repeated catalogue refresh must not undo the assignment or bypass cooldown.
-    m.sync(markets)
-    clock[0] = 5
-    m.tick()
-    assert b.assignment == applied
-    # After the cooldown the next bounded round continues towards the target.
-    for second in range(12, 60, 11):
-        clock[0] = second
-        b.pending = dict(b.rates)
-        b.sample_at = second - 1
-        m.tick()
-    assert max(b.loads()) / min(b.loads()) <= b.target
-
-
-def test_swaps_escape_single_move_local_minimum(monkeypatch):
-    # Two hot markets per shard require exchanges, not high-to-low moves.
-    weights = [8, 7, 6, 5, 4, 3, 2, 1]
-    owners = {str(i): i // 2 for i in range(8)}
-    b = balancer(monkeypatch, owners, {str(i): w for i, w in enumerate(weights)})
-    b.trigger = b.target = 1
-    b.threshold = 0
-    final = settle(b, owners)
-    assert b.loads(final) == [9] * 4
 
 
 def test_checkpoint_failure_keeps_dirty_day_for_retry(monkeypatch):
@@ -253,6 +146,49 @@ def test_checkpoint_failure_keeps_dirty_day_for_retry(monkeypatch):
     assert stats.dirty == {'2026-10-13'}
     assert stats.days['2026-10-13']['reconnect_count'] == 1
 
+
+
+def test_manager_applies_weighted_whole_market_rebalance_and_cooldown(monkeypatch):
+    from types import SimpleNamespace
+    monkeypatch.setattr(observer, '_STOP', threading.Event())
+    monkeypatch.setattr(observer, '_DAILY_STATS', DailyStats())
+    monkeypatch.setenv('POLYMARKET_OBSERVER_WS_REBALANCE_SECONDS', '1')
+    monkeypatch.setenv('POLYMARKET_OBSERVER_WS_REBALANCE_MIN_SECONDS', '10')
+    monkeypatch.setattr(observer, '_PIPELINE', None)
+    m = observer.MarketConnections()
+    m.markets = [dict(id=str(i), yesAssetId=f'{i}y', noAssetId=f'{i}n') for i in range(16)]
+    groups = observer.shard_markets(m.markets, 4)
+    initial = {a: i for i, group in groups.items() for a in observer.subscription_assets(group)}
+    b = balancer(monkeypatch, initial, {a: (7 if i == 3 else 1) for a, i in initial.items()})
+    m.balancer = b
+    m.states = {i: dict(assets=[a for a in initial if initial[a] == i], socket=None,
+                        connected=False, lock=threading.RLock(), thread=SimpleNamespace(is_alive=lambda: True))
+                for i in range(4)}
+    monkeypatch.setattr(observer, 'time', SimpleNamespace(monotonic=lambda: 1))
+    m.tick()
+    assert b.imbalance(b.loads(b.assignment)) < b.imbalance(b.loads(initial))
+    assert b.last_rebalance == 1
+    assert next(iter(m.stats.days.values()))['rebalance_count'] == 1
+    for market in m.markets:
+        assert b.assignment[market['yesAssetId']] == b.assignment[market['noAssetId']]
+    applied = dict(b.assignment)
+    # A repeated catalogue refresh must not undo the assignment or bypass cooldown.
+    m.sync(m.markets)
+    assert b.assignment == applied
+
+
+def test_weighted_packing_escapes_single_move_local_minimum():
+    # Two hot markets per shard require exchanges, not high-to-low moves.
+    weights = [8, 7, 6, 5, 4, 3, 2, 1]
+    markets = [dict(id=str(i), yesAssetId=f'{i}y', noAssetId=f'{i}n') for i in range(8)]
+    owners = [0, 0, 1, 1, 2, 2, 3, 3]
+    previous = {a: owners[i] for i, m in enumerate(markets) for a in observer.subscription_assets([m])}
+    rates = {a: weights[i] / 2 for i, m in enumerate(markets) for a in observer.subscription_assets([m])}
+    groups = observer.shard_markets(markets, 4, previous, rates)
+    target = {a: i for i, group in groups.items() for a in observer.subscription_assets(group)}
+    b = RateBalancer(4)
+    b.rates = rates
+    assert b.loads(target) == [9] * 4
 
 
 def test_rollover_keeps_retained_books_and_queue(monkeypatch):
