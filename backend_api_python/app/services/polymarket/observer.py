@@ -938,30 +938,8 @@ class ReceiveQueue:
         self.dropped = 0
         self.high_water = 0
         self.invalid = Event()
-        # Independent of publication: overloaded workers must not under-report
-        # ingress. No parsing or publication locks in this critical section.
-        self.meter_lock = RLock()
-        self.samples = deque(maxlen=2048)
-        self.received = 0
-        self.measured = 0
-        self.receive_rate = 0
-        self.sample_at = time.monotonic()
-
-    def measure(self, now):
-        with self.meter_lock:
-            total = self.received - self.measured
-            samples = list(self.samples)
-            self.samples.clear()
-            self.measured = self.received
-        elapsed = now - self.sample_at
-        self.receive_rate = total / elapsed if elapsed > 0 else 0
-        self.sample_at = now
-        return total, samples
 
     def put(self, raw):
-        with self.meter_lock:
-            self.received += 1
-            self.samples.append(raw)
         with self.lock:
             if self.invalid.is_set() or self.resync.is_set():
                 self.dropped += 1
@@ -1118,11 +1096,10 @@ class MarketConnections:
                     # Serialize gap recovery with publication. Never reuse a book
                     # assembled across a missing delta; request fresh full books.
                     pipeline_lock = _PIPELINE.lock if _PIPELINE else RLock()
-                    with pipeline_lock:
+                    with pipeline_lock, inbox.lock:
                         if inbox.invalid.is_set() or state.get('inbox') is not inbox:
                             break
-                        with inbox.lock:
-                            inbox.discard()
+                        inbox.discard()
                         if _PIPELINE:
                             for asset in state['assets']:
                                 _PIPELINE.books.pop(asset, None)
@@ -1145,6 +1122,7 @@ class MarketConnections:
                 try:
                     event = json.loads(raw)
                     self.stats.message(index)
+                    self.balancer.receive(event, index)
                     if _PIPELINE:
                         # Recheck generation under the same lock used for invalidation.
                         waiting_at = time.monotonic()
@@ -1225,10 +1203,6 @@ class MarketConnections:
         # Sample token activity, but move whole markets only, with hysteresis
         # and a cooldown to avoid turning load balancing into reconnect churn.
         due = self.reconnect_pending or now - self.balancer.last_check >= self.balancer.interval
-        for index, state in self.states.items():
-            if state.get('inbox'):
-                total, samples = state['inbox'].measure(now)
-                self.balancer.sample_received(index, total, samples)
         self.balancer.propose(now, self.reconnect_pending)
         if due and self.markets and now - self.balancer.last_rebalance >= self.balancer.minimum:
             groups = shard_markets(self.markets, self.count, self.balancer.assignment, self.balancer.rates)
@@ -1259,15 +1233,9 @@ class MarketConnections:
         with _LOCK:
             STATUS.setdefault('rebalance_count', 0)
             STATUS.update(self.balancer.metrics())
-            STATUS['ws_top_market_loads'] = sorted(
-                [dict(market_id=market['id'],
-                      shard=self.balancer.assignment.get(market['yesAssetId']),
-                      rate=sum(self.balancer.rates.get(a, 0) for a in subscription_assets([market])))
-                 for market in self.markets], key=lambda row: (-row['rate'], str(row['market_id'])))[:10]
             STATUS['ws_shard_assets'] = [len(self.states.get(i, {}).get('assets', [])) for i in range(self.count)]
             STATUS['ws_receive_queues'] = {
-                i: dict(received=s['inbox'].received, receive_rate=s['inbox'].receive_rate,
-                        depth=s['inbox'].queue.qsize(), drops=s.get('receive_drops', 0) + s['inbox'].dropped,
+                i: dict(depth=s['inbox'].queue.qsize(), drops=s.get('receive_drops', 0) + s['inbox'].dropped,
                         high_water=s['inbox'].high_water, capacity=s['inbox'].queue.maxsize,
                         resyncs=s['inbox'].resyncs, lag_seconds=s['inbox'].lag_seconds,
                         queue_wait_seconds=s['inbox'].queue_wait_seconds,
