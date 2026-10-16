@@ -61,26 +61,6 @@ class RateBalancer:
                 if self.assignment.get(asset) == shard:
                     self.pending[asset] = self.pending.get(asset, 0) + 1
 
-    def sample_received(self, shard, total, samples):
-        """Attribute actual ingress using a bounded recent-frame sample.
-
-        Split multi-token frame cost across its owners. Parse in tick, never
-        on receive; queue drops and book-lock waits cannot suppress measurement.
-        """
-        weights = {}
-        for raw in samples:
-            try:
-                assets = event_assets(json.loads(raw))
-            except (ValueError, TypeError, AttributeError):
-                continue
-            assets = {a for a in assets if self.assignment.get(a) == shard}
-            for asset in assets:
-                weights[asset] = weights.get(asset, 0) + 1 / len(assets)
-        with self.lock:
-            scale = total / len(samples) if samples else 0
-            for asset, weight in weights.items():
-                self.pending[asset] = self.pending.get(asset, 0) + weight * scale
-
     def loads(self, assignment):
         loads = [0.0] * self.count
         for asset, shard in assignment.items():
