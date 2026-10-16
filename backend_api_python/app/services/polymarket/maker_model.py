@@ -191,12 +191,12 @@ def bid_price(fair_k, h, tick, tolerance):
 
 
 def constrain(px, hedge, best_bid, best_ask, tick, p):
-    """Post-only, join/improve-only opening, bounded hedge lag. Returns (px, reason)."""
+    """Post-only, bounded lag behind the best bid (hedge and opening sides). Returns (px, reason)."""
     px = min(px, best_ask - tick)
     if hedge:
         if px < best_bid - p.hedge_max_behind_ticks * tick:
             return None, 'hedge_too_far'
-    elif px < best_bid:
+    elif px < best_bid - p.open_max_behind_ticks * tick:
         return None, 'behind_best'
     px = min(px, best_bid + p.max_improve_ticks * tick)
     return (px, None) if px > 0 else (None, 'nonpositive')
