@@ -60,6 +60,7 @@ class RateBalancer:
         self.count = count
         self.lock = threading.Lock()
         self.assignment, self.groups, self.pending = {}, {}, {}
+        self.byte_rates, self.pending_bytes = {}, {}
         self.rates, self.owners, self.measured, self.since = {}, {}, set(), {}
         self.sample_at = time.monotonic()
         self.last_check = self.sample_at
@@ -80,6 +81,7 @@ class RateBalancer:
         self.half_life = setting('RATE_HALF_LIFE_SECONDS', 30, 1)
         self.max_assets = int(setting('ASSETS_PER_SHARD', 12, 2))
         self.max_load = setting('MAX_MSG_PER_S', 300, 1)
+        self.max_bytes = setting('MAX_BYTES_PER_S', 262144, 1)
 
     def set_groups(self, groups, now=None):
         """Publish asset -> balance key; keys keep their rate and owner."""
@@ -88,7 +90,7 @@ class RateBalancer:
             self.groups = dict(groups)
             live = set(groups.values())
             # Bound catalogue history; series keys survive replacement of windows.
-            for values in (self.rates, self.owners, self.since, self.moved_at, self.pending):
+            for values in (self.rates, self.byte_rates, self.pending_bytes, self.owners, self.since, self.moved_at, self.pending):
                 for key in values.keys() - live:
                     del values[key]
             self.measured.intersection_update(live)
@@ -96,7 +98,7 @@ class RateBalancer:
             for key in set(groups.values()):
                 self.since.setdefault(key, now)
 
-    def receive(self, event, shard):
+    def receive(self, event, shard, raw_bytes=0):
         """Attribute one drained frame. ``event`` is parsed JSON or raw text."""
         if isinstance(event, (str, bytes, bytearray)):
             try:
@@ -118,6 +120,7 @@ class RateBalancer:
                 key = groups.get(asset)
                 if key is not None:
                     self.pending[key] = self.pending.get(key, 0) + share
+                    self.pending_bytes[key] = self.pending_bytes.get(key, 0) + share * raw_bytes
 
     def sample(self, now, unavailable=()):
         """Fold counts since the last sample into per-group EWMA msg/s."""
@@ -126,6 +129,7 @@ class RateBalancer:
             if elapsed <= 0:
                 return False
             counts, self.pending = self.pending, {}
+            byte_counts, self.pending_bytes = self.pending_bytes, {}
             blocked = self.unavailable | set(unavailable)
             self.unavailable = set(unavailable)
             for key in set(self.groups.values()):
@@ -137,11 +141,15 @@ class RateBalancer:
                 if window < min(elapsed, self.interval) / 2:
                     continue
                 rate = counts.get(key, 0) / window
+                byte_rate = byte_counts.get(key, 0) / window
                 if key in self.measured:
                     alpha = 1 - math.exp(-math.log(2) * window / self.half_life)
                     self.rates[key] += alpha * (rate - self.rates[key])
+                    self.byte_rates[key] = self.byte_rates.get(key, byte_rate) + alpha * (
+                        byte_rate - self.byte_rates.get(key, byte_rate))
                 else:
                     self.rates[key] = rate
+                    self.byte_rates[key] = byte_rate
                     self.measured.add(key)
             self.sample_at = now
             return True
@@ -151,6 +159,27 @@ class RateBalancer:
             return self.rates[key]
         known = sorted(v for v in self.rates.values() if v > 0)
         return known[len(known) // 2] if known else 1.0
+
+    def byte_weight(self, key):
+        if key in self.byte_rates:
+            return self.byte_rates[key]
+        known = sorted(v for v in self.byte_rates.values() if v > 0)
+        return known[len(known) // 2] if known else 0
+
+    def planning_weight(self, key):
+        return max(self.weight(key), self.byte_weight(key) / self.max_bytes * self.max_load)
+
+    def planning_loads(self, owners):
+        values = [0.] * self.count
+        for key, shard in owners.items():
+            values[shard] += self.planning_weight(key)
+        return values
+
+    def byte_loads(self, owners=None):
+        values = [0.] * self.count
+        for key, shard in (self.current_owners() if owners is None else owners).items():
+            values[shard] += self.byte_weight(key)
+        return values
 
     def loads(self, owners=None):
         """Per-shard msg/s for key -> shard owners (default: applied owners)."""
@@ -178,12 +207,12 @@ class RateBalancer:
         """Owners for ``keys``: retain known owners, put new groups on the lightest shard."""
         previous = dict(self.owners if previous is None else previous)
         owners = {k: previous[k] for k in keys if k in previous and previous[k] < self.count}
-        loads = self.loads(owners)
-        for key in sorted((k for k in keys if k not in owners), key=lambda k: (-self.weight(k), k)):
+        loads = self.planning_loads(owners)
+        for key in sorted((k for k in keys if k not in owners), key=lambda k: (-self.planning_weight(k), k)):
             shard = min(range(self.count), key=lambda i: (
                 self.capacity_cost(dict(owners, **{key: i})), loads[i], i))
             owners[key] = shard
-            loads[shard] += self.weight(key)
+            loads[shard] += self.planning_weight(key)
         if previous and any(self.capacity_cost(owners)):
             owners, _, _ = self.search(owners, min(32, len(owners)))
         return owners
@@ -198,21 +227,22 @@ class RateBalancer:
     def capacity_cost(self, owners):
         """Excess is explicit when an indivisible group or eight sockets cannot fit."""
         return (sum(max(0, n - self.max_assets) for n in self.asset_counts(owners)),
-                round(sum(max(0, n - self.max_load) for n in self.loads(owners)), 6))
+                round(sum(max(0, n - self.max_load) for n in self.loads(owners)), 6),
+                round(sum(max(0, n - self.max_bytes) for n in self.byte_loads(owners)), 6))
 
     def hot_groups(self, owners):
         """Reserve at least one shared shard; isolate dominant measured groups."""
-        total = sum(self.weight(k) for k in owners)
+        total = sum(self.planning_weight(k) for k in owners)
         threshold = max(self.hot_rate, total * self.hot_share)
         candidates = [k for k in owners if k in self.measured and
-                      self.weight(k) >= threshold * (1 - self.threshold if k in self.dedicated else 1)]
-        self.dedicated = set(sorted(candidates, key=lambda k: (-self.weight(k), k))[:max(0, self.count - 1)])
+                      self.planning_weight(k) >= threshold * (1 - self.threshold if k in self.dedicated else 1)]
+        self.dedicated = set(sorted(candidates, key=lambda k: (-self.planning_weight(k), k))[:max(0, self.count - 1)])
         return self.dedicated
 
     def isolation_cost(self, owners, hot):
         # The load sharing a dominant group's connection. Counting a hot/hot
         # collision twice makes separating two dominant groups the first move.
-        return sum(self.weight(other) for key in hot for other in owners
+        return sum(self.planning_weight(other) for key in hot for other in owners
                    if other != key and owners[other] == owners[key])
 
     def search(self, owners, budget, movable=None):
@@ -225,12 +255,12 @@ class RateBalancer:
         owners = dict(owners)
         movable = sorted(owners if movable is None else movable)
         # Keep the quadratic swap search bounded even for large catalogues.
-        movable = sorted(movable, key=lambda k: (-self.weight(k), k))[:32]
+        movable = sorted(movable, key=lambda k: (-self.planning_weight(k), k))[:32]
         hot = self.hot_groups(owners)
         moved = set()
 
         def score(layout):
-            values = self.loads(layout)
+            values = self.planning_loads(layout)
             return (*self.capacity_cost(layout), round(self.isolation_cost(layout, hot), 6), round(max(values), 6),
                     round(sum(v * v for v in values), 6))
 
@@ -258,7 +288,7 @@ class RateBalancer:
                 break
             owners.update(best)
             moved.update(best)
-        return owners, self.loads(owners), moved
+        return owners, self.planning_loads(owners), moved
 
     def ideal(self, keys):
         """Legacy ratio diagnostic; a large value need not mean overload."""
@@ -279,9 +309,9 @@ class RateBalancer:
         are isolated, a high max/min ratio provides no reason to migrate.
         """
         now = time.monotonic() if now is None else now
-        before = self.loads(owners)
+        before = self.planning_loads(owners)
         hot = self.hot_groups(owners)
-        bound = max([sum(before) / self.count, *(self.weight(k) for k in owners)])
+        bound = max([sum(before) / self.count, *(self.planning_weight(k) for k in owners)])
         isolation = self.isolation_cost(owners, hot)
         overloaded = any(self.capacity_cost(owners))
         if (not overloaded and (not any(before) or (isolation <= max(1e-6, self.min_gain) and
@@ -321,6 +351,8 @@ class RateBalancer:
                         ws_rebalance_pressure_samples=self.pressure_samples,
                         ws_group_cooldown_seconds=self.group_cooldown,
                         ws_max_assets_per_shard=self.max_assets, ws_max_msg_per_s=self.max_load,
+                        ws_max_bytes_per_s=self.max_bytes, ws_shard_byte_loads=self.byte_loads(),
+                        ws_group_byte_rates={k: round(v, 3) for k, v in self.byte_rates.items() if k in live},
                         ws_capacity_excess=self.capacity_cost(self.current_owners()),
                         ws_group_rates={k: round(v, 3) for k, v in sorted(
                             self.rates.items(), key=lambda kv: -kv[1]) if k in live},

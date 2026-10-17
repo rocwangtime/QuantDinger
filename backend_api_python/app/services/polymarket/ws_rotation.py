@@ -1,14 +1,16 @@
 """Bounded shadow books and non-control traffic health for public feed rotation."""
 import math
+import random
 import time
 
 from . import recording
 from .ws_balance import setting
+from .ws_redundancy import FeedMerge
 
 
 def reconnect_delay(attempts):
-    # Initial failure (including a long-lived connection) retries immediately.
-    return 0 if attempts <= 1 else min(120, 2 ** min(7, attempts - 2))
+    # Full jitter, including the first retry; no synchronized immediate retries.
+    return random.uniform(0, min(30, .5 * 2 ** min(6, max(0, attempts - 1))))
 
 
 class DataHealth:
@@ -54,10 +56,11 @@ class ShadowBooks:
         self.minimum_times = {}
         self.recorder = recording.Recorder()
         self.recorder.enabled = False
+        self.merge = FeedMerge({}, deduplicate=False)
 
     def receive(self, event, received):
         from .observer import ws_apply_event
-        event = recording.owned_events(event, self.assets)
+        event = self.merge.filter(event, 'shadow', self.assets)
         changed = ws_apply_event(event, self.books)
         self.recorder.receive(event, changed, {}, {}, received, self.assets)
 

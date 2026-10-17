@@ -100,6 +100,7 @@ def test_text_heartbeat_and_sampling_run_without_market_tick(monkeypatch):
     app.keep_running = True
     app.ping_interval = 10
     app.sock = SimpleNamespace(send=sent.append)
+    app.subscription_ready.set()
     class Stop:
         def wait(self, seconds):
             assert seconds == 1
@@ -124,6 +125,7 @@ def test_text_heartbeat_send_failure_wakes_reader(monkeypatch):
     def fail(raw):
         raise OSError('send failed')
     app.sock = SimpleNamespace(send=fail, shutdown=lambda: shutdowns.append(True))
+    app.subscription_ready.set()
     app._send_ping()
     assert errors == ['send failed']
     assert shutdowns == [True]
@@ -234,12 +236,13 @@ def test_real_websocket_text_ping_pong_and_remote_close_lifecycle(monkeypatch):
                 accept = base64.b64encode(hashlib.sha1(key + b'258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest())
                 conn.sendall(b'HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n'
                              b'Sec-WebSocket-Accept: ' + accept + b'\r\n\r\n')
-                opcode, size = exact(conn, 2)
-                assert size & 128
-                mask = exact(conn, 4)
-                payload = exact(conn, size & 127)
-                payload = bytes(value ^ mask[i % 4] for i, value in enumerate(payload))
-                wire.append((opcode & 15, payload))
+                for _ in range(2):
+                    opcode, size = exact(conn, 2)
+                    assert size & 128
+                    mask = exact(conn, 4)
+                    payload = exact(conn, size & 127)
+                    payload = bytes(value ^ mask[i % 4] for i, value in enumerate(payload))
+                    wire.append((opcode & 15, payload))
                 conn.sendall(b'\x81\x04PONG')
                 assert pong.wait(2)
                 reason = struct.pack('!H', 1013) + b'slow consumer: send buffer full'
@@ -254,8 +257,12 @@ def test_real_websocket_text_ping_pong_and_remote_close_lifecycle(monkeypatch):
         if raw == b'PONG':
             app.transport.pong()
             pong.set()
+    def opened(app):
+        app.send('{"assets_ids":["a"],"type":"market"}')
+        app.subscription_ready.set()
     app = observer.read_ahead_app(websocket.WebSocketApp)(
         f'ws://127.0.0.1:{server.getsockname()[1]}', on_message=receive,
+        on_open=opened,
         on_error=lambda app, error: closes.append(ws_transport.remote_close(error)))
     serving = threading.Thread(target=serve, daemon=True)
     serving.start()
@@ -266,7 +273,7 @@ def test_real_websocket_text_ping_pong_and_remote_close_lifecycle(monkeypatch):
         client.join(3)
         assert not client.is_alive()
         assert not errors
-        assert wire == [(1, b'PING')]
+        assert wire == [(1, b'{"assets_ids":["a"],"type":"market"}'), (1, b'PING')]
         assert app.transport.pongs == 1
         assert app.transport.pong_rtt_seconds >= 0
         assert closes == [(1013, 'slow consumer: send buffer full')]

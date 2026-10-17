@@ -1,0 +1,15 @@
+{
+  "full_pytest": {
+    "passed": 4545,
+    "skipped": 24,
+    "warnings": 59,
+    "seconds": 266.0,
+    "uncompressed_log_sha256": "336819bb62f8483efba5bff7c052130e2fe528f2219ec18fcd2aaea82d7f4edc"
+  },
+  "round6_regressions": {
+    "passed": 27,
+    "seconds": 2.92
+  },
+  "ruff": "passed",
+  "diff_check": "passed"
+}

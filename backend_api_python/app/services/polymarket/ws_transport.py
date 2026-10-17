@@ -8,6 +8,16 @@ from collections import deque
 from datetime import datetime, timezone
 
 
+def safe_handshake_headers(app):
+    """Only public diagnostics; never enumerate/log cookies or auth headers."""
+    try:
+        headers = app.sock.getheaders() or {}
+        allowed = {'cf-ray', 'server', 'date', 'sec-websocket-extensions'}
+        return {str(k).lower(): str(v)[:256] for k, v in headers.items() if str(k).lower() in allowed}
+    except (AttributeError, OSError, TypeError, ValueError):
+        return {}
+
+
 def socket_metrics(app):
     result = {}
     try:
@@ -49,6 +59,22 @@ class TransportDiagnostics:
         self.ping_at = self.pong_at = None
         self.pong_rtt_seconds = None
         self.last = {}
+        self.headers = {}
+        self.read_buckets = deque(maxlen=61)
+
+    def capture_headers(self, app):
+        with self.lock:
+            self.headers.update(safe_handshake_headers(app))
+
+    def read(self, size, now=None):
+        # One bucket per second bounds memory independently of traffic volume.
+        now = time.monotonic() if now is None else now
+        second = int(now)
+        with self.lock:
+            if self.read_buckets and self.read_buckets[-1][0] == second:
+                self.read_buckets[-1][1] += size
+            else:
+                self.read_buckets.append([second, size])
 
     def sample(self, app, now=None):
         with self.lock:
@@ -57,6 +83,9 @@ class TransportDiagnostics:
     def _sample(self, app, now=None):
         now = time.monotonic() if now is None else now
         metrics = socket_metrics(app)
+        self.headers.update(safe_handshake_headers(app))
+        metrics.update(read_bytes_60s=sum(size for second, size in self.read_buckets if second > now - 60),
+                       read_window_resolution_seconds=1)
         total = getattr(app, 'read_bytes', 0)
         elapsed = now - self.last_at if self.last_at is not None else None
         metrics.update(at=datetime.now(timezone.utc).isoformat(),
@@ -89,7 +118,10 @@ def receive_buffer_options():
 
 
 def remote_close(error):
-    """websocket-client 1.9.0 passes a received close ABNF to on_error."""
+    """Preserve both 1.9.0 ABNF closes and newer typed close exceptions."""
+    code = getattr(error, 'status_code', None)
+    if isinstance(code, int) and 1000 <= code < 5000 and hasattr(error, 'reason'):
+        return code, error.reason
     data = getattr(error, 'data', None)
     if getattr(error, 'opcode', None) == 8 and isinstance(data, bytes) and len(data) >= 2:
         return struct.unpack('!H', data[:2])[0], data[2:].decode('utf-8', errors='replace')

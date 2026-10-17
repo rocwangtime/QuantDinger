@@ -248,6 +248,7 @@ def test_reconnect_generation_ignores_all_old_callbacks(feed_manager):
     state = m.states[0]
     sockets[0].close()
     state['thread'].join(1)
+    state['retry_at'] = 0  # Generation isolation is independent of jitter delay.
     m.tick()
     assert sockets[1].opened.wait(1)
     m.subscriptions.next_at = 0
@@ -356,8 +357,9 @@ def test_supervisor_rotates_without_market_tick(feed_manager):
 
 
 @pytest.mark.parametrize('established', [False, True])
-def test_supervisor_first_reconnect_is_immediate_then_exponential(feed_manager, established):
+def test_supervisor_reconnect_uses_full_jitter_and_resets_after_healthy_lifetime(feed_manager, established, monkeypatch):
     m, p, sockets = feed_manager
+    monkeypatch.setattr(ws_rotation.random, 'uniform', lambda low, high: high / 2)
     if established:
         m.states[0]['opened_at'] -= 61
         m.states[0]['attempts'] = 7
@@ -369,8 +371,8 @@ def test_supervisor_first_reconnect_is_immediate_then_exponential(feed_manager, 
     wait_for(lambda: not m.states[0]['thread'].is_alive())
     remaining = m.states[0]['retry_at'] - time.monotonic()
     assert 0 < remaining <= 1.2
-    assert [ws_rotation.reconnect_delay(i) for i in range(8)] == [0, 0, 1, 2, 4, 8, 16, 32]
-    assert ws_rotation.reconnect_delay(999) == 120
+    assert [ws_rotation.reconnect_delay(i) for i in range(8)] == [.25, .25, .5, 1, 2, 4, 8, 15]
+    assert ws_rotation.reconnect_delay(999) == 15
 
 
 def test_data_collapse_requires_busy_baseline_consecutive_seconds_and_healthy_pong():

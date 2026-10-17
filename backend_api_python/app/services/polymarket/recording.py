@@ -225,7 +225,9 @@ class Recorder:
             at = exchange_time(payload.get('timestamp'))
             for token in set(tokens):
                 if token in changed and (owned is None or token in owned):
-                    self.metadata[token] = (at, received, 'ws')
+                    previous = self.metadata.get(token, (None,))[0]
+                    if previous is None or at is None or at >= previous:
+                        self.metadata[token] = (at, received, 'ws')
             if self.enabled and kind == 'last_trade_price':
                 trade = parse_trade(payload, received)
                 if trade is None:
@@ -301,6 +303,7 @@ class Recorder:
         def percentile(q, values=ages):
             return values[min(len(values) - 1, math.ceil(len(values) * q) - 1)] if values else None
         freshness = {}
+        hot_details = []
         if groups is not None:
             # Snapshot cross-section, not message-weighted: every subscribed token
             # counts once; missing and unknown timestamps cannot look fresh.
@@ -319,12 +322,21 @@ class Recorder:
                         receipts.append((now - received).total_seconds() * 1000)
                     if at is not None and received is not None and at <= received:
                         lags.append((received - at).total_seconds() * 1000)
+                    if name == 'hot':
+                        hot_details.append(dict(token=token, group=groups[token],
+                            group_msg_per_s=group_rates[groups[token]],
+                            book_age_ms=(now - at).total_seconds() * 1000 if at is not None else None,
+                            receipt_age_ms=(now - received).total_seconds() * 1000 if received is not None else None,
+                            arrival_lag_ms=(received - at).total_seconds() * 1000
+                                if at is not None and received is not None else None))
                 freshness[name] = dict(tokens=len(tokens), measured_tokens=len(values),
                     missing_tokens=len(tokens) - len(values),
                     book_age_p95_ms=percentile(.95, sorted(values)),
                     book_receipt_age_p95_ms=percentile(.95, sorted(receipts)),
                     book_arrival_lag_p95_ms=percentile(.95, sorted(lags)))
         return dict(book_freshness_by_activity=freshness, book_freshness_hot_threshold_msg_per_s=hot_threshold,
+                    book_hot_oldest_tokens=sorted(hot_details,
+                        key=lambda row: -(row['book_age_ms'] if row['book_age_ms'] is not None else float('inf')))[:8],
                     recording_enabled=self.enabled, recording_rows_per_minute=rates,
                     recording_scope=dict(assets=list(self.scope[0]), intervals=list(self.scope[1])),
                     recording_retention_days=retention_days(),

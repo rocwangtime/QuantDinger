@@ -21,30 +21,25 @@ def state(assets):
                                        transport=SimpleNamespace(last={})), sent=sent)
 
 
-def test_cold_start_shares_budget_with_standby_and_reader_returns_between_batches():
+def test_cold_start_bypasses_global_budget_and_small_shards_subscribe_in_one_frame():
     pacer = SubscriptionPacer()
     active, standby = state(['a', 'b', 'c', 'd']), state(['x', 'y'])
     standby['standby'] = True
+    pacer.next_at = 10000
     for s in (active, standby):
         pacer.enqueue(s, s['assets'], initial=True)
         pacer.drain(s, 0)
-    assert active['sent'] == [dict(type='market', assets_ids=['a', 'b'])]
-    assert not standby['sent'] and active['subscribe_pending'] == ['c', 'd']
-    assert active['inbox'].activated['c'] == datetime.max.replace(tzinfo=timezone.utc)
-    pacer.drain(standby, .499)
-    assert not standby['sent']
-    pacer.drain(standby, .5)
+    assert active['sent'] == [dict(type='market', assets_ids=['a', 'b', 'c', 'd'])]
     assert standby['sent'] == [dict(type='market', assets_ids=['x', 'y'])]
-    pacer.drain(active, 1)
-    assert active['sent'][-1] == dict(operation='subscribe', assets_ids=['c', 'd'])
-    assert active['subscriptions_complete_at'] == 1
+    assert active['subscriptions_complete_at'] == 0
+    assert pacer.next_at == 10000
     assert active['inbox'].activated['c'] < datetime.max.replace(tzinfo=timezone.utc)
 
 
 @pytest.mark.parametrize('pressure', ['queue', 'resync', 'invalid', 'gap', 'tcp', 'scheduler', 'retired'])
 def test_new_subscription_pauses_under_pressure(pressure):
     pacer, s = SubscriptionPacer(), state(['a', 'b'])
-    pacer.enqueue(s, s['assets'], initial=True)
+    pacer.enqueue(s, s['assets'])
     if pressure == 'queue':
         for _ in range(33):
             s['inbox'].put('frame')
@@ -62,7 +57,8 @@ def test_new_subscription_pauses_under_pressure(pressure):
     assert not s['sent'] and len(s['subscribe_pending']) == 2
 
 
-def test_standby_must_soak_after_last_batch_and_pressure_restarts_soak():
+def test_standby_must_soak_after_last_batch_and_pressure_restarts_soak(monkeypatch):
+    monkeypatch.setenv('POLYMARKET_OBSERVER_WS_SUBSCRIBE_INITIAL_ASSETS', '2')
     pacer, s = SubscriptionPacer(), state(['a', 'b', 'c'])
     pacer.enqueue(s, s['assets'], initial=True)
     pacer.drain(s, 0)
@@ -89,7 +85,8 @@ def test_real_transport_requires_fresh_pong_before_promotion():
     assert pacer.settled(s, 42)
 
 
-def test_catalogue_removes_unsent_assets_without_subscribing_them():
+def test_catalogue_removes_unsent_assets_without_subscribing_them(monkeypatch):
+    monkeypatch.setenv('POLYMARKET_OBSERVER_WS_SUBSCRIBE_INITIAL_ASSETS', '2')
     pacer, s = SubscriptionPacer(), state(['a', 'b', 'old', 'oldn'])
     pacer.enqueue(s, s['assets'], initial=True)
     pacer.drain(s, 0)
@@ -108,7 +105,7 @@ def test_recent_delivery_gap_remains_a_pause_after_metrics_consumes_the_flag(mon
     m.states = {0: s}
     m.balancer.set_groups(dict(a='market:a', b='market:a'))
     m.balancer.assignment = dict(a=0, b=0)
-    m.subscriptions.enqueue(s, s['assets'], initial=True)
+    m.subscriptions.enqueue(s, s['assets'])
     s['inbox'].delivery_gap = True
     clock = [10]
     monkeypatch.setattr(observer, 'time', SimpleNamespace(monotonic=lambda: clock[0]))
@@ -184,4 +181,4 @@ def test_indivisible_series_excess_is_reported_without_idle_growth(monkeypatch):
     m.balancer.rates = dict(hot=690)
     owners = m.capacity_owners()
     assert m.count == 4
-    assert m.balancer.capacity_cost(owners) == (0, 390)
+    assert m.balancer.capacity_cost(owners) == (0, 390, 0)
