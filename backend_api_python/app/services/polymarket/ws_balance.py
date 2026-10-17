@@ -61,6 +61,7 @@ class RateBalancer:
         self.lock = threading.Lock()
         self.assignment, self.groups, self.pending = {}, {}, {}
         self.byte_rates, self.pending_bytes = {}, {}
+        self.ingress_byte_rates = {}
         self.forced_hot = set()
         self.rates, self.owners, self.measured, self.since = {}, {}, set(), {}
         self.sample_at = time.monotonic()
@@ -91,7 +92,7 @@ class RateBalancer:
             self.groups = dict(groups)
             live = set(groups.values())
             # Bound catalogue history; series keys survive replacement of windows.
-            for values in (self.rates, self.byte_rates, self.pending_bytes, self.owners, self.since, self.moved_at, self.pending):
+            for values in (self.rates, self.byte_rates, self.ingress_byte_rates, self.pending_bytes, self.owners, self.since, self.moved_at, self.pending):
                 for key in values.keys() - live:
                     del values[key]
             self.measured.intersection_update(live)
@@ -162,6 +163,8 @@ class RateBalancer:
         return known[len(known) // 2] if known else 1.0
 
     def byte_weight(self, key):
+        if key in self.ingress_byte_rates:
+            return max(self.ingress_byte_rates[key], self.byte_rates.get(key, 0))
         if key in self.byte_rates:
             return self.byte_rates[key]
         known = sorted(v for v in self.byte_rates.values() if v > 0)
@@ -209,8 +212,9 @@ class RateBalancer:
         previous = dict(self.owners if previous is None else previous)
         owners = {k: previous[k] for k in keys if k in previous and previous[k] < self.count}
         loads = self.planning_loads(owners)
-        for key in sorted((k for k in keys if k not in owners), key=lambda k: (-self.planning_weight(k), k)):
+        for key in sorted((k for k in keys if k not in owners), key=lambda k: (k not in self.forced_hot, -self.planning_weight(k), k)):
             shard = min(range(self.count), key=lambda i: (
+                self.forced_collisions(dict(owners, **{key: i})),
                 self.capacity_cost(dict(owners, **{key: i})), loads[i], i))
             owners[key] = shard
             loads[shard] += self.planning_weight(key)
@@ -267,6 +271,12 @@ class RateBalancer:
         return sum(self.planning_weight(other) for key in hot for other in owners
                    if other != key and owners[other] == owners[key])
 
+    def forced_collisions(self, owners):
+        # Structural isolation must work before rates exist, and cannot lose to
+        # small capacity improvements or a frozen/unavailable measurement window.
+        return sum(other != key and owners[other] == owners[key]
+                   for key in self.forced_hot & owners.keys() for other in owners)
+
     def search(self, owners, budget, movable=None):
         """Bounded moves/swaps minimizing hot co-tenancy, peak, then squares.
 
@@ -283,7 +293,7 @@ class RateBalancer:
 
         def score(layout):
             values = self.planning_loads(layout)
-            return (*self.capacity_cost(layout), round(self.isolation_cost(layout, hot), 6), round(max(values), 6),
+            return (self.forced_collisions(layout), *self.capacity_cost(layout), round(self.isolation_cost(layout, hot), 6), round(max(values), 6),
                     round(sum(v * v for v in values), 6))
 
         while len(moved) < budget:
@@ -381,6 +391,7 @@ class RateBalancer:
                         ws_max_assets_per_shard=self.max_assets, ws_max_msg_per_s=self.max_load,
                         ws_max_bytes_per_s=self.max_bytes, ws_shard_byte_loads=self.byte_loads(),
                         ws_group_byte_rates={k: round(v, 3) for k, v in self.byte_rates.items() if k in live},
+                        ws_group_ingress_byte_rates={k: round(v, 3) for k, v in self.ingress_byte_rates.items() if k in live},
                         ws_capacity_excess=self.capacity_cost(self.current_owners()),
                         ws_capacity_scope='logical_primary_planning_budget',
                         ws_capacity_by_shard=self.capacity_details(self.current_owners()),

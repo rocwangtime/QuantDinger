@@ -38,13 +38,24 @@ class SubscriptionPacer:
                      now >= state.get('subscribe_pause_until', 0) and not self.pressured(state)))
 
     @staticmethod
-    def pressured(state):
+    def pressure_reasons(state):
         inbox = state.get('inbox')
         transport = getattr(getattr(state.get('socket'), 'transport', None), 'last', {})
-        return bool(inbox and (inbox.invalid.is_set() or inbox.resync.is_set() or inbox.delivery_gap
-                    or inbox.queue.qsize() > 32 or inbox.queue.qsize() and inbox.lag_seconds > .25)
-                    or (transport.get('tcp_pending_bytes') or 0) >= 65536
-                    or (transport.get('scheduler_lag_seconds') or 0) > .1)
+        reasons = []
+        if inbox:
+            reasons.extend(name for name, flag in (('invalid', inbox.invalid.is_set()),
+                ('resync', inbox.resync.is_set()), ('delivery_gap', inbox.delivery_gap),
+                ('queue_depth', inbox.queue.qsize() > 32),
+                ('queue_lag', inbox.queue.qsize() and inbox.lag_seconds > .25)) if flag)
+        if (transport.get('tcp_pending_bytes') or 0) >= 65536:
+            reasons.append('tcp_pending')
+        if (transport.get('scheduler_lag_seconds') or 0) > .1:
+            reasons.append('scheduler_lag')
+        return reasons
+
+    @classmethod
+    def pressured(cls, state):
+        return bool(cls.pressure_reasons(state))
 
     def drain(self, state, now):
         # First frame is synchronous in on_open; only later batches share the
