@@ -1,0 +1,14 @@
+{
+  "ss.log": {
+    "bytes": 13941145,
+    "sha256": "d917c6605277b83fb73faddb606816feced17571a93ef75bba95706730ee705b"
+  },
+  "observer.log": {
+    "bytes": 81584,
+    "sha256": "7c8bf939645dad078cabc22a5302b0336d7154ee52de1bf161a5b4c78c36bfb7"
+  },
+  "p36_mon.log": {
+    "bytes": 122204,
+    "sha256": "98fbbec078d2a2c266f140f9bdba5ee9a43909a03b0c8367e31aabe10d256c3e"
+  }
+}

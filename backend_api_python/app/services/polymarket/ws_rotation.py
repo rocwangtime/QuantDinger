@@ -1,5 +1,6 @@
 """Bounded shadow books and non-control traffic health for public feed rotation."""
 import math
+import time
 
 from . import recording
 from .ws_balance import setting
@@ -17,23 +18,32 @@ class DataHealth:
         self.baseline = 0
         self.low_seconds = 0
 
-    def sample(self, now, transport):
+    def sample(self, now, transport, wall_time=None):
         elapsed = now - self.at
         if elapsed < .8:
             return False
         rate = (self.total - self.previous) / elapsed
         self.at, self.previous = now, self.total
+        # 5m markets naturally stop/start together. Do not learn that silence
+        # as transport failure, including when discovery has not refreshed yet.
+        phase = (time.time() if wall_time is None else wall_time) % 300
+        excluded = (phase < setting('ROTATE_ROLLOVER_AFTER_SECONDS', 45, 0)
+                    or phase >= 300 - setting('ROTATE_ROLLOVER_BEFORE_SECONDS', 15, 0))
+        if excluded:
+            self.low_seconds = 0
+            return False
         healthy_pong = (transport.get('pong_age_seconds') is not None
                         and transport['pong_age_seconds'] <= 15
                         and transport.get('pongs', 0) > 0
                         and transport.get('pings', 0) - transport.get('pongs', 0) <= 1)
-        low = self.baseline >= setting('ROTATE_MIN_BYTES_PER_S', 16384, 1) and rate < self.baseline * .05
+        low = (self.baseline >= setting('ROTATE_MIN_BYTES_PER_S', 65536, 1)
+               and rate < min(self.baseline * .01, setting('ROTATE_MAX_QUIET_BYTES_PER_S', 1024, 1)))
         # Discovery/scheduler pauses are unknown samples, never consecutive quiet seconds.
         self.low_seconds = self.low_seconds + elapsed if low and healthy_pong and elapsed <= 2 else 0
         if not low:
             alpha = 1 - math.exp(-elapsed / 60)
             self.baseline += alpha * (rate - self.baseline)
-        return now - self.started >= 60 and self.low_seconds >= setting('ROTATE_QUIET_SECONDS', 5, 1)
+        return now - self.started >= 120 and self.low_seconds >= setting('ROTATE_QUIET_SECONDS', 20, 1)
 
 
 class ShadowBooks:

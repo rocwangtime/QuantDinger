@@ -310,12 +310,16 @@ def test_shards_dynamic_subscription_ping_and_independent_reconnect(monkeypatch)
     a, b = market(), market('b', market_type='up_down')
     manager.sync([a, b])
     assert len(sockets) == 2
+    clock[0] += .5
+    manager.tick()  # Shared pacing admits the second connection's first batch.
     assert sockets[0].sent[0]['assets_ids'] == ['ay', 'an']
     assert sockets[1].sent[0]['assets_ids'] == ['by', 'bn']
     manager.sync([a, b])
     assert len(sockets[0].sent) == len(sockets[1].sent) == 1
     c = market('c', market_type='up_down')
     manager.sync([a, c])
+    clock[0] += .5
+    manager.tick()
     assert len(sockets) == 2
     assert not any(s.closed for s in sockets)
     assert sockets[1].sent[-2:] == [dict(assets_ids=['bn', 'by'], operation='unsubscribe'),
@@ -705,7 +709,8 @@ def test_hard_overflow_recovers_snapshots_on_same_socket(monkeypatch):
                 sockets[0].callbacks['on_message'](sockets[0], json.dumps(dict(
                     event_type='price_change', price_changes=[dict(asset_id='ay', side='SELL', price='.4', size='999')])))
             assert m.states[0]['inbox'].resync.is_set()
-        assert subscribed.wait(1) and applied.wait(1)
+        m.start_supervisor()  # Snapshot recovery now uses paced admission.
+        assert subscribed.wait(2) and applied.wait(1)
         assert len(sockets) == 1 and not stopped.is_set()
         assert operations == [None, 'unsubscribe', 'subscribe']
         assert p.books['ay']['asks'] == {'.6': '3'}
@@ -778,6 +783,7 @@ def test_rollover_snapshot_processed_on_original_worker(monkeypatch):
         retained = p.books['ay']
         thread, worker = m.states[0]['thread'], m.states[0]['worker']
         m.sync([market(), market('new')])
+        m.start_supervisor()
         assert applied.wait(1)
         assert len(sockets) == 1 and not stopped.is_set()
         assert m.states[0]['thread'] is thread and m.states[0]['worker'] is worker

@@ -78,6 +78,8 @@ class RateBalancer:
         self.target = setting('REBALANCE_TARGET_RATIO', 2, 1)
         self.max_moves = int(setting('REBALANCE_MAX_GROUPS', 8, 1))
         self.half_life = setting('RATE_HALF_LIFE_SECONDS', 30, 1)
+        self.max_assets = int(setting('ASSETS_PER_SHARD', 12, 2))
+        self.max_load = setting('MAX_MSG_PER_S', 300, 1)
 
     def set_groups(self, groups, now=None):
         """Publish asset -> balance key; keys keep their rate and owner."""
@@ -178,10 +180,25 @@ class RateBalancer:
         owners = {k: previous[k] for k in keys if k in previous and previous[k] < self.count}
         loads = self.loads(owners)
         for key in sorted((k for k in keys if k not in owners), key=lambda k: (-self.weight(k), k)):
-            shard = min(range(self.count), key=lambda i: (loads[i], i))
+            shard = min(range(self.count), key=lambda i: (
+                self.capacity_cost(dict(owners, **{key: i})), loads[i], i))
             owners[key] = shard
             loads[shard] += self.weight(key)
+        if previous and any(self.capacity_cost(owners)):
+            owners, _, _ = self.search(owners, min(32, len(owners)))
         return owners
+
+    def asset_counts(self, owners):
+        counts = [0] * self.count
+        for key in self.groups.values():
+            if key in owners:
+                counts[owners[key]] += 1
+        return counts
+
+    def capacity_cost(self, owners):
+        """Excess is explicit when an indivisible group or eight sockets cannot fit."""
+        return (sum(max(0, n - self.max_assets) for n in self.asset_counts(owners)),
+                round(sum(max(0, n - self.max_load) for n in self.loads(owners)), 6))
 
     def hot_groups(self, owners):
         """Reserve at least one shared shard; isolate dominant measured groups."""
@@ -207,12 +224,14 @@ class RateBalancer:
         """
         owners = dict(owners)
         movable = sorted(owners if movable is None else movable)
+        # Keep the quadratic swap search bounded even for large catalogues.
+        movable = sorted(movable, key=lambda k: (-self.weight(k), k))[:32]
         hot = self.hot_groups(owners)
         moved = set()
 
         def score(layout):
             values = self.loads(layout)
-            return (round(self.isolation_cost(layout, hot), 6), round(max(values), 6),
+            return (*self.capacity_cost(layout), round(self.isolation_cost(layout, hot), 6), round(max(values), 6),
                     round(sum(v * v for v in values), 6))
 
         while len(moved) < budget:
@@ -264,8 +283,9 @@ class RateBalancer:
         hot = self.hot_groups(owners)
         bound = max([sum(before) / self.count, *(self.weight(k) for k in owners)])
         isolation = self.isolation_cost(owners, hot)
-        if (not any(before) or (isolation <= max(1e-6, self.min_gain) and
-                max(before) <= bound * (1 + self.threshold))):
+        overloaded = any(self.capacity_cost(owners))
+        if (not overloaded and (not any(before) or (isolation <= max(1e-6, self.min_gain) and
+                max(before) <= bound * (1 + self.threshold)))):
             self.pressure, self.pressure_samples = None, 0
             return None
         pressure = (max(range(self.count), key=lambda i: before[i]), frozenset(hot))
@@ -274,11 +294,12 @@ class RateBalancer:
         if self.pressure_samples < self.confirmations or now - self.last_rebalance < self.minimum:
             return None
         movable = [k for k in owners if k in self.measured and k not in self.unavailable
-                   and now - self.moved_at.get(k, float('-inf')) >= self.group_cooldown]
+                   and (overloaded or now - self.moved_at.get(k, float('-inf')) >= self.group_cooldown)]
         target, loads, moved = self.search(owners, self.max_moves, movable)
         peak_gain = max(before) - max(loads)
         isolation_gain = isolation - self.isolation_cost(target, hot)
-        if not moved or (peak_gain < max(self.min_gain, max(before) * self.threshold)
+        capacity_gain = self.capacity_cost(target) < self.capacity_cost(owners)
+        if not moved or (not capacity_gain and peak_gain < max(self.min_gain, max(before) * self.threshold)
                          and (isolation_gain <= 1e-6 or
                               isolation_gain < max(self.min_gain, isolation * self.threshold))):
             return None
@@ -299,6 +320,8 @@ class RateBalancer:
                             self.current_owners(), self.hot_groups(self.current_owners())),
                         ws_rebalance_pressure_samples=self.pressure_samples,
                         ws_group_cooldown_seconds=self.group_cooldown,
+                        ws_max_assets_per_shard=self.max_assets, ws_max_msg_per_s=self.max_load,
+                        ws_capacity_excess=self.capacity_cost(self.current_owners()),
                         ws_group_rates={k: round(v, 3) for k, v in sorted(
                             self.rates.items(), key=lambda kv: -kv[1]) if k in live},
                         ws_unmeasured_groups=len(live - self.measured),

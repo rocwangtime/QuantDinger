@@ -344,6 +344,7 @@ def test_global_and_per_group_cooldowns_survive_rollover(monkeypatch):
     owners = dict(a=0, b=0, c=1, d=1)
     b = balancer(monkeypatch, owners, dict(a=300, b=200, c=100, d=80), count=2)
     b.group_cooldown, b.minimum = 300, 120
+    b.max_load = 1000  # Exercise ordinary cooldown, outside capacity recovery.
     b.applied(dict(a=1, b=1, c=0, d=0), owners, 0)
     assert b.plan(owners, 119) is None
     assert b.plan(owners, 120) is None  # All groups are still in their cooldown.
@@ -455,3 +456,20 @@ def test_manager_freezes_plans_through_outage_and_recovery_window(monkeypatch):
     clock[0] = 3
     m.tick()
     assert calls == [3]
+
+
+def test_manager_sample_expands_sockets_for_confirmed_capacity_pressure(monkeypatch):
+    from types import SimpleNamespace
+    markets = [dict(id=k, yesAssetId=k+'y', noAssetId=k+'n') for k in 'abcde']
+    owners = {f'market:{k}': i % 4 for i, k in enumerate('abcde')}
+    m, _ = connected_manager(monkeypatch, markets, owners, {k: 200 for k in owners})
+    m.balancer.owners = dict(owners)
+    monkeypatch.setattr(observer, 'time', SimpleNamespace(monotonic=lambda: 1))
+    # New physical connection is deliberately stubbed; this test is admission
+    # planning against healthy measured traffic, never a network smoke test.
+    opened = []
+    monkeypatch.setattr(m, 'connect', lambda index, state: opened.append(index))
+    m.tick()
+    assert m.count == m.balancer.count == 5 and opened == [4]
+    assert max(m.balancer.loads()) <= 300
+    assert not any(m.balancer.capacity_cost(m.balancer.current_owners()))

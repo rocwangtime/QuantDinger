@@ -29,6 +29,9 @@ def book(asset, size='1', at=None):
 
 @pytest.fixture
 def feed_manager(monkeypatch):
+    # Publication contracts below use immediate warmup; admission/soak are
+    # covered separately with the production defaults.
+    monkeypatch.setenv('POLYMARKET_OBSERVER_WS_ROTATE_WARM_SECONDS', '0')
     sockets = []
     class Socket:
         def __init__(self, url, **callbacks):
@@ -75,6 +78,8 @@ def prepare(m, sockets):
     m.tick()
     assert len(sockets) == 2
     assert sockets[1].opened.wait(1)
+    m.subscriptions.next_at = 0
+    m.tick()  # Admit the replacement's first batch before testing publication.
     return old, m.standby[1]
 
 
@@ -112,7 +117,7 @@ def test_stale_shadow_cannot_roll_back_live_book(feed_manager):
     sockets[1].emit([book('ay', '2', 1780000000000), book('an', '2', 1780000000000)])
     wait_for(lambda: len(standby['shadow'].books) == 2)
     assert m.states[0] is old and p.books['ay']['asks']['.4'] == '1'
-    standby['created_at'] -= 31
+    standby['created_at'] -= 91
     m.tick()
     assert m.standby is None and m.rotation_failures == 1
     assert not sockets[0].stopped.is_set() and old['connected']
@@ -127,7 +132,7 @@ def test_missing_snapshot_times_out_even_with_deltas_and_trades(feed_manager):
     wait_for(lambda: 'ay' in standby['shadow'].books)
     assert 'an' not in standby['shadow'].books
     assert not p.recording.pending and not standby['shadow'].recorder.pending
-    standby['created_at'] -= 31
+    standby['created_at'] -= 91
     m.tick()
     assert m.standby is None and m.states[0] is old
     sockets[0].emit(book('an', '3'))
@@ -168,6 +173,33 @@ def test_failed_shadow_and_assignment_change_preserve_live_feed(feed_manager):
     assert m.states[0] is old
 
 
+def test_standby_slow_consumer_during_soak_preserves_active(feed_manager, monkeypatch):
+    m, p, sockets = feed_manager
+    old, standby = prepare(m, sockets)
+    monkeypatch.setenv('POLYMARKET_OBSERVER_WS_ROTATE_WARM_SECONDS', '30')
+    sockets[1].emit([book('ay', '2'), book('an', '2')])
+    wait_for(lambda: len(standby['shadow'].books) == 2)
+    assert m.states[0] is old and m.rotations == 0
+    sockets[1].callbacks['on_error'](sockets[1], RuntimeError('slow consumer: send buffer full'))
+    sockets[1].callbacks['on_close'](sockets[1], 1013, 'slow consumer: send buffer full')
+    m.tick()
+    assert m.standby is None and m.rotation_failures == 1 and m.standby_slow_consumers == 1
+    assert m.states[0] is old and old['connected'] and not sockets[0].stopped.is_set()
+    assert p.books['ay']['asks']['.4'] == '1'
+
+
+def test_idle_shadow_promotes_after_soak_on_worker_without_another_data_frame(feed_manager, monkeypatch):
+    m, p, sockets = feed_manager
+    old, standby = prepare(m, sockets)
+    monkeypatch.setenv('POLYMARKET_OBSERVER_WS_ROTATE_WARM_SECONDS', '30')
+    sockets[1].emit([book('ay', '2'), book('an', '2')])
+    wait_for(lambda: len(standby['shadow'].books) == 2)
+    assert m.states[0] is old
+    standby['warm_since'] -= 31
+    wait_for(lambda: m.states[0] is standby)
+    assert p.books['ay']['asks']['.4'] == '2' and sockets[0].stopped.is_set()
+
+
 def test_overflowing_shadow_never_invalidates_active_books(feed_manager, monkeypatch):
     m, p, sockets = feed_manager
     old, standby = prepare(m, sockets)
@@ -205,6 +237,8 @@ def test_subscription_refresh_cancels_shadow_and_late_callbacks(feed_manager):
     sockets[1].callbacks['on_close'](sockets[1], 1013, 'slow_consumer')
     assert old['connected'] and m.rotations == 0 and len(p.books) == 2
     assert observer.STATUS['slow_consumer_count'] == 0
+    m.subscriptions.next_at = 0
+    m.tick()
     sockets[0].emit([book('by'), book('bn')])
     wait_for(lambda: len(p.books) == 4)
 
@@ -216,6 +250,8 @@ def test_reconnect_generation_ignores_all_old_callbacks(feed_manager):
     state['thread'].join(1)
     m.tick()
     assert sockets[1].opened.wait(1)
+    m.subscriptions.next_at = 0
+    m.tick()
     sockets[1].emit([book('ay', '2'), book('an', '2')])
     wait_for(lambda: len(p.books) == 2)
     health = state['data_health']
@@ -342,19 +378,19 @@ def test_data_collapse_requires_busy_baseline_consecutive_seconds_and_healthy_po
     pong = dict(pings=1, pongs=1, pong_age_seconds=1)
     for now in range(1, 121):
         health.total += 100000
-        assert not health.sample(now, pong)
-    for now in range(121, 125):
+        assert not health.sample(now, pong, wall_time=100)
+    for now in range(121, 140):
         health.total += 100
-        assert not health.sample(now, pong)
-    assert health.sample(125, pong)
+        assert not health.sample(now, pong, wall_time=100)
+    assert health.sample(140, pong, wall_time=100)
     health.total += 100000
-    assert not health.sample(126, pong)
-    assert not health.sample(132, pong)  # Scheduling gap resets consecutiveness.
-    for now in range(133, 150):
-        assert not health.sample(now, dict(pong, pong_age_seconds=30))
+    assert not health.sample(141, pong, wall_time=100)
+    assert not health.sample(147, pong, wall_time=100)  # Scheduling gap resets consecutiveness.
+    for now in range(148, 170):
+        assert not health.sample(now, dict(pong, pong_age_seconds=30), wall_time=100)
     cold = ws_rotation.DataHealth(0)
     for now in range(1, 200):
-        assert not cold.sample(now, pong)
+        assert not cold.sample(now, pong, wall_time=100)
 
 
 def test_control_pong_does_not_count_as_data(feed_manager):
