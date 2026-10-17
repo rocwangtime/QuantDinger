@@ -1,0 +1,38 @@
+{
+  "base": "a7ac467",
+  "code_commit": "dbf290d1ada948921dc46fb91cdcc483949a41ed",
+  "branch": "fix/pm-ws-stability",
+  "working_directory": "backend_api_python",
+  "commands": [
+    "ruff check .",
+    "pytest -q tests/test_polymarket_ws_*.py",
+    "pytest -q tests ../mcp_server/tests"
+  ],
+  "python_tools": "/tmp/pm-round6-venv",
+  "postgres": "18.6",
+  "postgres_version_num": 180006,
+  "postgres_local_test_database": "127.0.0.1:5432/qd_automation_test",
+  "postgres_install": "/tmp/pm-pg18",
+  "postgres_data": "/tmp/pm-pg18-test",
+  "database_variables": [
+    "DATABASE_URL",
+    "QD_TEST_POSTGRES_DSN",
+    "AUTOMATION_TEST_DATABASE_URL"
+  ],
+  "database_stopped_after_validation": true,
+  "ruff": "passed",
+  "diff_check": "passed",
+  "ws": {
+    "passed": 209,
+    "seconds": 75.2
+  },
+  "full": {
+    "passed": 4598,
+    "skipped": 26,
+    "warnings": 59,
+    "seconds": 262.91
+  },
+  "code_commit_and_push_immediately_after_full_pass": true,
+  "production_access": false,
+  "deployed": false
+}
