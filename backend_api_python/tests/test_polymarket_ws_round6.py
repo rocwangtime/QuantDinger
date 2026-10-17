@@ -77,7 +77,7 @@ def backup(m, sockets, monkeypatch):
     return old, m.backups[0]
 
 
-def test_replacement_waits_90_to_120_seconds_and_hot_age_rotation_defaults_off(feed_manager, monkeypatch):
+def test_replacement_does_not_wait_for_primary_age_and_hot_rotation_defaults_off(feed_manager, monkeypatch):
     m, p, sockets = feed_manager
     monkeypatch.delenv('POLYMARKET_OBSERVER_WS_HOT_ROTATE_SECONDS', raising=False)
     monkeypatch.setattr(m, 'hot_shard', lambda index: True)
@@ -86,14 +86,10 @@ def test_replacement_waits_90_to_120_seconds_and_hot_age_rotation_defaults_off(f
     old['backup_started'] = True  # First startup backup is now eager (round 8).
     old['opened_at'] -= 89
     m.tick()
-    assert len(sockets) == 1 and m.standby is None
-    assert 90 <= old['backup_stagger_seconds'] <= 120
-    old['opened_at'] -= 32
-    monkeypatch.setenv('POLYMARKET_OBSERVER_WS_ROTATE_BUSY_WARM_SECONDS', '0')
-    m.tick()
+    assert m.standby is None
     assert len(sockets) == 2 and sockets[1].opened.wait(1)
     candidate = m.backups[0]
-    assert candidate['opened_at'] - old['opened_at'] >= 90
+    assert candidate['opened_at'] - old['opened_at'] < 90
     sockets[1].emit([book('ay', '2'), book('an', '2')])
     wait_for(lambda: candidate.get('ready'))
     old['opened_at'] -= 2100
@@ -136,17 +132,18 @@ def test_hot_rotation_opt_in_promotes_ready_backup(feed_manager, monkeypatch):
     assert m.backup_promotions == 1 and old['retired']
 
 
-def test_warming_backup_survives_primary_failure_without_third_connection(feed_manager, monkeypatch):
+def test_warming_backup_survives_parallel_primary_recovery(feed_manager, monkeypatch):
     m, p, sockets = feed_manager
     old, candidate = backup(m, sockets, monkeypatch)
     sockets[0].close()
     old['thread'].join(1)
     old['retry_at'] = 0
     m.tick()
-    assert len(sockets) == 2
+    assert len(sockets) == 3 and sockets[2].opened.wait(1)
+    replacement = m.states[0]
     sockets[1].emit([book('ay', '2'), book('an', '2')])
-    wait_for(lambda: m.states[0] is candidate)
-    assert len(p.books) == 2
+    wait_for(lambda: candidate.get('ready'))
+    assert m.states[0] is replacement and len(p.books) == 2
 
 
 def test_shadow_stale_snapshot_cannot_hide_behind_newer_metadata():

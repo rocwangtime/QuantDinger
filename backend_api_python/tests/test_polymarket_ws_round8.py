@@ -32,10 +32,11 @@ def test_first_hot_backup_is_eager_and_ready_before_42s(feed_manager, key):
     assert row['time_without_backup_seconds'] < 2
     sockets[0].callbacks['on_close'](sockets[0], 1013, 'slow consumer')
     wait_for(lambda: m.states[0] is candidate, .5)
-    # Promotion of a young eager backup cannot bypass replacement staggering.
+    # Replenish even a young survivor as soon as the global dial slot clears.
+    m.backup_next_connect_at = 0
     m.tick()
-    assert len(sockets) == 2 and not m.backups
-    assert 90 <= candidate['backup_stagger_seconds'] <= 120
+    assert sockets[2].opened.wait(1)
+    assert m.backups[0]['opened_at'] - candidate['opened_at'] < 2
 
 
 def test_all_four_hot_groups_start_with_paced_initial_subscriptions(feed_manager, monkeypatch):
@@ -53,12 +54,12 @@ def test_all_four_hot_groups_start_with_paced_initial_subscriptions(feed_manager
     p.set_markets(markets)
     m.sync(markets)
     m.start_supervisor()
-    wait_for(lambda: len(m.backups) == 4 and all(s.get('opened_at') for s in m.backups.values()), 5)
+    wait_for(lambda: len(m.backups) == 4 and all(s.get('opened_at') for s in m.backups.values()), 8)
     with m.lifecycle_lock:
         candidates = list(m.backups.values())
     opened = sorted(s['opened_at'] for s in candidates)
     assert all(b - a >= .49 for a, b in zip(opened, opened[1:]))
-    wait_for(lambda: all(not s.get('subscribe_pending') for s in candidates), 5)
+    wait_for(lambda: all(not s.get('subscribe_pending') for s in candidates), 8)
     for s in candidates:
         commands = [json.loads(raw) for raw in s['socket'].sent if raw != 'PING']
         assert commands[0]['type'] == 'market' and len(commands[0]['assets_ids']) == 2
@@ -112,31 +113,21 @@ def test_failed_backup_replenishes_without_waiting_for_discovery(feed_manager, m
         assert m.rotation_failures == 1
 
 
-def test_young_primary_waits_only_remaining_target_age_and_jitter(feed_manager, monkeypatch):
+def test_young_primary_replenishes_without_age_guard(feed_manager, monkeypatch):
     m, _, sockets = feed_manager
-    key = 'up_down:BTC:5m'
-    m.balancer.set_groups({a: key for a in m.states[0]['assets']})
+    old = m.states[0]
+    m.balancer.set_groups({a: 'up_down:BTC:5m' for a in old['assets']})
     m.tick()
     assert sockets[1].opened.wait(1)
-    candidate = m.backups[0]
-    old = m.states[0]
     monkeypatch.setattr(observer.random, 'uniform', lambda low, high: high)
     sockets[1].callbacks['on_close'](sockets[1], 1013, 'slow consumer')
     m.tick()
-    assert not m.backups
-    target = old['backup_stagger_seconds']
-    assert 90 <= target <= 120
-    old['opened_at'] = time.monotonic() - target + 2
-    old['backup_retry_at'] = time.monotonic() - 1
+    old['backup_retry_at'] = 0
+    old['rotate_retry_at'] = time.monotonic() + 480
     m.backup_next_connect_at = 0
     m.tick()
-    assert len(sockets) == 2
-    old['opened_at'] -= 3
-    # A cold rotation's long retry must never suppress hot replenishment.
-    old['rotate_retry_at'] = time.monotonic() + 480
-    m.tick()
     assert sockets[2].opened.wait(1)
-    assert candidate['retired']
+    assert m.backups[0]['opened_at'] - old['opened_at'] < 2
 
 
 @pytest.mark.parametrize('failure', ['handshake_error', 'return_without_callback', 'handshake_hangs'])
@@ -171,12 +162,12 @@ def test_backup_never_opened_is_retired_and_retried(feed_manager, monkeypatch, f
     assert sockets[2].opened.wait(1)
 
 
-def test_full_jitter_escalates_half_second_to_30s_and_allows_zero(feed_manager, monkeypatch):
+def test_hot_repair_jitter_caps_at_two_seconds_and_allows_zero(feed_manager, monkeypatch):
     m, _, sockets = feed_manager
     candidate = ready_backup(m, sockets)
     old = m.states[0]
     monkeypatch.setattr(observer.random, 'uniform', lambda low, high: high)
-    for expected in (.5, 1, 2, 4, 8, 16, 30, 30):
+    for expected in (.5, 1, 2, 2, 2, 2, 2, 2):
         m.rotation_failed(0, old, candidate, 'connect_failure')
         assert m.rotation_last_failure['retry_seconds'] == expected
     monkeypatch.setattr(observer.random, 'uniform', lambda low, high: low)

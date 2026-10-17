@@ -93,10 +93,14 @@ def test_mature_survivor_replenishes_immediately_after_failover(feed_manager):
     candidate = ready_backup(m, sockets)
     m.states[0]['opened_at'] -= 121
     candidate['opened_at'] -= 121
-    m.start_supervisor()  # The global initial-subscription slot may still be occupied.
     sockets[0].callbacks['on_close'](sockets[0], 1013, 'slow consumer')
     wait_for(lambda: m.states[0] is candidate)
-    wait_for(lambda: len(sockets) == 3)
+    # Advance the shared dial slot explicitly; this tests the absence of an
+    # age guard, independently of host scheduling and the supervisor timer.
+    with m.lifecycle_lock:
+        m.backup_next_connect_at = 0
+        m.tick()
+    assert len(sockets) == 3
     assert sockets[2].opened.wait(1)
     assert m.backups[0]['opened_at'] - candidate['opened_at'] >= 90
 
@@ -107,11 +111,11 @@ def test_repeated_hot_backup_failures_never_use_minutes_of_backoff(feed_manager,
     monkeypatch.setattr(observer.random, 'uniform', lambda low, high: high)
     for _ in range(12):
         m.rotation_failed(0, m.states[0], candidate, 'wire_failure')
-        assert m.rotation_last_failure['retry_seconds'] <= 30
-    assert m.rotation_last_failure['retry_seconds'] == 30
+        assert m.rotation_last_failure['retry_seconds'] <= 2
+    assert m.rotation_last_failure['retry_seconds'] == 2
 
 
-def test_uncertain_switch_resubscribes_and_records_snapshot_gap(feed_manager):
+def test_uncertain_switch_repairs_without_unsubscribe_and_records_snapshot_gap(feed_manager):
     m, _, sockets = feed_manager
     candidate = ready_backup(m, sockets)
     # No comparable overlap evidence: force the conservative recovery path.
@@ -120,10 +124,10 @@ def test_uncertain_switch_resubscribes_and_records_snapshot_gap(feed_manager):
     assert m.continuity.metrics()['pending_assets'] == ['an', 'ay']
     m.tick()
     commands = [json.loads(raw) for raw in sockets[1].sent if raw != 'PING']
-    assert any(c.get('operation') == 'unsubscribe' for c in commands)
+    assert not any(c.get('operation') == 'unsubscribe' for c in commands)
     m.subscriptions.next_at = 0
     m.tick()
-    assert any(json.loads(raw).get('operation') == 'subscribe' for raw in sockets[1].sent if raw != 'PING')
+    assert not any(json.loads(raw).get('operation') == 'subscribe' for raw in sockets[1].sent if raw != 'PING')
     sockets[1].emit([book('ay'), book('an')])
     wait_for(lambda: not m.continuity.pending)
     restored = [r for r in m.continuity.metrics()['events'] if r['status'] == 'snapshot_restored']

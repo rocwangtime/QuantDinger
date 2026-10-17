@@ -231,6 +231,26 @@ class RateBalancer:
                 round(sum(max(0, n - self.max_load) for n in self.loads(owners)), 6),
                 round(sum(max(0, n - self.max_bytes) for n in self.byte_loads(owners)), 6))
 
+    def capacity_details(self, owners):
+        """Planning budgets, not a documented upstream connection limit.
+
+        Show indivisible-series floors separately from co-tenant excess; sums
+        across logical primary shards exclude redundant and migration copies.
+        """
+        counts, loads, byte_loads = self.asset_counts(owners), self.loads(owners), self.byte_loads(owners)
+        rows = []
+        for index in range(self.count):
+            keys = [k for k, i in owners.items() if i == index]
+            raw = (max(0, counts[index] - self.max_assets), max(0, loads[index] - self.max_load),
+                   max(0, byte_loads[index] - self.max_bytes))
+            floor = (sum(max(0, sum(v == k for v in self.groups.values()) - self.max_assets) for k in keys),
+                     sum(max(0, self.weight(k) - self.max_load) for k in keys),
+                     sum(max(0, self.byte_weight(k) - self.max_bytes) for k in keys))
+            rows.append(dict(shard=index, groups=keys, excess=raw, indivisible_excess=floor,
+                             co_tenant_excess=tuple(max(0, a - b) for a, b in zip(raw, floor)),
+                             estimated_groups=[k for k in keys if k not in self.measured]))
+        return rows
+
     def hot_groups(self, owners):
         """Reserve at least one shared shard; isolate dominant measured groups."""
         total = sum(self.planning_weight(k) for k in owners)
@@ -362,6 +382,8 @@ class RateBalancer:
                         ws_max_bytes_per_s=self.max_bytes, ws_shard_byte_loads=self.byte_loads(),
                         ws_group_byte_rates={k: round(v, 3) for k, v in self.byte_rates.items() if k in live},
                         ws_capacity_excess=self.capacity_cost(self.current_owners()),
+                        ws_capacity_scope='logical_primary_planning_budget',
+                        ws_capacity_by_shard=self.capacity_details(self.current_owners()),
                         ws_group_rates={k: round(v, 3) for k, v in sorted(
                             self.rates.items(), key=lambda kv: -kv[1]) if k in live},
                         ws_unmeasured_groups=len(live - self.measured),

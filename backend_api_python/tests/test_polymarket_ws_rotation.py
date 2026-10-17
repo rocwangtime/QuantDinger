@@ -17,7 +17,9 @@ from app.services.polymarket import observer, ws_rotation
 def wait_for(predicate, seconds=2):
     deadline = time.monotonic() + seconds
     while not predicate():
-        assert time.monotonic() < deadline
+        if time.monotonic() >= deadline:
+            assert predicate(), 'condition not met before deadline'
+            return
         threading.Event().wait(.005)
 
 
@@ -43,7 +45,7 @@ def feed_manager(monkeypatch):
         def run_forever(self, **kwargs):
             self.callbacks['on_open'](self)
             self.opened.set()
-            self.stopped.wait(10)
+            self.stopped.wait(30)
             self.callbacks['on_close'](self, None, None)
         def send(self, raw):
             self.sent.append(raw)
@@ -61,6 +63,7 @@ def feed_manager(monkeypatch):
     p.set_markets([market])
     monkeypatch.setattr(observer, '_PIPELINE', p)
     m = observer.MarketConnections()
+    monkeypatch.setattr(m.snapshot_recovery, 'request', lambda *args: None)
     m.sync([market])
     assert sockets[0].opened.wait(1)
     sockets[0].emit([book('ay'), book('an')])
@@ -256,7 +259,9 @@ def test_reconnect_generation_ignores_all_old_callbacks(feed_manager):
     m.subscriptions.next_at = 0
     m.tick()
     sockets[1].emit([book('ay', '2'), book('an', '2')])
-    wait_for(lambda: len(p.books) == 2)
+    wait_for(lambda: len(p.books) == 2 and p.books['ay']['asks']['.4'] == '2')
+    assert state['retired'] and m.states[0] is not state
+    state = m.states[0]
     health = state['data_health']
     before = health.total
     sockets[0].emit(book('ay', '99'))
