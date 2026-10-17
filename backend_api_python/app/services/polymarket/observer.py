@@ -20,6 +20,7 @@ from .client import PublicClient
 from .engine import number, sweep
 from . import updown, recording
 from .ws_balance import RateBalancer, DailyStats, balance_key
+from .ws_transport import TransportDiagnostics, receive_buffer_options, remote_close
 
 STATUS = {"enabled": False, "running": False, "mode": "stopped", "connected": False, "markets_subscribed": 0,
           "last_message_at": None, "rebalance_count": 0, "reconnect_count": 0, "ws_connections": 0, "slow_consumer_count": 0, "last_error": None, "started_at": None}
@@ -579,6 +580,7 @@ def close_reason(code, reason):
     reason = reason[:160]
     with _LOCK:
         STATUS['last_close_reason'] = reason
+        STATUS['last_close_code'] = code
         category = 'slow_consumer' if 'slow consumer' in reason.lower() or 'slow_consumer' in reason.lower() else 'remote_close'
         reasons = STATUS.setdefault('close_reason_counts', {})
         reasons[category] = reasons.get(category, 0) + 1
@@ -1032,6 +1034,35 @@ def read_ahead_app(base):
                 sel.close()
 
     class App(base):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.transport = TransportDiagnostics()
+            self.text_heartbeat_active = False
+
+        def _send_ping(self):
+            # Use the library's per-connection lifecycle, but the exchange expects
+            # TEXT PING, not an RFC control ping. Discovery/retention/SQL on the
+            # market loop must not delay it. Sample even when no frames arrive.
+            stop_ping = self.stop_ping
+            self.text_heartbeat_active = True
+            deadline = time.monotonic() + self.ping_interval
+            try:
+                while not stop_ping.wait(1) and self.keep_running:
+                    now = time.monotonic()
+                    self.transport.sample(self, now)
+                    if now >= deadline and self.sock:
+                        self.transport.ping_at = now
+                        self.sock.send('PING')
+                        self.transport.pings += 1
+                        deadline = now + self.ping_interval
+            except Exception as exc:
+                self._callback(self.on_error, exc)
+                # shutdown wakes a blocked reader without a close handshake.
+                if self.sock:
+                    self.sock.shutdown()
+            finally:
+                self.text_heartbeat_active = False
+
         def create_dispatcher(self, ping_timeout, dispatcher=None, is_ssl=False, handleDisconnect=None):
             if dispatcher:
                 return super().create_dispatcher(ping_timeout, dispatcher, is_ssl, handleDisconnect)
@@ -1062,6 +1093,8 @@ class MarketConnections:
         self.reconnect_pending = False
         self.sample_unavailable = set()
         self.cpu_at, self.cpu_seconds = time.monotonic(), process_time()
+        self.tick_at = self.cpu_at
+        self.tick_gap_max = 0
         self.closed = False
         self.markets = []
 
@@ -1269,6 +1302,8 @@ class MarketConnections:
 
         def received(_sock, raw):
             if raw in ('PONG', b'PONG'):
+                if hasattr(_sock, 'transport'):
+                    _sock.transport.pong()
                 return
             # No JSON, rate-balancer lock or Pipeline lock on the socket reader.
             # Raw ingress totals remain accurate even when the FIFO overflows;
@@ -1282,6 +1317,19 @@ class MarketConnections:
         def failed(_sock, error):
             inbox.delivery_gap = True
             state['connected'] = False
+            code, reason = remote_close(error)
+            if code is not None:
+                state['remote_close'] = (code, reason)
+                error = reason
+            if hasattr(_sock, 'transport'):
+                # on_error is called before the library clears app.sock. Capture
+                # the last readable TCP state here, plus the preceding 60s.
+                _sock.transport.sample(_sock)
+                state['last_transport_failure'] = dict(
+                    code=code, reason=str(error)[:160], assets=len(state['assets']),
+                    sample=dict(_sock.transport.last))
+                _LOG.warning('Polymarket WS transport failure shard=%s evidence=%s', index,
+                             json.dumps(dict(state['last_transport_failure'], samples=list(_sock.transport.samples))))
             slow = 'slow consumer' in str(error).lower() or 'slow_consumer' in str(error).lower()
             if not slow or not state.get('slow_error'):
                 _ws_error(error)
@@ -1294,6 +1342,11 @@ class MarketConnections:
             inbox.delivery_gap = True
             state['connected'] = False
             counted = state.pop('slow_error', False)
+            remote_code, remote_reason = state.pop('remote_close', (None, None))
+            code = code if code is not None else remote_code
+            reason = reason if reason is not None else remote_reason
+            with _LOCK:
+                STATUS['last_close_code'] = code
             _LOG.info('Polymarket WS close shard=%s code=%s slow_consumer=%s', index, code, 'slow consumer' in str(reason).lower() or 'slow_consumer' in str(reason).lower())
             slow = 'slow consumer' in str(reason).lower() or 'slow_consumer' in str(reason).lower()
             if slow and not counted:
@@ -1313,7 +1366,8 @@ class MarketConnections:
         # websocket-client validates UTF-8 per byte in Python without wsaccel
         # (~50 us per price_change, ~0.5 ms per book) on the reading thread;
         # json.loads rejects invalid UTF-8 in C instead.
-        state['thread'] = threading.Thread(target=lambda: sock.run_forever(ping_interval=0, skip_utf8_validation=True),
+        state['thread'] = threading.Thread(target=lambda: sock.run_forever(ping_interval=10, skip_utf8_validation=True,
+                                                                               sockopt=receive_buffer_options()),
                                            name=f'polymarket-receive-{index}', daemon=True)
         state['worker'] = threading.Thread(target=consume, name=f'polymarket-book-{index}', daemon=True)
         state['worker'].start()
@@ -1323,6 +1377,9 @@ class MarketConnections:
         if self.closed or _STOP.is_set():
             return
         now = time.monotonic()
+        tick_gap = now - self.tick_at
+        self.tick_at = now
+        self.tick_gap_max = max(self.tick_gap_max, tick_gap)
         # Group attribution runs off-reader. Freeze measurements/plans during
         # outages, overflow or backlog, plus one full recovery window; never
         # move a hot group because incomplete delivery made its rate look low.
@@ -1363,7 +1420,8 @@ class MarketConnections:
             if not state['thread'] or not state['thread'].is_alive():
                 if now >= state['retry_at']:
                     self.connect(index, state)
-            elif state['connected'] and now >= state['ping_at']:
+            elif (state['connected'] and now >= state['ping_at']
+                  and not getattr(state['socket'], 'text_heartbeat_active', False)):
                 try:
                     state['socket'].send('PING')
                     state['ping_at'] = now + 10
@@ -1385,7 +1443,10 @@ class MarketConnections:
         with _LOCK:
             STATUS.setdefault('rebalance_count', 0)
             STATUS.update(self.balancer.metrics())
-            STATUS.update(ws_process_cpu_cores=cpu_cores, ws_gil_switch_ms=sys.getswitchinterval() * 1000)
+            STATUS.update(ws_process_cpu_cores=cpu_cores, ws_gil_switch_ms=sys.getswitchinterval() * 1000,
+                          ws_tick_gap_seconds=tick_gap, ws_tick_gap_max_seconds=self.tick_gap_max)
+            STATUS['ws_last_transport_failures'] = {i: s['last_transport_failure']
+                for i, s in self.states.items() if 'last_transport_failure' in s}
             STATUS['ws_shard_assets'] = [len(self.states.get(i, {}).get('assets', [])) for i in range(self.count)]
             STATUS['ws_receive_queues'] = {
                 i: dict(depth=s['inbox'].queue.qsize(), drops=s.get('receive_drops', 0) + s['inbox'].dropped,
@@ -1399,7 +1460,8 @@ class MarketConnections:
                         parse_max_seconds=s['inbox'].parse_max_seconds,
                         tcp_pending_bytes=socket_pending_bytes(s.get('socket')),
                         read_ahead_active=getattr(s.get('socket'), 'read_ahead_active', False),
-                        read_calls=getattr(s.get('socket'), 'read_calls', 0))
+                        read_calls=getattr(s.get('socket'), 'read_calls', 0),
+                        transport=dict(getattr(getattr(s.get('socket'), 'transport', None), 'last', {})))
                 for i, s in self.states.items() if 'inbox' in s}
             STATUS['ws_shards'] = self.count
             STATUS['ws_connected'] = sum(bool(s['connected']) for s in self.states.values())

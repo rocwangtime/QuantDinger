@@ -1,0 +1,6 @@
+S=2026-10-16T18:04:03Z
+for i in $(seq 1 15); do
+ { echo "=== $(date '+%F %T SGT') sample $i"; timeout 90 ssh -F ~/.ssh/config -o ConnectTimeout=15 qd-sg "sudo bash -s $S" < p34_mon.sh 2>&1 | grep -v '^$'; r=${PIPESTATUS[0]}; [ "$r" = 124 ] && echo "SKIPPED timeout"; } >> p34_mon.log
+ sleep 120
+done
+echo LOOP_DONE >> p34_mon.log

@@ -1,0 +1,10 @@
+{
+  "observed_at": "2026-10-17T08:24:01.640379905+08:00",
+  "observer_command": "/usr/local/bin/docker-entrypoint.sh python -m app.commands.polymarket_observer",
+  "scheduler_command": "/usr/local/bin/docker-entrypoint.sh python -m app.commands.scheduler",
+  "cpu_max": "max 100000",
+  "nr_periods": 0,
+  "nr_throttled": 0,
+  "throttled_usec": 0,
+  "scope": "Read-only docker inspect and cgroup cpu.stat/cpu.max; not a sample at the 02:42 close."
+}
