@@ -61,6 +61,7 @@ class RateBalancer:
         self.lock = threading.Lock()
         self.assignment, self.groups, self.pending = {}, {}, {}
         self.byte_rates, self.pending_bytes = {}, {}
+        self.forced_hot = set()
         self.rates, self.owners, self.measured, self.since = {}, {}, set(), {}
         self.sample_at = time.monotonic()
         self.last_check = self.sample_at
@@ -236,7 +237,8 @@ class RateBalancer:
         threshold = max(self.hot_rate, total * self.hot_share)
         candidates = [k for k in owners if k in self.measured and
                       self.planning_weight(k) >= threshold * (1 - self.threshold if k in self.dedicated else 1)]
-        self.dedicated = set(sorted(candidates, key=lambda k: (-self.planning_weight(k), k))[:max(0, self.count - 1)])
+        candidates = set(candidates) | (self.forced_hot & owners.keys())
+        self.dedicated = set(sorted(candidates, key=lambda k: (k not in self.forced_hot, -self.planning_weight(k), k))[:max(0, self.count - 1)])
         return self.dedicated
 
     def isolation_cost(self, owners, hot):

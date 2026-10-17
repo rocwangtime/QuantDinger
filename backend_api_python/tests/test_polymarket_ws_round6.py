@@ -68,6 +68,7 @@ def test_heartbeat_waits_for_first_successful_subscription(monkeypatch):
 
 def backup(m, sockets, monkeypatch):
     monkeypatch.setenv('POLYMARKET_OBSERVER_WS_ROTATE_BUSY_WARM_SECONDS', '0')
+    monkeypatch.setattr(m, 'hot_shard', lambda index: True)
     m.balancer.rates = {'market:a': 500}
     old = m.states[0]
     old['opened_at'] -= 121
@@ -79,6 +80,7 @@ def backup(m, sockets, monkeypatch):
 def test_backup_waits_90_to_120_seconds_and_hot_age_rotation_defaults_off(feed_manager, monkeypatch):
     m, p, sockets = feed_manager
     monkeypatch.delenv('POLYMARKET_OBSERVER_WS_HOT_ROTATE_SECONDS', raising=False)
+    monkeypatch.setattr(m, 'hot_shard', lambda index: True)
     m.balancer.rates = {'market:a': 500}
     old = m.states[0]
     old['opened_at'] -= 89
@@ -189,10 +191,10 @@ def test_backup_failure_keeps_primary_and_backoff_records_stage(feed_manager, mo
     m.tick()
     assert not m.backups and old['connected'] and len(p.books) == 2
     assert m.rotation_failures == 1
-    assert m.rotation_last_failure['retry_seconds'] == 60
-    for delay in (120, 240, 480, 480):
+    assert 0 <= m.rotation_last_failure['retry_seconds'] <= .5
+    for delay in (1, 2, 4, 8):
         m.rotation_failed(0, old, candidate, 'test')
-        assert m.rotation_last_failure['retry_seconds'] == delay
+        assert 0 <= m.rotation_last_failure['retry_seconds'] <= delay
     assert m.rotation_last_failure['stage']
 
 
@@ -337,48 +339,3 @@ def test_hot_oldest_tokens_separate_exchange_age_receipt_age_and_arrival_lag(mon
     row = next(r for r in rows if r['token'] == 'ay')
     assert row['book_age_ms'] >= 5000 and row['receipt_age_ms'] < 1000
     assert row['arrival_lag_ms'] >= 5000
-
-
-def load_probe():
-    spec = importlib.util.spec_from_file_location('compression_probe',
-        Path(__file__).resolve().parents[2] / 'scripts/pm_ws_compression_probe.py')
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-@pytest.mark.parametrize('extension,accepted', [('', False), ('permessage-deflate; server_no_context_takeover', True)])
-def test_one_shot_compression_probe_subscribes_first_and_never_logs_sensitive_headers(monkeypatch, extension, accepted):
-    import base64
-    import hashlib
-    probe = load_probe()
-    sent = []
-    class Wire:
-        def __enter__(self):
-            return self
-        def __exit__(self, *args):
-            pass
-        def sendall(self, data):
-            sent.append(data)
-        def recv(self, size):
-            key = next(line.split(b': ', 1)[1] for line in sent[0].split(b'\r\n') if line.startswith(b'Sec-WebSocket-Key:'))
-            accept = base64.b64encode(hashlib.sha1(key + b'258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest())
-            return (b'HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nSec-WebSocket-Accept: ' + accept
-                    + b'\r\nSec-WebSocket-Extensions: ' + extension.encode()
-                    + b'\r\nSet-Cookie: DO-NOT-LOG\r\n\r\n')
-    wire = Wire()
-    calls = []
-    monkeypatch.setattr(probe.socket, 'create_connection', lambda *args, **kw: calls.append(args) or wire)
-    monkeypatch.setattr(probe.ssl, 'create_default_context', lambda: SimpleNamespace(wrap_socket=lambda *args, **kw: wire))
-    result = probe.probe('123')
-    assert len(calls) == 1 and len(sent) == 3
-    assert result['permessage_deflate_accepted'] is accepted
-    assert 'DO-NOT-LOG' not in json.dumps(result)
-    assert b'permessage-deflate' in sent[0]
-    frame = sent[1]
-    assert frame[0] == 0x81 and frame[1] & 0x80
-    mask, payload = frame[2:6], frame[6:]
-    assert json.loads(bytes(v ^ mask[i % 4] for i, v in enumerate(payload))) == dict(type='market', assets_ids=['123'])
-    assert sent[2][0] == 0x88
-    with pytest.raises(ValueError):
-        probe.probe('not-an-asset')

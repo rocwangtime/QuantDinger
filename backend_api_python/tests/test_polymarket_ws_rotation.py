@@ -32,6 +32,8 @@ def feed_manager(monkeypatch):
     # Publication contracts below use immediate warmup; admission/soak are
     # covered separately with the production defaults.
     monkeypatch.setenv('POLYMARKET_OBSERVER_WS_ROTATE_WARM_SECONDS', '0')
+    monkeypatch.setenv('POLYMARKET_OBSERVER_WS_ROTATE_SECONDS', '2100')
+    monkeypatch.setenv('POLYMARKET_OBSERVER_WS_COLD_ROTATION_ENABLED', '1')
     sockets = []
     class Socket:
         def __init__(self, url, **callbacks):

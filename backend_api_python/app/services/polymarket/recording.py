@@ -190,6 +190,7 @@ class Recorder:
         self.enabled = flag('RECORDING_ENABLED', True)
         self.scope = recording_scope()
         self.metadata = {}
+        self.delivery_samples = deque(maxlen=8192)
         self.last_books = {}
         self.pending = deque()
         self.maximum = setting('RECORDING_BUFFER_MAX', 10000, 1, 100000)
@@ -223,6 +224,12 @@ class Recorder:
             else:
                 tokens = []
             at = exchange_time(payload.get('timestamp'))
+            if at is not None:
+                from .ws_balance import event_assets
+                lag = (received - at).total_seconds() * 1000
+                for asset in event_assets(payload):
+                    if asset in asset_markets and (owned is None or asset in owned):
+                        self.delivery_samples.append((time.monotonic(), asset, lag))
             for token in set(tokens):
                 if token in changed and (owned is None or token in owned):
                     previous = self.metadata.get(token, (None,))[0]
@@ -304,6 +311,7 @@ class Recorder:
             return values[min(len(values) - 1, math.ceil(len(values) * q) - 1)] if values else None
         freshness = {}
         hot_details = []
+        delivery = {}
         if groups is not None:
             # Snapshot cross-section, not message-weighted: every subscribed token
             # counts once; missing and unknown timestamps cannot look fresh.
@@ -329,12 +337,23 @@ class Recorder:
                             receipt_age_ms=(now - received).total_seconds() * 1000 if received is not None else None,
                             arrival_lag_ms=(received - at).total_seconds() * 1000
                                 if at is not None and received is not None else None))
+                token_set = set(tokens)
+                sample_floor = time.monotonic() - 60
+                samples = sorted(lag for at, token, lag in self.delivery_samples
+                                 if at > sample_floor and token in token_set)
+                delivery[name] = dict(samples=len(samples), p50_ms=percentile(.5, samples),
+                    p95_ms=percentile(.95, samples), max_ms=max(samples) if samples else None,
+                    negative_clock_samples=sum(v < 0 for v in samples),
+                    within_1s=(max(samples) <= 1000 and min(samples) >= 0) if samples else None)
                 freshness[name] = dict(tokens=len(tokens), measured_tokens=len(values),
                     missing_tokens=len(tokens) - len(values),
                     book_age_p95_ms=percentile(.95, sorted(values)),
+                    update_silence_p95_ms=percentile(.95, sorted(receipts)),
+                    updated_within_30s_tokens=sum(v <= 30000 for v in receipts),
                     book_receipt_age_p95_ms=percentile(.95, sorted(receipts)),
                     book_arrival_lag_p95_ms=percentile(.95, sorted(lags)))
-        return dict(book_freshness_by_activity=freshness, book_freshness_hot_threshold_msg_per_s=hot_threshold,
+        return dict(ws_delivery_latency_by_activity=delivery, ws_delivery_latency_window_seconds=60,
+                    ws_delivery_latency_max_samples=8192, book_freshness_by_activity=freshness, book_freshness_hot_threshold_msg_per_s=hot_threshold,
                     book_hot_oldest_tokens=sorted(hot_details,
                         key=lambda row: -(row['book_age_ms'] if row['book_age_ms'] is not None else float('inf')))[:8],
                     recording_enabled=self.enabled, recording_rows_per_minute=rates,
