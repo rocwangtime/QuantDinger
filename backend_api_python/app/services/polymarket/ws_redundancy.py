@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from collections import OrderedDict
 
 from . import recording
+from .ws_payloads import fingerprint
 
 
 class HotBackupCoverage:
@@ -24,26 +25,45 @@ class HotBackupCoverage:
     def __init__(self, groups):
         self.lock = threading.RLock()
         self.rows = {key: dict(active=False, ready=False, observed_seconds=0., ready_seconds=0.,
-                              time_without_backup_seconds=0., without_since=None) for key in groups}
+                              time_without_backup_seconds=0., without_since=None,
+                              zero_ready_backup_seconds=0., zero_ready=False, zero_active=False,
+                              zero_ready_by_phase_seconds=dict(before=0., after=0., steady=0.)) for key in groups}
         self.required, self.ready_shards = {}, set()
         self.at = time.monotonic()
 
-    def update(self, required, ready_shards, now):
+    def update(self, required, ready_shards, now, backup_counts=None, wall_now=None, zero_required=None):
         with self.lock:
             now = max(now, self.at)
             elapsed = now - self.at
+            wall_now = time.time() if wall_now is None else wall_now
+            zero_required = required if zero_required is None else zero_required
             for key, row in self.rows.items():
                 if row['active']:
                     row['observed_seconds'] += elapsed
                     row['ready_seconds' if row['ready'] else 'time_without_backup_seconds'] += elapsed
+                if row['zero_active'] and row['zero_ready']:
+                    row['zero_ready_backup_seconds'] += elapsed
+                    # Integrate across actual window boundaries, even when
+                    # there was no status sample at that instant.
+                    period = 900 if key.endswith(':15m') else 300
+                    start = wall_now - elapsed
+                    while start < wall_now:
+                        phase = start % period
+                        label, edge = (('after', 45) if phase < 45 else
+                                       ('steady', period - 15) if phase < period - 15 else ('before', period))
+                        stop = min(wall_now, start + edge - phase)
+                        row['zero_ready_by_phase_seconds'][label] += stop - start
+                        start = stop
                 active = bool(required.get(key))
                 ready = active and required[key] <= ready_shards
+                count = (min((backup_counts.get(i, 0) for i in zero_required.get(key, set())), default=0)
+                         if backup_counts is not None else int(ready))
                 if active and not ready:
                     if not row['active'] or row['ready']:
                         row['without_since'] = now
                 else:
                     row['without_since'] = None
-                row.update(active=active, ready=ready)
+                row.update(active=active, ready=ready, zero_active=bool(zero_required.get(key)), zero_ready=count == 0)
             self.required = {k: set(v) for k, v in required.items()}
             self.ready_shards = set(ready_shards)
             self.at = now
@@ -54,6 +74,9 @@ class HotBackupCoverage:
                         hot_backup_ready_ratio=(row['ready_seconds'] / row['observed_seconds']
                                                 if row['observed_seconds'] else None),
                         time_without_backup_seconds=row['time_without_backup_seconds'],
+                        zero_ready_backup_seconds=row['zero_ready_backup_seconds'],
+                        zero_ready_backup_active=row['zero_active'],
+                        zero_ready_by_phase_seconds=dict(row['zero_ready_by_phase_seconds']),
                         current_time_without_backup_seconds=(now - row['without_since']
                                                             if row['without_since'] is not None else 0.))
                     for key, row in self.rows.items()}
@@ -72,15 +95,26 @@ class FeedMerge:
         self.seen = OrderedDict()
         self.duplicates = self.stale = self.evictions = 0
 
-    def unique(self, event, source):
+    def prune(self, assets):
+        self.latest = {a: at for a, at in self.latest.items() if a in assets}
+        self.snapshots = {a: at for a, at in self.snapshots.items() if a in assets}
+        self.levels = OrderedDict((k, at) for k, at in self.levels.items() if k[0] in assets)
+        self.expire()
+
+    def expire(self):
+        now = time.monotonic()
+        while self.seen and next(iter(self.seen.values()))[0] < now - 60:
+            self.seen.popitem(last=False)
+            self.evictions += 1
+
+    def unique(self, event, source, key=None):
         if not self.deduplicate:
             return True
         now = time.monotonic()
         while self.seen and (len(self.seen) >= 65536 or next(iter(self.seen.values()))[0] < now - 60):
             self.seen.popitem(last=False)
             self.evictions += 1
-        key = hashlib.blake2b(json.dumps(event, sort_keys=True, separators=(',', ':')).encode(),
-                              digest_size=16).digest()
+        key = fingerprint(event) if key is None else key
         _, counts = self.seen.get(key, (now, {}))
         previous = max(counts.values(), default=0)
         counts[source] = counts.get(source, 0) + 1
@@ -111,9 +145,11 @@ class FeedMerge:
                 if (backup and at is None) or (at is not None and floor is not None and at < floor):
                     self.stale += 1
                     continue
-                unit = dict(event_type=kind, timestamp=payload.get('timestamp'), row=row)
-                if not self.unique(unit, source):
-                    continue
+                if self.deduplicate:
+                    duplicate_key = hashlib.blake2b(b'price_change' + str(payload.get('timestamp')).encode()
+                                                    + fingerprint(row), digest_size=16).digest()
+                    if not self.unique(row, source, duplicate_key):
+                        continue
                 if at is not None:
                     self.levels[key] = at
                     self.levels.move_to_end(key)
@@ -196,8 +232,8 @@ class FeedContinuity:
                 asset = str(row.get('asset_id') or row.get('assetId') or '')
                 if not asset:
                     continue
-                key = hashlib.blake2b(json.dumps([kind, at.isoformat(), row], sort_keys=True,
-                                                separators=(',', ':')).encode(), digest_size=16).hexdigest()
+                key = hashlib.blake2b(kind.encode() + at.isoformat().encode() + fingerprint(row),
+                                      digest_size=16).hexdigest()
                 history = self.history.setdefault(asset, OrderedDict())
                 sources = history.setdefault(key, set())
                 sources.add(source)
@@ -225,7 +261,7 @@ class FeedContinuity:
                     del self.pending[asset]
 
     @serialized
-    def switch(self, old, new, assets, reason):
+    def switch(self, old, new, assets, reason, book_preserved=False):
         uncertain = set()
         for asset in assets:
             self.checks += 1
@@ -243,9 +279,19 @@ class FeedContinuity:
                 previous = self.pending.get(asset)
                 self.pending[asset] = previous or dict(old=old, at=before[0] if before else None,
                     received=before[2] if before else datetime.now(timezone.utc), reason=reason)
+                now = datetime.now(timezone.utc)
+                caught_up = bool(before and after and after[0] >= before[0])
                 self.log(dict(asset=asset, reason=reason, status='unverified', gap_ms=None,
                               receipt_gap_ms=max(0, (datetime.now(timezone.utc) - before[2]).total_seconds() * 1000)
                                   if before else None,
+                              source_silence_ms=max(0, (now - before[2]).total_seconds() * 1000) if before else None,
+                              destination_silence_ms=max(0, (now - after[2]).total_seconds() * 1000) if after else None,
+                              destination_exchange_gap_ms=(after[0] - before[0]).total_seconds() * 1000
+                                  if before and after else None,
+                              book_preserved=book_preserved and caught_up,
+                              book_unavailable_ms=0 if book_preserved and caught_up else None,
+                              market_silence_compatible=bool(caught_up and after[0] == before[0]),
+                              historical_trades_verified=False,
                               exchange_at=before[0].isoformat() if before else None,
                               fingerprint=before[1] if before else None))
         return uncertain

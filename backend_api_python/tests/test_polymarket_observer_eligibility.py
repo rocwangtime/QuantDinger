@@ -68,8 +68,9 @@ def test_websocket_status_transitions_clear_error_and_preserve_mode(monkeypatch)
     from app.services.polymarket import observer
 
     monkeypatch.setattr(observer, "STATUS", {"mode": "rest", "connected": True, "last_error": "old"})
+    monkeypatch.setattr(observer, "process_rss_bytes", lambda: 4096)
     observer._ws_connected()
-    assert observer.snapshot() == {"mode": "ws", "connected": True, "last_error": None}
+    assert observer.snapshot() == {"mode": "ws", "connected": True, "last_error": None, "ws_process_rss_bytes": 4096}
     observer._ws_error("socket failed\ntraceback")
     assert observer.snapshot()["last_error"] == "socket failed"
     observer._ws_disconnected()

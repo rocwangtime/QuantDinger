@@ -64,6 +64,13 @@ class ShadowBooks:
         changed = ws_apply_event(event, self.books)
         self.recorder.receive(event, changed, {}, {}, received, self.assets)
 
+    def prune(self, assets):
+        self.assets = frozenset(assets)
+        self.books = {a: b for a, b in self.books.items() if a in self.assets}
+        self.minimum_times = {a: at for a, at in self.minimum_times.items() if a in self.assets}
+        self.recorder.prune(self.assets)
+        self.merge.prune(self.assets)
+
     def observe_active(self, metadata):
         # Keep the live watermark even if its failed worker clears live books.
         for asset in self.assets:

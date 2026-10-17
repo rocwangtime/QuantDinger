@@ -239,7 +239,7 @@ def test_loop_rediscovery_updates_subscriptions_without_reconnect(monkeypatch):
         def close(self):
             pass
 
-    def discovery(*args):
+    def discovery(*args, **kwargs):
         if len(subscriptions) == 1:
             assert not sockets[0].closed
         return discovered.pop(0), []

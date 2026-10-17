@@ -599,10 +599,11 @@ def test_reader_never_parses_or_waits_on_balancer_and_pipeline(monkeypatch):
         assert isinstance(inbox.queue.queue[0][0], bytes)
         assert all(name != threading.current_thread().name for name, _ in parsed if _ == frame)
     for _ in range(100):
-        if len([raw for _, raw in parsed if raw == frame]) == 10 and inbox.queue.empty():
+        if m.parsed_frames.hits == 9 and inbox.queue.empty():
             break
         time.sleep(.01)
-    assert len([raw for _, raw in parsed if raw == frame]) == 10
+    assert len([raw for _, raw in parsed if raw == frame]) == 1
+    assert m.parsed_frames.hits == 9
     assert m.balancer.pending == {'market:a': 10}
     m.close()
 

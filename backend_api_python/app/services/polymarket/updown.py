@@ -104,7 +104,7 @@ def market_from_updown(row, *, asset, interval, now=None):
             'price_to_beat': strike}
 
 
-def discover(client, series_cache, *, now=None):
+def discover(client, series_cache, *, now=None, prewarm=None):
     now = now or datetime.now(timezone.utc)
     assets = selections('ASSETS', ASSETS, ASSETS)
     intervals = selections('INTERVALS', INTERVALS, INTERVALS)
@@ -112,8 +112,11 @@ def discover(client, series_cache, *, now=None):
     per_pair = setting('UPDOWN_PER_PAIR_LIMIT', 2, 1, 10)
     ahead = setting('UPDOWN_LOOKAHEAD_SECONDS', 1800, 0, 86400)
     selected, excluded, conditions = [], [], set()
+    next_hot = {}
     for asset in assets:
         for interval in intervals:
+            if len(selected) >= cap:
+                continue
             slug = series_slug(asset, interval)
             try:
                 if slug not in series_cache:
@@ -133,6 +136,14 @@ def discover(client, series_cache, *, now=None):
                     for row in event.get('markets', []):
                         try:
                             market = market_from_updown({**row, 'events': [event]}, asset=asset, interval=interval, now=now)
+                            start = timestamp(market['eventStartTime'])
+                            if (prewarm is not None and asset in ('BTC', 'ETH') and interval in ('5m', '15m')
+                                    and now < start <= now + timedelta(seconds=INTERVALS[interval])):
+                                key = (asset, interval)
+                                if key not in next_hot or start < timestamp(next_hot[key]['eventStartTime']):
+                                    next_hot[key] = market
+                            if pair >= per_pair or len(selected) >= cap:
+                                continue
                             if timestamp(market['eventStartTime']) > now + timedelta(seconds=ahead):
                                 continue
                             if market['conditionId'] in conditions:
@@ -140,16 +151,19 @@ def discover(client, series_cache, *, now=None):
                             selected.append(market)
                             conditions.add(market['conditionId'])
                             pair += 1
-                            if len(selected) >= cap:
+                            if len(selected) >= cap and prewarm is None:
                                 return selected, excluded
-                            if pair >= per_pair:
+                            if pair >= per_pair and prewarm is None:
                                 break
                         except (ValueError, KeyError, TypeError) as exc:
                             excluded.append({'marketId': str(row.get('id', '')), 'reason': str(exc)})
-                    if pair >= per_pair:
+                    if pair >= per_pair and prewarm is None:
                         break
             except (ValueError, TypeError, KeyError) as exc:
                 excluded.append({'series': slug, 'reason': str(exc)})
+    if prewarm is not None:
+        selected_pairs = {(m['asset'], m['interval']) for m in selected}
+        prewarm.extend(market for key, market in next_hot.items() if key in selected_pairs)
     return selected, excluded[:100]
 
 
