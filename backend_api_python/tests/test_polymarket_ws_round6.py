@@ -77,12 +77,13 @@ def backup(m, sockets, monkeypatch):
     return old, m.backups[0]
 
 
-def test_backup_waits_90_to_120_seconds_and_hot_age_rotation_defaults_off(feed_manager, monkeypatch):
+def test_replacement_waits_90_to_120_seconds_and_hot_age_rotation_defaults_off(feed_manager, monkeypatch):
     m, p, sockets = feed_manager
     monkeypatch.delenv('POLYMARKET_OBSERVER_WS_HOT_ROTATE_SECONDS', raising=False)
     monkeypatch.setattr(m, 'hot_shard', lambda index: True)
     m.balancer.rates = {'market:a': 500}
     old = m.states[0]
+    old['backup_started'] = True  # First startup backup is now eager (round 8).
     old['opened_at'] -= 89
     m.tick()
     assert len(sockets) == 1 and m.standby is None

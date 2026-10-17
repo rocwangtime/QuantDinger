@@ -347,6 +347,7 @@ class Recorder:
                     within_1s=(max(samples) <= 1000 and min(samples) >= 0) if samples else None)
                 freshness[name] = dict(tokens=len(tokens), measured_tokens=len(values),
                     missing_tokens=len(tokens) - len(values),
+                    delivery_latency_p95_ms=delivery[name]['p95_ms'],
                     book_age_p95_ms=percentile(.95, sorted(values)),
                     update_silence_p95_ms=percentile(.95, sorted(receipts)),
                     updated_within_30s_tokens=sum(v <= 30000 for v in receipts),

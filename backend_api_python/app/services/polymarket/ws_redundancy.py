@@ -15,6 +15,54 @@ from collections import OrderedDict
 from . import recording
 
 
+class HotBackupCoverage:
+    """Session cumulative coverage; a split series needs every shard ready.
+
+    Account at transitions, including close callbacks, rather than counting
+    status samples. Unsubscribed periods do not enter the denominator.
+    """
+    def __init__(self, groups):
+        self.lock = threading.RLock()
+        self.rows = {key: dict(active=False, ready=False, observed_seconds=0., ready_seconds=0.,
+                              time_without_backup_seconds=0., without_since=None) for key in groups}
+        self.required, self.ready_shards = {}, set()
+        self.at = time.monotonic()
+
+    def update(self, required, ready_shards, now):
+        with self.lock:
+            now = max(now, self.at)
+            elapsed = now - self.at
+            for key, row in self.rows.items():
+                if row['active']:
+                    row['observed_seconds'] += elapsed
+                    row['ready_seconds' if row['ready'] else 'time_without_backup_seconds'] += elapsed
+                active = bool(required.get(key))
+                ready = active and required[key] <= ready_shards
+                if active and not ready:
+                    if not row['active'] or row['ready']:
+                        row['without_since'] = now
+                else:
+                    row['without_since'] = None
+                row.update(active=active, ready=ready)
+            self.required = {k: set(v) for k, v in required.items()}
+            self.ready_shards = set(ready_shards)
+            self.at = now
+            return {key: dict(active=row['active'], ready=row['ready'],
+                        required_shards=sorted(required.get(key, set())),
+                        ready_shards=sorted(required.get(key, set()) & ready_shards),
+                        observed_seconds=row['observed_seconds'], ready_seconds=row['ready_seconds'],
+                        hot_backup_ready_ratio=(row['ready_seconds'] / row['observed_seconds']
+                                                if row['observed_seconds'] else None),
+                        time_without_backup_seconds=row['time_without_backup_seconds'],
+                        current_time_without_backup_seconds=(now - row['without_since']
+                                                            if row['without_since'] is not None else 0.))
+                    for key, row in self.rows.items()}
+
+    def unready(self, index, now):
+        with self.lock:
+            self.update(self.required, self.ready_shards - {index}, now)
+
+
 class FeedMerge:
     def __init__(self, metadata, deduplicate=True):
         self.deduplicate = deduplicate

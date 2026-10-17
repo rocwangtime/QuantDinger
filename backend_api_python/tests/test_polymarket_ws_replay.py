@@ -56,6 +56,12 @@ def simulate(monkeypatch, seconds=7200, prior=False, seed=3, synthetic=False):
 
         def close(self):
             closed.append(self.index)
+    # Capacity growth can allocate new shards during this balancing-only
+    # simulation. Every shard, including those, must use the fake transport.
+    def connect(index, state):
+        state.update(socket=Socket(index), connected=True,
+                     thread=SimpleNamespace(is_alive=lambda: True), ping_at=float('inf'), attempts=0)
+    monkeypatch.setattr(m, 'connect', connect)
     for i in range(m.count):
         m.states[i] = dict(assets=[], socket=Socket(i), connected=True, lock=threading.RLock(),
                            thread=SimpleNamespace(is_alive=lambda: True), ping_at=float('inf'), attempts=0)

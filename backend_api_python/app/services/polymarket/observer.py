@@ -23,7 +23,7 @@ from .ws_balance import RateBalancer, DailyStats, balance_key
 from .ws_transport import TransportDiagnostics, receive_buffer_options, remote_close
 from .ws_rotation import DataHealth, ShadowBooks, reconnect_delay
 from .ws_subscriptions import SubscriptionPacer
-from .ws_redundancy import FeedMerge, FeedContinuity
+from .ws_redundancy import FeedMerge, FeedContinuity, HotBackupCoverage
 from .ws_balance import setting as ws_setting
 
 STATUS = {"enabled": False, "running": False, "mode": "stopped", "connected": False, "markets_subscribed": 0,
@@ -1129,6 +1129,8 @@ class MarketConnections:
         self.lifecycle_lock = RLock()
         self.standby = None
         self.backups = {}
+        self.backup_next_connect_at = 0
+        self.hot_backup_coverage = HotBackupCoverage(HOT_SERIES)
         self.merges = {}
         self.continuity = FeedContinuity()
         self.split_series = set()
@@ -1264,6 +1266,7 @@ class MarketConnections:
             return self._apply_assignment(assignment)
 
     def _apply_assignment(self, assignment):
+        self.update_hot_coverage(time.monotonic())
         assignments = {i: [a for a, shard in assignment.items() if shard == i] for i in range(self.count)}
         # Serialize publication with consumers. Retained assets keep both books
         # and queued deltas; moved assets require a new snapshot on their owner.
@@ -1344,10 +1347,17 @@ class MarketConnections:
                 shadow.recorder.prune(assets)
                 candidate['ready'] = shadow.books.keys() == shadow.assets
             for command in commands:
-                if command['operation'] == 'unsubscribe':
-                    candidate['socket'].send(json.dumps(command))
-                else:
-                    self.subscriptions.enqueue(candidate, command['assets_ids'])
+                try:
+                    if command['operation'] == 'unsubscribe':
+                        candidate['socket'].send(json.dumps(command))
+                    else:
+                        self.subscriptions.enqueue(candidate, command['assets_ids'])
+                except Exception as exc:
+                    candidate['connected'] = False
+                    candidate['inbox'].invalid.set()
+                    self.hot_backup_coverage.unready(index, time.monotonic())
+                    _LOG.warning('Polymarket WS backup subscription failed shard=%s reason=%s', index, str(exc)[:160])
+                    break
             with pipeline_lock:
                 merge = self.merges.get(index)
                 if merge:
@@ -1359,6 +1369,7 @@ class MarketConnections:
             self.stats.increment('rebalance_count')
             with _LOCK:
                 STATUS['rebalance_count'] = STATUS.get('rebalance_count', 0) + 1
+        self.update_hot_coverage(time.monotonic())
         return True
 
     def retire(self, state):
@@ -1393,10 +1404,11 @@ class MarketConnections:
                 self.rotation_failed(index, active, candidate, reason)
 
     def rotation_failed(self, index, active, candidate, reason):
-        failures = active.get('rotate_failures', 0) + 1 if active else 1
+        prefix = 'backup' if candidate.get('redundant') else 'rotate'
+        failures = active.get(f'{prefix}_failures', 0) + 1 if active else 1
         delay = reconnect_delay(failures) if candidate.get('redundant') else min(480, 60 * 2 ** min(3, failures - 1))
         if active:
-            active.update(rotate_failures=failures, rotate_retry_at=time.monotonic() + delay)
+            active.update({f'{prefix}_failures': failures, f'{prefix}_retry_at': time.monotonic() + delay})
         self.rotation_failures += 1
         self.rotation_last_failure = dict(shard=index, reason=reason, stage=self.prepare_stage(candidate),
                                           retry_seconds=delay, consecutive_failures=failures)
@@ -1431,14 +1443,27 @@ class MarketConnections:
             old = self.states.get(index)
             # Traffic pressure, missing PONG and elapsed warmup are not wire
             # failures. A hot standby remains online and keeps consuming.
-            if not old or candidate['inbox'].invalid.is_set():
+            # A handshake can fail/return without an on_close callback. Also
+            # bound an unfinished handshake; hot snapshot warmup stays online.
+            failed = (candidate['inbox'].invalid.is_set() or candidate.get('failed_at') is not None
+                      or not candidate['thread'].is_alive() or not candidate['worker'].is_alive()
+                      or candidate.get('initial_sent_at') is None and now - candidate['created_at'] >= 15)
+            if not old or failed:
+                self.hot_backup_coverage.unready(index, now)
                 self.backups.pop(index)
                 if not candidate.get('normal_shutdown'):
                     self.rotation_failed(index, old, candidate, 'backup_wire_failure')
                 elif old:
-                    old['rotate_retry_at'] = now + reconnect_delay(1)
+                    old['backup_retry_at'] = now + reconnect_delay(1)
                 self.retire(candidate)
-        for index, old in list(self.states.items()):
+            elif candidate.get('initial_sent_at') is not None:
+                # Handshake completion can lag the dial. Pace from the actual
+                # first subscription, so delayed handshakes cannot bunch up.
+                self.backup_next_connect_at = max(self.backup_next_connect_at,
+                    candidate['initial_sent_at'] + candidate['admission_seconds'])
+        dialing = any(s.get('initial_sent_at') is None for s in self.backups.values())
+        # Give uncovered new groups a turn before retrying an older pair.
+        for index, old in sorted(self.states.items(), key=lambda item: (bool(item[1].get('backup_started')), item[0])):
             if not self.hot_shard(index):
                 continue
             health = old.get('data_health')
@@ -1454,9 +1479,10 @@ class MarketConnections:
                 if health and health.sample(now, transport):
                     candidate.setdefault('recover_assets', set()).update(candidate['assets'])
             stagger = old.setdefault('backup_stagger_seconds', random.uniform(90, 120))
-            if (index in self.backups or not old['connected'] or not old['assets']
-                    or now < old.get('rotate_retry_at', 0)
-                    or abs(now - old.get('opened_at', now)) < stagger):
+            if (dialing or index in self.backups or not old['connected'] or not old['assets']
+                    or old.get('subscribe_initial', True) or not old.get('inbox') or old['inbox'].invalid.is_set()
+                    or now < old.get('backup_retry_at', 0) or now < self.backup_next_connect_at
+                    or old.get('backup_started') and now - old.get('opened_at', now) < stagger):
                 continue
             pipeline_lock = _PIPELINE.lock if _PIPELINE else RLock()
             with pipeline_lock:
@@ -1467,8 +1493,34 @@ class MarketConnections:
                 lock=RLock(), attempts=0, retry_at=0, ping_at=0, standby=True, redundant=True,
                 busy=True, source=f'backup-{self.backup_serial}', shadow=ShadowBooks(old['assets']), created_at=now)
             self.backups[index] = candidate
+            # First redundancy is eager, including newly allocated hot shards.
+            # Later attempts preserve the survivor's 90–120s target age. Pace
+            # initial batches too, which necessarily bypass the shared queue.
+            old['backup_started'] = True
+            initial = max(int(ws_setting('SUBSCRIBE_BATCH_ASSETS', 2, 1)),
+                          int(ws_setting('SUBSCRIBE_INITIAL_ASSETS', 12, 1)))
+            candidate['admission_seconds'] = max(ws_setting('SUBSCRIBE_BATCH_SECONDS', .5, .05),
+                min(initial, len(candidate['assets'])) / ws_setting('SUBSCRIBE_ASSETS_PER_S', 4, .1))
+            self.backup_next_connect_at = now + candidate['admission_seconds']
             _LOG.info('Polymarket WS redundant prepare shard=%s assets=%s', index, len(old['assets']))
             self.connect(index, candidate)
+            dialing = True
+
+    def update_hot_coverage(self, now):
+        required = {}
+        for asset, index in self.balancer.assignment.items():
+            key = self.balancer.groups.get(asset, '').split(':outcome:')[0]
+            if key in HOT_SERIES:
+                required.setdefault(key, set()).add(index)
+        ready = set()
+        for index, candidate in self.backups.items():
+            old = self.states.get(index, {})
+            if (candidate.get('ready') and candidate['connected'] and old.get('connected')
+                    and not old.get('data_suspect') and not old['inbox'].invalid.is_set()
+                    and not candidate['inbox'].invalid.is_set() and not candidate['inbox'].resync.is_set()
+                    and not candidate.get('subscribe_pending') and not candidate.get('recover_assets')):
+                ready.add(index)
+        return self.hot_backup_coverage.update(required, ready, now)
 
     def redundant_receive(self, index, state, event, received_at, inbox):
         with self.lifecycle_lock:
@@ -1506,9 +1558,15 @@ class MarketConnections:
                 if not ready:
                     if inbox.queue_wait_seconds <= 1 and inbox.queue.empty():
                         inbox.delivery_gap = False
-                    state['ready'] = False
+                    if state.get('ready'):
+                        state['ready'] = False
+                        self.update_hot_coverage(time.monotonic())
                     return
-                state['ready'] = True
+                # Reset retry escalation only on usable full snapshots.
+                old['backup_failures'] = 0
+                if not state.get('ready'):
+                    state['ready'] = True
+                    self.update_hot_coverage(time.monotonic())
                 maximum = ws_setting('HOT_ROTATE_SECONDS', 0, 0)
                 due = maximum > 0 and time.monotonic() - old.get('opened_at', time.monotonic()) >= maximum
                 if old['connected'] and not old['inbox'].invalid.is_set() and not old.get('data_suspect') and not due:
@@ -1526,17 +1584,18 @@ class MarketConnections:
                             shadow.assets, receipt, inbox, inbox.epoch)
                 self.check_continuity(index, old, state, 'failover' if not old['connected'] else 'data_collapse' if old.get('data_suspect') else 'hot_age')
                 self.failover_ms = max(0, (time.monotonic() - old.get('failed_at', time.monotonic())) * 1000)
-                state.update(standby=False, redundant=False, rotate_failures=0, rotate_retry_at=0)
+                state.update(standby=False, redundant=False, rotate_failures=0, rotate_retry_at=0,
+                             backup_started=True, backup_failures=0, backup_retry_at=0)
                 state.pop('shadow')
                 self.states[index] = state
                 del self.backups[index]
+                self.update_hot_coverage(time.monotonic())
                 self.backup_promotions += 1
                 self.rotations += 1
                 _LOG.info('Polymarket WS redundant promoted shard=%s reason=%s', index, 'hot_age' if due else 'data_collapse' if old.get('data_suspect') else 'failover')
                 self.retire(old)
-                # The survivor was opened at least 90s after its old primary.
-                # Replenish now if it is already 90s old, otherwise wait only
-                # the remainder needed for the new pair's age separation.
+                # Replenish when the survivor reaches its target age, including
+                # an eager startup backup that has just been promoted.
                 self.redundancy_tick(time.monotonic())
 
     def check_continuity(self, index, old, new, reason):
@@ -1662,6 +1721,7 @@ class MarketConnections:
                         if _PIPELINE.paper_account:
                             _PIPELINE.paper_account.history.assets.pop(asset, None)
         state.pop('opened_at', None)
+        state.pop('initial_sent_at', None)
         state.pop('failed_at', None)
         state.pop('data_suspect', None)
         state.pop('subscribe_pause_until', None)
@@ -1699,6 +1759,7 @@ class MarketConnections:
                 state['snapshot_retry_at'] = time.monotonic() + 10
                 self.subscriptions.enqueue(state, state['assets'], initial=True)
                 self.subscriptions.drain(state, time.monotonic())
+                state['initial_sent_at'] = time.monotonic()
             if hasattr(sock, 'transport'):
                 sock.transport.capture_headers(sock)
             _LOG.info('Polymarket WS open shard=%s standby=%s assets=%s', index,
@@ -1716,6 +1777,7 @@ class MarketConnections:
                             inbox.invalid.set()
                             break
                         with self.lifecycle_lock, inbox.lock:
+                            self.hot_backup_coverage.unready(index, time.monotonic())
                             inbox.discard()
                             state['shadow'] = ShadowBooks(state['assets'])
                             state['ready'] = False
@@ -1857,6 +1919,7 @@ class MarketConnections:
             inbox.delivery_gap = True
             state['connected'] = False
             state.setdefault('failed_at', time.monotonic())
+            self.hot_backup_coverage.unready(index, time.monotonic())
             code, reason = remote_close(error)
             if code is not None:
                 state['remote_close'] = (code, reason)
@@ -1901,10 +1964,14 @@ class MarketConnections:
             if state.get('retired') or state.get('standby'):
                 state['connected'] = False
                 inbox.invalid.set()
+                if not state.get('retired'):
+                    state.setdefault('failed_at', time.monotonic())
+                    self.hot_backup_coverage.unready(index, time.monotonic())
                 return
             inbox.delivery_gap = True
             state['connected'] = False
             state.setdefault('failed_at', time.monotonic())
+            self.hot_backup_coverage.unready(index, time.monotonic())
             counted = state.pop('slow_error', False)
             with _LOCK:
                 STATUS['last_close_code'] = code
@@ -2004,6 +2071,12 @@ class MarketConnections:
                     state['snapshot_retry_at'] = now + 10
                 recover = state.pop('recover_assets', set()) & set(state['assets'])
                 if recover and state['connected'] and not state.get('subscribe_initial'):
+                    if state.get('redundant'):
+                        state['ready'] = False
+                        self.hot_backup_coverage.unready(next(i for i, s in self.backups.items() if s is state), now)
+                        for asset in recover:
+                            state['shadow'].books.pop(asset, None)
+                            state['shadow'].recorder.metadata.pop(asset, None)
                     state['socket'].send(json.dumps(dict(operation='unsubscribe', assets_ids=sorted(recover))))
                     self.subscriptions.enqueue(state, sorted(recover))
                 self.subscriptions.drain(state, now)
@@ -2058,6 +2131,7 @@ class MarketConnections:
         cpu_now = process_time()
         cpu_cores = (cpu_now - self.cpu_seconds) / (now - self.cpu_at) if now > self.cpu_at else 0
         self.cpu_at, self.cpu_seconds = now, cpu_now
+        hot_coverage = self.update_hot_coverage(time.monotonic())
         with _LOCK:
             STATUS.setdefault('rebalance_count', 0)
             STATUS.update(self.balancer.metrics())
@@ -2083,6 +2157,7 @@ class MarketConnections:
                         transport=dict(getattr(getattr(s.get('socket'), 'transport', None), 'last', {})))
                 for i, s in self.states.items() if 'inbox' in s}
             STATUS.update(ws_continuity=self.continuity.metrics(), ws_failover_ms=self.failover_ms,
+                          ws_hot_backup_by_group=hot_coverage,
                           ws_required_hot_groups=sorted(HOT_SERIES),
                           ws_split_byte_series=sorted(self.split_series),
                           ws_rotation_count=self.rotations, ws_rotation_failures=self.rotation_failures,

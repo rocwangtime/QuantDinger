@@ -93,6 +93,7 @@ def test_mature_survivor_replenishes_immediately_after_failover(feed_manager):
     candidate = ready_backup(m, sockets)
     m.states[0]['opened_at'] -= 121
     candidate['opened_at'] -= 121
+    m.start_supervisor()  # The global initial-subscription slot may still be occupied.
     sockets[0].callbacks['on_close'](sockets[0], 1013, 'slow consumer')
     wait_for(lambda: m.states[0] is candidate)
     wait_for(lambda: len(sockets) == 3)
