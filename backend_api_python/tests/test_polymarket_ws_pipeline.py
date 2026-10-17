@@ -338,8 +338,8 @@ def test_shards_dynamic_subscription_ping_and_independent_reconnect(monkeypatch)
     assert manager.failures() == 0  # A healthy open does not trigger REST fallback.
     clock[0] += 61
     sockets[2].callbacks['on_close'](sockets[2], 1000, 'closed')
-    assert manager.states[1]['attempts'] == 0
-    assert clock[0] + 2.5 <= manager.states[1]['retry_at'] <= clock[0] + 7.5
+    assert manager.states[1]['attempts'] == 1  # Reset to the first-failure fast retry.
+    assert manager.states[1]['retry_at'] == clock[0]
     manager.close()
     assert all(s.closed for s in sockets)
 

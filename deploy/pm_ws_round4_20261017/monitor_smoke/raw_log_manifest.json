@@ -1,0 +1,18 @@
+{
+  "tcp.log.2": {
+    "uncompressed_bytes": 65536,
+    "sha256": "ab8fc3d50488cf0ed2a75d37c3850d4e50c55c10f7be1d51887ccb12992d42e0"
+  },
+  "observer.log": {
+    "uncompressed_bytes": 52001,
+    "sha256": "2edf8ac5bed429750489aea324be34ea71d73cc03ea5f15d508240c2b101c316"
+  },
+  "tcp.log": {
+    "uncompressed_bytes": 7223,
+    "sha256": "1b77d6a9b7b0cbd4a93f8355c87770da7fde430e834df819fd4bb74ea56e8206"
+  },
+  "tcp.log.1": {
+    "uncompressed_bytes": 65536,
+    "sha256": "cd0d79e8be8f6677893d86a5ab6b59dc722cec4606ab59ce00f5e9acc973c1ab"
+  }
+}

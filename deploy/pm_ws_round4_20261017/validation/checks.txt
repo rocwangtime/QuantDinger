@@ -1,0 +1,3 @@
+All checks passed!
+bash -n deploy/p34_loop.sh deploy/p34_mon.sh deploy/p34_tcp.sh: passed
+git diff --cached --check: passed

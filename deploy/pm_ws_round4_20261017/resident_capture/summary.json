@@ -1,0 +1,40 @@
+{
+  "captured_at": "2026-10-17T10:25:09.788580+08:00",
+  "source": "/tmp/pm-round4-resident",
+  "duration_limit": 0,
+  "lanes": {
+    "observer_heartbeat.jsonl": {
+      "completed_sessions": 3,
+      "elapsed_seconds": [
+        4.076085601001978,
+        3.6946068899997044,
+        3.9877965429914184
+      ],
+      "returncodes": [
+        0,
+        0,
+        0
+      ],
+      "timeouts": 0
+    },
+    "tcp_heartbeat.jsonl": {
+      "completed_sessions": 5,
+      "elapsed_seconds": [
+        46.49078630600707,
+        46.17311138298828,
+        46.2508612050151,
+        46.134568676003255,
+        46.32184919898282
+      ],
+      "returncodes": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "timeouts": 0
+    }
+  },
+  "all_completed_ssh_below_50_seconds": true
+}

@@ -282,7 +282,8 @@ class Recorder:
                 else:
                     history.append((second, count))
 
-    def metrics(self, books):
+    def metrics(self, books, groups=None, rates=None, hot_threshold=100):
+        group_rates = rates or {}
         now = datetime.now(timezone.utc)
         ages = sorted((now - at).total_seconds() * 1000 for token, (at, _, _) in self.metadata.items()
                       if at is not None and token in books and at <= now)
@@ -299,7 +300,32 @@ class Recorder:
 
         def percentile(q, values=ages):
             return values[min(len(values) - 1, math.ceil(len(values) * q) - 1)] if values else None
-        return dict(recording_enabled=self.enabled, recording_rows_per_minute=rates,
+        freshness = {}
+        if groups is not None:
+            # Snapshot cross-section, not message-weighted: every subscribed token
+            # counts once; missing and unknown timestamps cannot look fresh.
+            for name in ('hot', 'cold', 'unmeasured'):
+                tokens = [a for a, key in groups.items() if
+                          ('unmeasured' if key not in group_rates else
+                           'hot' if group_rates[key] >= hot_threshold else 'cold') == name]
+                values, receipts, lags = [], [], []
+                for token in tokens:
+                    at, received, _ = self.metadata.get(token, (None, None, None))
+                    if token not in books:
+                        continue
+                    if at is not None and at <= now:
+                        values.append((now - at).total_seconds() * 1000)
+                    if received is not None and received <= now:
+                        receipts.append((now - received).total_seconds() * 1000)
+                    if at is not None and received is not None and at <= received:
+                        lags.append((received - at).total_seconds() * 1000)
+                freshness[name] = dict(tokens=len(tokens), measured_tokens=len(values),
+                    missing_tokens=len(tokens) - len(values),
+                    book_age_p95_ms=percentile(.95, sorted(values)),
+                    book_receipt_age_p95_ms=percentile(.95, sorted(receipts)),
+                    book_arrival_lag_p95_ms=percentile(.95, sorted(lags)))
+        return dict(book_freshness_by_activity=freshness, book_freshness_hot_threshold_msg_per_s=hot_threshold,
+                    recording_enabled=self.enabled, recording_rows_per_minute=rates,
                     recording_scope=dict(assets=list(self.scope[0]), intervals=list(self.scope[1])),
                     recording_retention_days=retention_days(),
                     recording_buffer_depth=len(self.pending), recording_dropped=self.dropped,

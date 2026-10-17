@@ -1,0 +1,151 @@
+{
+  "historical_events": [
+    {
+      "at": "2026-10-16T18:40:29.634133+00:00",
+      "message": "fin=1 opcode=8 data=b'\\x03\\xf5slow consumer: send buffer full' - goodbye",
+      "sources": [
+        "/workspace/quantdinger/QuantDinger/deploy/pm_ws_round3_20261017/monitor_smoke/observer.log.gz"
+      ]
+    },
+    {
+      "at": "2026-10-16T18:40:29.634347+00:00",
+      "message": "Polymarket WS close shard=3 code=None slow_consumer=False",
+      "sources": [
+        "/workspace/quantdinger/QuantDinger/deploy/pm_ws_round3_20261017/monitor_smoke/observer.log.gz"
+      ]
+    },
+    {
+      "at": "2026-10-16T18:40:34.268485+00:00",
+      "message": "Polymarket WS reconnect shard=3 attempt=1",
+      "sources": [
+        "/workspace/quantdinger/QuantDinger/deploy/pm_ws_round3_20261017/monitor_smoke/observer.log.gz"
+      ]
+    },
+    {
+      "at": "2026-10-16T19:03:10.594599+00:00",
+      "message": "fin=1 opcode=8 data=b'\\x03\\xf5slow consumer: send buffer full' - goodbye",
+      "sources": [
+        "/workspace/quantdinger/QuantDinger/deploy/pm_ws_round3_20261017/monitor_smoke/observer.log.gz"
+      ]
+    },
+    {
+      "at": "2026-10-16T19:03:10.594788+00:00",
+      "message": "Polymarket WS close shard=3 code=None slow_consumer=False",
+      "sources": [
+        "/workspace/quantdinger/QuantDinger/deploy/pm_ws_round3_20261017/monitor_smoke/observer.log.gz"
+      ]
+    },
+    {
+      "at": "2026-10-16T19:03:17.615881+00:00",
+      "message": "Polymarket WS reconnect shard=3 attempt=1",
+      "sources": [
+        "/workspace/quantdinger/QuantDinger/deploy/pm_ws_round3_20261017/monitor_smoke/observer.log.gz"
+      ]
+    },
+    {
+      "at": "2026-10-16T23:42:05.367759+00:00",
+      "message": "Connection to remote host was lost. - goodbye",
+      "sources": [
+        "/workspace/quantdinger/QuantDinger/deploy/pm_ws_round3_20261017/monitor_smoke/observer.log.gz"
+      ]
+    },
+    {
+      "at": "2026-10-16T23:42:05.367930+00:00",
+      "message": "Polymarket WS close shard=0 code=None slow_consumer=False",
+      "sources": [
+        "/workspace/quantdinger/QuantDinger/deploy/pm_ws_round3_20261017/monitor_smoke/observer.log.gz"
+      ]
+    },
+    {
+      "at": "2026-10-16T23:42:07.837201+00:00",
+      "message": "Connection to remote host was lost. - goodbye",
+      "sources": [
+        "/workspace/quantdinger/QuantDinger/deploy/pm_ws_round3_20261017/monitor_smoke/observer.log.gz"
+      ]
+    },
+    {
+      "at": "2026-10-16T23:42:07.837380+00:00",
+      "message": "Polymarket WS close shard=1 code=None slow_consumer=False",
+      "sources": [
+        "/workspace/quantdinger/QuantDinger/deploy/pm_ws_round3_20261017/monitor_smoke/observer.log.gz"
+      ]
+    },
+    {
+      "at": "2026-10-16T23:42:11.733313+00:00",
+      "message": "Polymarket WS reconnect shard=1 attempt=1",
+      "sources": [
+        "/workspace/quantdinger/QuantDinger/deploy/pm_ws_round3_20261017/monitor_smoke/observer.log.gz"
+      ]
+    },
+    {
+      "at": "2026-10-16T23:42:12.734854+00:00",
+      "message": "Polymarket WS reconnect shard=0 attempt=1",
+      "sources": [
+        "/workspace/quantdinger/QuantDinger/deploy/pm_ws_round3_20261017/monitor_smoke/observer.log.gz"
+      ]
+    }
+  ],
+  "production_lost": {
+    "code": null,
+    "reason": "Connection to remote host was lost.",
+    "assets": 42,
+    "sample": {
+      "at": "2026-10-17T01:11:01.764175+00:00",
+      "sample_gap_seconds": 0.7629385930486023,
+      "scheduler_lag_seconds": 0,
+      "read_bytes": 225492969,
+      "read_calls": 227446,
+      "read_bytes_per_second": 97988.22694402293,
+      "pings": 248,
+      "pongs": 248,
+      "pong_rtt_seconds": 0.24897612910717726,
+      "pong_age_seconds": 0.5139624639414251
+    }
+  },
+  "normalization": {
+    "removed_exact_token": "2026-10-17T01:11:01.765305022Z ",
+    "occurrences": 2
+  },
+  "history_samples": 60,
+  "history_start": "2026-10-17T01:10:02.980810+00:00",
+  "history_end": "2026-10-17T01:11:01.764175+00:00",
+  "history_ranges": {
+    "tcp_pending_bytes": {
+      "min": 0,
+      "max": 0,
+      "last": 0,
+      "samples": 59
+    },
+    "rcv_wnd": {
+      "min": 1065472,
+      "max": 1580032,
+      "last": 1095680,
+      "samples": 59
+    },
+    "rcvbuf_bytes": {
+      "min": 2435369,
+      "max": 2435369,
+      "last": 2435369,
+      "samples": 59
+    },
+    "read_bytes_per_second": {
+      "min": 1229.8215677099593,
+      "max": 215255.3002099179,
+      "last": 97988.22694402293,
+      "samples": 60
+    },
+    "sample_gap_seconds": {
+      "min": 0.7629385930486023,
+      "max": 1.0029987711459398,
+      "last": 0.7629385930486023,
+      "samples": 60
+    },
+    "pong_age_seconds": {
+      "min": 0.5139624639414251,
+      "max": 9.754788762889802,
+      "last": 0.5139624639414251,
+      "samples": 60
+    }
+  },
+  "lost_pair_gap_seconds": 2.469442
+}
