@@ -1133,7 +1133,10 @@ class MarketConnections:
         self.hot_backup_coverage = HotBackupCoverage(HOT_SERIES)
         self.merges = {}
         self.continuity = FeedContinuity()
-        self.split_series = set()
+        self.migration = None
+        self.migration_retry_at = 0
+        self.migration_failures = 0
+        self.primary_1013 = {}
         self.failover_ms = 0
         self.backup_serial = 0
         self.backup_promotions = 0
@@ -1172,7 +1175,6 @@ class MarketConnections:
                                  time.monotonic())
         self.balancer.forced_hot = {k for k in self.balancer.groups.values() if k.split(':outcome:')[0] in HOT_SERIES}
         self.continuity.prune(set(subscription_assets(markets)))
-        self.split_series.intersection_update({balance_key(m) for m in markets})
         if set(subscription_assets(markets)) == set(self.balancer.assignment):
             self.tick()
             return
@@ -1202,59 +1204,41 @@ class MarketConnections:
                 self.balancer.rates.setdefault(key, rate)
 
     def asset_key(self, market, side):
-        key = balance_key(market)
-        return f'{key}:outcome:{side}' if key in self.split_series else key
+        # A YES/NO pair is indivisible, including when its byte rate exceeds a cap.
+        return balance_key(market)
 
     def hot_shard(self, index):
         return any(self.balancer.groups.get(a, '').split(':outcome:')[0] in HOT_SERIES
-                   for a in self.states[index]['assets'])
+                   for a, owner in self.balancer.assignment.items() if owner == index)
 
     def assignment_for(self, owners):
-        return {a: owners[k] for a, k in self.balancer.groups.items()}
+        # A rollover can replace every asset of a group before current_owners()
+        # sees it. Complete the catalogue, retaining the proposed known owners.
+        complete = self.balancer.place(set(self.balancer.groups.values()), owners, optimize=False)
+        return {a: complete[k] for a, k in self.balancer.groups.items()}
 
-    def split_byte_overloads(self):
-        # Outcome legs can use different sockets; pair evaluation still uses
-        # the shared Pipeline. Preserve side keys/rates across window rollovers.
+    def capacity_owners(self, rebalance=False, now=None):
+        """Place new groups without silently migrating retained ones at rollover."""
         b = self.balancer
-        oversized = {k for k in b.groups.values() if ':outcome:' not in k and b.byte_weight(k) > b.max_bytes
-                     and sum(v == k for v in b.groups.values()) > 1}
-        if not oversized:
-            return
-        self.split_series.update(oversized)
-        old_groups = dict(b.groups)
-        groups = {a: self.asset_key(m, side) for m in self.markets for side, a in
-                  (('yes', m['yesAssetId']), ('no', m['noAssetId']))}
-        for key in oversized:
-            parts = {v for a, v in groups.items() if old_groups.get(a) == key}
-            for part in parts:
-                b.rates[part] = b.weight(key) / len(parts)
-                b.byte_rates[part] = b.byte_weight(key) / len(parts)
-                if key in b.measured:
-                    b.measured.add(part)
-        b.set_groups(groups)
-        hot_keys = {k for k in groups.values() if k.split(':outcome:')[0] in HOT_SERIES}
-        cold_assets = sum(k.split(':outcome:')[0] not in HOT_SERIES for k in groups.values())
-        self.count = b.count = max(self.count, min(8, len(hot_keys) +
-                                      (cold_assets + b.max_assets - 1) // b.max_assets))
-        b.forced_hot = {k for k in groups.values() if k.split(':outcome:')[0] in HOT_SERIES}
-
-    def capacity_owners(self):
-        """Grow within the eight-socket bound when whole groups do not fit."""
-        balancer = self.balancer
-        self.split_byte_overloads()
-        keys = set(balancer.groups.values())
-        owners = balancer.place(keys)
-        owners, _, _ = balancer.search(owners, min(32, len(keys)))
-        while any(balancer.capacity_cost(owners)) and self.count < 8:
-            before = balancer.capacity_cost(owners)
+        now = time.monotonic() if now is None else now
+        keys = set(b.groups.values())
+        previous = {**b.owners, **b.current_owners()}
+        owners = b.place(keys, previous, optimize=False)
+        initial = not b.assignment
+        movable = keys if initial else {
+            k for k in keys if k not in previous or rebalance and k in b.measured
+            and k not in b.unavailable and now - b.moved_at.get(k, float('-inf')) >= b.group_cooldown}
+        if initial or rebalance:
+            owners, _, _ = b.search(owners, b.max_moves, movable)
+        while any(b.capacity_cost(owners)) and self.count < 8:
+            before = b.capacity_cost(owners)
             self.count += 1
-            balancer.count = self.count
-            trial = balancer.place(keys, owners)
-            if balancer.capacity_cost(trial) >= before:
-                # One indivisible series can exceed a cap; extra idle sockets
-                # cannot help. Report the excess instead of growing forever.
+            b.count = self.count
+            trial = b.place(keys, owners, optimize=False)
+            trial, _, _ = b.search(trial, b.max_moves, movable)
+            if b.capacity_cost(trial) >= before:
                 self.count -= 1
-                balancer.count = self.count
+                b.count = self.count
                 break
             owners = trial
         return owners
@@ -1263,28 +1247,50 @@ class MarketConnections:
         with self.lifecycle_lock:
             if self.standby and assignment != self.balancer.assignment:
                 self.cancel_rotation('assignment_changed')
+            if self.migration:
+                if assignment == self.migration['target']:
+                    return True
+                self.cancel_migration('assignment_changed')
+            old = self.balancer.assignment
+            incoming = {a for a in old.keys() & assignment.keys() if old[a] != assignment[a]}
+            if incoming:
+                return self.prepare_migration(assignment, incoming)
             return self._apply_assignment(assignment)
 
-    def _apply_assignment(self, assignment):
+    def _apply_assignment(self, assignment, warmed=None):
+        warmed = warmed or {}
+        warm_assets = {a for shadow in warmed.values() for a in shadow.assets}
         self.update_hot_coverage(time.monotonic())
         assignments = {i: [a for a, shard in assignment.items() if shard == i] for i in range(self.count)}
-        # Serialize publication with consumers. Retained assets keep both books
-        # and queued deltas; moved assets require a new snapshot on their owner.
+        # Serialize publication with consumers. Warmed assets keep live books
+        # until caught-up destination snapshots replace them atomically.
         pipeline_lock = _PIPELINE.lock if _PIPELINE else RLock()
         with pipeline_lock:
+            if warmed:
+                metadata = _PIPELINE.recording.metadata if _PIPELINE else {}
+                for index, shadow in warmed.items():
+                    state = self.states[index]
+                    inbox = state.get('inbox')
+                    if (not state['connected'] or state.get('subscribe_pending')
+                            or self.migration and inbox is not self.migration['generations'][index]
+                            or inbox and (inbox.invalid.is_set() or inbox.resync.is_set()
+                                or inbox.delivery_gap or inbox.queue_wait_seconds > 1)
+                            or not shadow.ready(metadata)):
+                        return False
             old = self.balancer.assignment
             old_owners = self.balancer.current_owners()
             moved = any(a in assignment and assignment[a] != i for a, i in old.items())
             changed = {a for a in old.keys() | assignment.keys() if old.get(a) != assignment.get(a)}
             for asset in changed & old.keys() & assignment.keys():
-                self.continuity.switch(self.states[old[asset]].get('source'), None, [asset], 'reassignment')
+                self.continuity.switch(self.states[old[asset]].get('source'),
+                    self.states[assignment[asset]].get('source'), [asset], 'reassignment')
             if _PIPELINE:
-                for asset in changed:
+                for asset in changed - warm_assets:
                     _PIPELINE.books.pop(asset, None)
                     _PIPELINE.recording.metadata.pop(asset, None)
                     if _PIPELINE.paper_account:
                         _PIPELINE.paper_account.history.assets.pop(asset, None)
-            # Remove on every source before subscribing on any destination.
+            # Warmed destinations already have their physical subscriptions.
             changes = {}
             for index, assets in assignments.items():
                 state = self.states.setdefault(index, dict(assets=[], socket=None, thread=None,
@@ -1298,13 +1304,38 @@ class MarketConnections:
                         state['data_health'] = DataHealth(time.monotonic())
                     if state.get('inbox'):
                         activated = getattr(state['inbox'], 'activated', {})
-                        state['inbox'].activated = {a: (datetime.max.replace(tzinfo=timezone.utc) if a in changed else activated[a])
+                        state['inbox'].activated = {a: (datetime.max.replace(tzinfo=timezone.utc) if a in changed - warm_assets else activated.get(a, datetime.now(timezone.utc)))
                                                    for a in assets if a in changed or a in activated}
             with self.balancer.lock:
                 self.balancer.assignment = dict(assignment)
                 new_owners = self.balancer.current_owners()
                 self.balancer.owners.update(new_owners)
                 self.balancer.applied(old_owners, new_owners, time.monotonic())
+            # Both paths are still subscribed. Publish caught-up full books under
+            # the same lock as ownership, then remove the former subscriptions.
+            for index, shadow in warmed.items():
+                state = self.states[index]
+                merge = self.merges.setdefault(index, FeedMerge({}))
+                for asset in shadow.assets:
+                    merge.latest[asset] = merge.snapshots[asset] = shadow.recorder.metadata[asset][0]
+                merge.levels = type(merge.levels)((k, v) for k, v in merge.levels.items()
+                                                   if k[0] not in shadow.assets)
+                # Retain hot fan-in duplicate counts across the shard boundary.
+                for origin in {old[a] for a in shadow.assets}:
+                    source_merge = self.merges.get(origin)
+                    if source_merge and source_merge is not merge:
+                        merge.seen.update(source_merge.seen)
+                merge.seen = type(merge.seen)(sorted(merge.seen.items(), key=lambda item: item[1][0])[-65536:])
+                for asset, book in shadow.books.items():
+                    at, receipt, _ = shadow.recorder.metadata[asset]
+                    event = dict(event_type='book', asset_id=asset, timestamp=int(at.timestamp() * 1000),
+                        bids=[dict(price=p, size=q) for p, q in book['bids'].items()],
+                        asks=[dict(price=p, size=q) for p, q in book['asks'].items()])
+                    # A prepared full book satisfies an uncertain continuity
+                    # switch locally, without a second wire resubscription.
+                    self.continuity.receive(event, state.get('source'), receipt)
+                    if _PIPELINE:
+                        _PIPELINE.receive(event, shadow.assets, receipt, state['inbox'], state['inbox'].epoch)
         # Subscription sends/close handshakes may block on the network. Ownership
         # is already published; retained books must not wait behind that I/O.
         for operation in ('unsubscribe', 'subscribe'):
@@ -1371,6 +1402,127 @@ class MarketConnections:
                 STATUS['rebalance_count'] = STATUS.get('rebalance_count', 0) + 1
         self.update_hot_coverage(time.monotonic())
         return True
+
+    def prepare_migration(self, assignment, incoming):
+        """Warm incoming pairs on destination sockets while the old owners publish."""
+        if time.monotonic() < self.migration_retry_at:
+            return False
+        shadows = {i: ShadowBooks({a for a in incoming if assignment[a] == i})
+                   for i in set(assignment[a] for a in incoming)}
+        pipeline_lock = _PIPELINE.lock if _PIPELINE else RLock()
+        with pipeline_lock:
+            for shadow in shadows.values():
+                shadow.observe_active(_PIPELINE.recording.metadata if _PIPELINE else {})
+        self.migration = dict(target=dict(assignment), shadows=shadows,
+                              created_at=time.monotonic(), generations={})
+        for index, shadow in shadows.items():
+            state = self.states.setdefault(index, dict(assets=[], socket=None, thread=None,
+                connected=False, lock=RLock(), attempts=0, retry_at=0, ping_at=0))
+            with state['lock']:
+                state['assets'] = sorted(set(state['assets']) | shadow.assets)
+                if state.get('inbox'):
+                    activated = getattr(state['inbox'], 'activated', {})
+                    state['inbox'].activated = {**activated, **{a: datetime.max.replace(tzinfo=timezone.utc)
+                                                               for a in shadow.assets}}
+                if state['connected'] and state['socket']:
+                    self.subscriptions.enqueue(state, sorted(shadow.assets))
+                elif not state.get('thread') or not state['thread'].is_alive():
+                    self.connect(index, state)
+            # connect() has synchronously installed the new inbox/source before
+            # its reader opens. A later reconnect/promotion cancels this prepare.
+            self.migration['generations'][index] = state.get('inbox')
+        _LOG.info('Polymarket WS migration prepare assets=%s destinations=%s', len(incoming), sorted(shadows))
+        return True
+
+    def cancel_migration(self, reason):
+        pending, self.migration = self.migration, None
+        if not pending:
+            return
+        if reason != 'shutdown':
+            self.migration_failures += 1
+            self.migration_retry_at = time.monotonic() + self.balancer.minimum
+            # Reconcile only the extra destination subscriptions; the applied
+            # owners and their live books have never changed.
+            self._apply_assignment(dict(self.balancer.assignment))
+        _LOG.info('Polymarket WS migration cancelled reason=%s', reason)
+
+    def migration_tick(self, now):
+        pending = self.migration
+        if not pending:
+            return
+        failed = now - pending['created_at'] >= ws_setting('MIGRATION_PREPARE_SECONDS', 90, 1)
+        for index, generation in pending['generations'].items():
+            state = self.states[index]
+            inbox = state.get('inbox')
+            failed |= (inbox is not generation or (not state['connected']
+                       and ('opened_at' in state or 'failed_at' in state)) or state.get('retired', False)
+                       or bool(inbox and (inbox.invalid.is_set() or inbox.resync.is_set() or inbox.delivery_gap)))
+        if failed:
+            self.cancel_migration('failed_or_timeout')
+
+    def migration_receive(self, index, state, event, received, inbox):
+        if not self.migration:
+            return event
+        with self.lifecycle_lock:
+            pending = self.migration
+            if not pending or index not in pending['shadows']:
+                return event
+            if (self.states.get(index) is not state or inbox is not pending['generations'][index]
+                    or inbox.invalid.is_set() or inbox.resync.is_set()
+                    or (datetime.now(timezone.utc) - received).total_seconds() > 1):
+                return event
+            pipeline_lock = _PIPELINE.lock if _PIPELINE else RLock()
+            with pipeline_lock:
+                shadow = pending['shadows'][index]
+                assets = {a for a in shadow.assets if received >= getattr(inbox, 'activated', {}).get(a, received)}
+                shadow_event = recording.owned_events(event, assets)
+                shadow.receive(shadow_event, received)
+                self.continuity.receive(shadow_event, state.get('source'), received)
+            # Recheck every watermark/inbox under the publication lock. Network
+            # sends happen after that lock exits.
+            if self._apply_assignment(pending['target'], warmed=pending['shadows']):
+                self.migration = None
+                _LOG.info('Polymarket WS migration committed destinations=%s', sorted(pending['shadows']))
+            # Another destination can commit while this worker waits to publish.
+            # Books/deltas already applied to its shadow must not replay over the
+            # published snapshot. Trades still follow normal owner/merge rules.
+            def live_event(row):
+                if isinstance(row, list):
+                    return [live_event(item) for item in row]
+                if isinstance(row, dict) and (row.get('event_type') or row.get('type')) in ('book', 'price_change'):
+                    return recording.owned_events(row, set(state['assets']) - shadow.assets)
+                return row
+            return live_event(event)
+
+    def migration_metrics(self, now):
+        pending = self.migration
+        return dict(pending=bool(pending), failures=self.migration_failures,
+                    age_seconds=max(0, now - pending['created_at']) if pending else 0,
+                    assets=sorted(a for s in pending['shadows'].values() for a in s.assets) if pending else [],
+                    retry_in_seconds=max(0, self.migration_retry_at - now))
+
+    def record_primary_1013(self, index, state, code):
+        if code != 1013 or state.get('standby') or state.get('retired') or state.get('primary_1013_recorded'):
+            return
+        with self.lifecycle_lock:
+            if state.get('primary_1013_recorded'):
+                return
+            state['primary_1013_recorded'] = True
+            row = self.primary_1013.setdefault(index, dict(total=0, recent=deque(maxlen=64)))
+            row['total'] += 1
+            inbox = state.get('inbox')
+            owners = self.balancer.current_owners()
+            row['last'] = dict(assets=len(state['assets']),
+                groups=sorted(k for k, i in owners.items() if i == index),
+                measured_msg_per_s=self.balancer.loads(owners)[index],
+                measured_bytes_per_s=self.balancer.byte_loads(owners)[index],
+                receive_bytes_per_second=inbox.byte_rate if inbox else None)
+            row['recent'].append(time.monotonic())
+
+    def primary_1013_metrics(self, now):
+        return {i: dict(total=row['total'], count_10m=sum(t >= now - 600 for t in row['recent']),
+                        window_seconds=600, window_count_capped=(len(row['recent']) == 64
+                            and row['recent'][0] >= now - 600), **row['last']) for i, row in self.primary_1013.items()}
 
     def retire(self, state):
         """Wake readers without waiting for a network close handshake on the book worker."""
@@ -1489,9 +1641,10 @@ class MarketConnections:
                 self.merges.setdefault(index, FeedMerge({a: v for a, v in
                     (_PIPELINE.recording.metadata.items() if _PIPELINE else []) if a in old['assets']}))
             self.backup_serial += 1
-            candidate = dict(assets=list(old['assets']), socket=None, thread=None, connected=False,
+            owned_assets = [a for a in old['assets'] if self.balancer.assignment.get(a) == index]
+            candidate = dict(assets=owned_assets, socket=None, thread=None, connected=False,
                 lock=RLock(), attempts=0, retry_at=0, ping_at=0, standby=True, redundant=True,
-                busy=True, source=f'backup-{self.backup_serial}', shadow=ShadowBooks(old['assets']), created_at=now)
+                busy=True, source=f'backup-{self.backup_serial}', shadow=ShadowBooks(owned_assets), created_at=now)
             self.backups[index] = candidate
             # First redundancy is eager, including newly allocated hot shards.
             # Later attempts preserve the survivor's 90–120s target age. Pace
@@ -1715,7 +1868,7 @@ class MarketConnections:
             self.reconnect_pending = True
             if _PIPELINE:
                 with _PIPELINE.lock:
-                    for asset in state['assets']:
+                    for asset in [a for a in state['assets'] if self.balancer.assignment.get(a) == index]:
                         _PIPELINE.books.pop(asset, None)
                         _PIPELINE.recording.metadata.pop(asset, None)
                         if _PIPELINE.paper_account:
@@ -1730,6 +1883,7 @@ class MarketConnections:
         state.pop('backup_stagger_seconds', None)
         state.pop('slow_error', None)
         state.pop('close_evidence_recorded', None)
+        state.pop('primary_1013_recorded', None)
         if not state.get('standby') and index in self.merges:
             # This generation needs fresh snapshots; a previous generation's
             # duplicate cache must not suppress them after its books were reset.
@@ -1786,6 +1940,9 @@ class MarketConnections:
                             inbox.resyncs += 1
                             state.setdefault('recover_assets', set()).update(state['assets'])
                         continue
+                    with self.lifecycle_lock:
+                        if self.migration and index in self.migration['shadows']:
+                            self.cancel_migration('destination_resync')
                     # Serialize gap recovery with publication. Never reuse a book
                     # assembled across a missing delta; request fresh full books.
                     pipeline_lock = _PIPELINE.lock if _PIPELINE else RLock()
@@ -1795,7 +1952,7 @@ class MarketConnections:
                             break
                         inbox.discard()
                         if _PIPELINE:
-                            for asset in state['assets']:
+                            for asset in [a for a in state['assets'] if self.balancer.assignment.get(a) == index]:
                                 _PIPELINE.books.pop(asset, None)
                                 _PIPELINE.recording.metadata.pop(asset, None)
                                 if _PIPELINE.paper_account:
@@ -1827,6 +1984,7 @@ class MarketConnections:
                     if state.get('standby'):
                         self.shadow_receive(index, state, event, received_at, inbox)
                         continue
+                    event = self.migration_receive(index, state, event, received_at, inbox)
                     self.balancer.receive(event, index, len(raw.encode('utf-8')) if isinstance(raw, str) else len(raw) if isinstance(raw, (bytes, bytearray)) else 0)
                     self.stats.message(index)
                     if _PIPELINE:
@@ -1838,13 +1996,18 @@ class MarketConnections:
                                      and self.states.get(index) is state and not state.get('retired'))
                             if valid:
                                 continuity_assets = {a for a in state['assets']
-                                    if received_at >= inbox.activated.get(a, received_at)}
+                                    if self.balancer.assignment.get(a) == index
+                                    and received_at >= inbox.activated.get(a, received_at)}
                                 self.continuity.receive(recording.owned_events(event, continuity_assets), state['source'], received_at)
-                                owned = frozenset(state['assets'])
+                                owned = frozenset(a for a in state['assets'] if self.balancer.assignment.get(a) == index)
                                 merge = self.merges.get(index)
                                 merged = merge.filter(event, state['source'], owned) if merge else event
                                 if merged:
                                     _PIPELINE.receive(merged, owned, received_at, inbox, epoch)
+                                migration = self.migration
+                                if migration:
+                                    for shadow in migration['shadows'].values():
+                                        shadow.observe_active(_PIPELINE.recording.metadata)
                                 pending = self.standby
                                 if pending and pending[0] == index:
                                     pending[1]['shadow'].observe_active(_PIPELINE.recording.metadata)
@@ -1871,7 +2034,7 @@ class MarketConnections:
                         if (state.get('inbox') is inbox and self.states.get(index) is state
                                 and not (backup and backup.get('ready') and backup['connected']
                                          and not backup['inbox'].invalid.is_set())):
-                            for asset in state['assets']:
+                            for asset in [a for a in state['assets'] if self.balancer.assignment.get(a) == index]:
                                 _PIPELINE.books.pop(asset, None)
                                 _PIPELINE.recording.metadata.pop(asset, None)
                                 if _PIPELINE.paper_account:
@@ -1921,6 +2084,7 @@ class MarketConnections:
             state.setdefault('failed_at', time.monotonic())
             self.hot_backup_coverage.unready(index, time.monotonic())
             code, reason = remote_close(error)
+            self.record_primary_1013(index, state, code)
             if code is not None:
                 state['remote_close'] = (code, reason)
                 error = reason
@@ -1950,6 +2114,7 @@ class MarketConnections:
             remote_code, remote_reason = state.pop('remote_close', (None, None))
             code = code if code is not None else remote_code
             reason = reason if reason is not None else remote_reason
+            self.record_primary_1013(index, state, code)
             if not state.get('retired'):
                 evidence(_sock, code, reason)
             if code == 1001 and not state.get('retired'):
@@ -2024,6 +2189,7 @@ class MarketConnections:
         tick_gap = now - self.tick_at
         self.tick_at = now
         self.tick_gap_max = max(self.tick_gap_max, tick_gap)
+        self.migration_tick(now)
         # Group attribution runs off-reader. Freeze measurements/plans during
         # outages, overflow or backlog, plus one full recovery window; never
         # move a hot group because incomplete delivery made its rate look low.
@@ -2049,11 +2215,12 @@ class MarketConnections:
             balancer.sample(now, self.sample_unavailable)
             owners = balancer.current_owners()
             if (not self.sample_unavailable and not previous_unavailable and self.markets and balancer.measured
-                    and set(owners) >= {balance_key(m) for m in self.markets}):
+                    and set(owners) >= set(balancer.groups.values())
+                    and not self.migration and now >= self.migration_retry_at):
                 target = balancer.plan(owners, now)
-                if (any(balancer.capacity_cost(owners)) and balancer.pressure_samples >= balancer.confirmations
+                if (balancer.overloaded(owners) and balancer.pressure_samples >= balancer.confirmations
                         and now - balancer.last_rebalance >= balancer.minimum):
-                    expanded = self.capacity_owners()
+                    expanded = self.capacity_owners(rebalance=True, now=now)
                     if balancer.capacity_cost(expanded) < balancer.capacity_cost(owners):
                         target = expanded
                 if target:
@@ -2159,7 +2326,9 @@ class MarketConnections:
             STATUS.update(ws_continuity=self.continuity.metrics(), ws_failover_ms=self.failover_ms,
                           ws_hot_backup_by_group=hot_coverage,
                           ws_required_hot_groups=sorted(HOT_SERIES),
-                          ws_split_byte_series=sorted(self.split_series),
+                          ws_split_byte_series=[],
+                          ws_migration=self.migration_metrics(now),
+                          ws_primary_1013_by_shard=self.primary_1013_metrics(now),
                           ws_rotation_count=self.rotations, ws_rotation_failures=self.rotation_failures,
                           ws_rotation_last_failure=self.rotation_last_failure,
                           ws_hot_rotate_seconds=ws_setting('HOT_ROTATE_SECONDS', 0, 0),
@@ -2193,6 +2362,7 @@ class MarketConnections:
         self.supervisor_stop.set()
         with self.lifecycle_lock:
             self.closed = True
+            self.cancel_migration('shutdown')
             self.cancel_rotation('shutdown')
             for state in self.backups.values():
                 self.retire(state)

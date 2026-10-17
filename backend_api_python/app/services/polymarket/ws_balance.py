@@ -204,7 +204,7 @@ class RateBalancer:
         mean = sum(loads) / len(loads) if loads else 0
         return (max(loads) - min(loads)) / mean if mean else 0
 
-    def place(self, keys, previous=None):
+    def place(self, keys, previous=None, optimize=True):
         """Owners for ``keys``: retain known owners, put new groups on the lightest shard."""
         previous = dict(self.owners if previous is None else previous)
         owners = {k: previous[k] for k in keys if k in previous and previous[k] < self.count}
@@ -214,7 +214,7 @@ class RateBalancer:
                 self.capacity_cost(dict(owners, **{key: i})), loads[i], i))
             owners[key] = shard
             loads[shard] += self.planning_weight(key)
-        if previous and any(self.capacity_cost(owners)):
+        if optimize and previous and any(self.capacity_cost(owners)):
             owners, _, _ = self.search(owners, min(32, len(owners)))
         return owners
 
@@ -303,6 +303,12 @@ class RateBalancer:
             self.moved_at.update({k: now for k in moved})
             self.pressure, self.pressure_samples = None, 0
 
+    def overloaded(self, owners):
+        """Rate caps have an entry band; asset capacity is an exact bound."""
+        return (max(self.asset_counts(owners)) > self.max_assets
+                or max(self.loads(owners)) > self.max_load * (1 + self.threshold)
+                or max(self.byte_loads(owners)) > self.max_bytes * (1 + self.threshold))
+
     def plan(self, owners, now=None):
         """Require sustained, meaningful improvement and global/per-group cooldown.
 
@@ -315,7 +321,7 @@ class RateBalancer:
         hot = self.hot_groups(owners)
         bound = max([sum(before) / self.count, *(self.planning_weight(k) for k in owners)])
         isolation = self.isolation_cost(owners, hot)
-        overloaded = any(self.capacity_cost(owners))
+        overloaded = self.overloaded(owners)
         if (not overloaded and (not any(before) or (isolation <= max(1e-6, self.min_gain) and
                 max(before) <= bound * (1 + self.threshold)))):
             self.pressure, self.pressure_samples = None, 0
@@ -326,11 +332,11 @@ class RateBalancer:
         if self.pressure_samples < self.confirmations or now - self.last_rebalance < self.minimum:
             return None
         movable = [k for k in owners if k in self.measured and k not in self.unavailable
-                   and (overloaded or now - self.moved_at.get(k, float('-inf')) >= self.group_cooldown)]
+                   and now - self.moved_at.get(k, float('-inf')) >= self.group_cooldown]
         target, loads, moved = self.search(owners, self.max_moves, movable)
         peak_gain = max(before) - max(loads)
         isolation_gain = isolation - self.isolation_cost(target, hot)
-        capacity_gain = self.capacity_cost(target) < self.capacity_cost(owners)
+        capacity_gain = overloaded and self.capacity_cost(target) < self.capacity_cost(owners)
         if not moved or (not capacity_gain and peak_gain < max(self.min_gain, max(before) * self.threshold)
                          and (isolation_gain <= 1e-6 or
                               isolation_gain < max(self.min_gain, isolation * self.threshold))):

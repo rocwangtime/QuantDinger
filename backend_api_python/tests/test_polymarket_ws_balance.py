@@ -108,9 +108,26 @@ def manager(monkeypatch):
         def close(self):
             pass
     m.states = {i: dict(assets=['a', 'b'] if i == 0 else [], socket=Socket(i),
-                       connected=True, lock=threading.RLock()) for i in range(4)}
+                       connected=True, lock=threading.RLock(), inbox=observer.ReceiveQueue(20),
+                       source=f'fake-{i}') for i in range(4)}
     m.balancer.assignment = dict(a=0, b=0)
     return m, sent
+
+
+def finish_migration(m):
+    """Drive paced fake destination subscriptions and deliver full snapshots."""
+    from datetime import datetime, timezone
+    from tests.test_polymarket_ws_rotation import book
+    if not m.migration:
+        return
+    for index, shadow in list(m.migration['shadows'].items()):
+        state = m.states[index]
+        while state.get('subscribe_pending'):
+            m.subscriptions.next_at = 0
+            m.subscriptions.drain(state, time.monotonic())
+        m.migration_receive(index, state, [book(a) for a in shadow.assets],
+                            datetime.now(timezone.utc), state['inbox'])
+    assert m.migration is None
 
 
 def test_handover_sends_deltas_without_invalidating_generations(monkeypatch):
@@ -119,8 +136,10 @@ def test_handover_sends_deltas_without_invalidating_generations(monkeypatch):
     m.states[0]['inbox'] = observer.ReceiveQueue(2)
     m.states[2]['inbox'] = observer.ReceiveQueue(2)
     assert m.apply_assignment(dict(a=0, b=2))
-    assert sent == [(0, dict(assets_ids=['b'], operation='unsubscribe')),
-                    (2, dict(assets_ids=['b'], operation='subscribe'))]
+    assert m.balancer.assignment == dict(a=0, b=0) and sent == []
+    finish_migration(m)
+    assert sent == [(2, dict(assets_ids=['b'], operation='subscribe')),
+                    (0, dict(assets_ids=['b'], operation='unsubscribe'))]
     assert not m.states[0]['inbox'].invalid.is_set()
     assert not m.states[2]['inbox'].invalid.is_set()
     assert m.states[0]['connected'] and m.states[2]['connected']
@@ -163,7 +182,8 @@ def connected_manager(monkeypatch, markets, owners, rates):
     m.balancer.set_groups({a: observer.balance_key(x) for x in markets for a in observer.subscription_assets([x])})
     assignment = {a: owners[observer.balance_key(x)] for x in markets for a in observer.subscription_assets([x])}
     m.states = {i: dict(assets=[a for a in assignment if assignment[a] == i], socket=Socket(i), connected=True,
-                        lock=threading.RLock(), thread=SimpleNamespace(is_alive=lambda: True), ping_at=float('inf'))
+                        lock=threading.RLock(), inbox=observer.ReceiveQueue(20), source=f'fake-{i}',
+                        thread=SimpleNamespace(is_alive=lambda: True), ping_at=float('inf'))
                 for i in range(4)}
     m.balancer.assignment = assignment
     m.balancer.rates, m.balancer.measured = dict(rates), set(rates)
@@ -213,6 +233,7 @@ def test_manager_applies_weighted_whole_group_rebalance_and_cooldown(monkeypatch
     monkeypatch.setattr(observer, 'time', SimpleNamespace(process_time=time.process_time, monotonic=lambda: clock[0]))
     before = b.loads()
     m.tick()
+    finish_migration(m)
     assert max(b.loads()) / min(b.loads()) < max(before) / min(before)
     assert b.last_rebalance == 1
     assert next(iter(m.stats.days.values()))['rebalance_count'] == 1
@@ -232,6 +253,7 @@ def test_manager_applies_weighted_whole_group_rebalance_and_cooldown(monkeypatch
         b.pending = dict(b.rates)
         b.sample_at = second - 1
         m.tick()
+        finish_migration(m)
     assert max(b.loads()) / min(b.loads()) <= b.target
 
 
@@ -301,6 +323,7 @@ def test_catalogue_owner_moves_count_once_and_wire_failure_is_local(monkeypatch)
     for i in (1, 2, 3):
         m.states[i]['socket'].close = lambda: pytest.fail('unrelated socket closed')
     m.apply_assignment(dict(a=0, b=2))
+    finish_migration(m)
     assert closed == [0]
     assert m.states[0]['inbox'].invalid.is_set()
     assert m.states[2]['connected']
@@ -410,8 +433,9 @@ def test_slow_subscription_send_does_not_lock_retained_books_or_accept_early_tar
     def slow_send(raw):
         entered.set()
         assert release.wait(3)
-    m.states[0]['socket'].send = slow_send
-    thread = threading.Thread(target=lambda: m.apply_assignment(dict(a=0, b=1)), daemon=True)
+    m.states[1]['socket'].send = slow_send
+    m.apply_assignment(dict(a=0, b=1))
+    thread = threading.Thread(target=lambda: m.subscriptions.drain(m.states[1], time.monotonic()), daemon=True)
     thread.start()
     try:
         assert entered.wait(1)
@@ -419,8 +443,9 @@ def test_slow_subscription_send_does_not_lock_retained_books_or_accept_early_tar
         try:
             inbox = m.states[1]['inbox']
             p.receive(dict(event_type='book', asset_id='b', bids=[], asks=[]),
-                      {'b'}, datetime.now(timezone.utc), inbox, inbox.epoch)
-            assert 'b' not in p.books  # Destination subscription has not been sent.
+                      {a for a, owner in m.balancer.assignment.items() if owner == 1},
+                      datetime.now(timezone.utc), inbox, inbox.epoch)
+            assert 'b' not in p.books  # Target has not obtained a full snapshot.
             assert 'a' in p.books
         finally:
             p.lock.release()
@@ -428,6 +453,8 @@ def test_slow_subscription_send_does_not_lock_retained_books_or_accept_early_tar
         release.set()
         thread.join(2)
     assert not thread.is_alive()
+    m.states[1]['socket'].send = lambda raw: None
+    finish_migration(m)
     inbox = m.states[1]['inbox']
     p.receive(dict(event_type='book', asset_id='b', bids=[], asks=[]),
               {'b'}, datetime.now(timezone.utc), inbox, inbox.epoch)
@@ -468,8 +495,15 @@ def test_manager_sample_expands_sockets_for_confirmed_capacity_pressure(monkeypa
     # New physical connection is deliberately stubbed; this test is admission
     # planning against healthy measured traffic, never a network smoke test.
     opened = []
-    monkeypatch.setattr(m, 'connect', lambda index, state: opened.append(index))
+    def connect(index, state):
+        opened.append(index)
+        state.update(connected=True, inbox=observer.ReceiveQueue(20),
+                     thread=SimpleNamespace(is_alive=lambda: True), source=f'fake-{index}',
+                     socket=m.states[1]['socket'], ping_at=float('inf'))
+    monkeypatch.setattr(m, 'connect', connect)
     m.tick()
     assert m.count == m.balancer.count == 5 and opened == [4]
+    assert m.migration is not None
+    finish_migration(m)
     assert max(m.balancer.loads()) <= 300
     assert not any(m.balancer.capacity_cost(m.balancer.current_owners()))

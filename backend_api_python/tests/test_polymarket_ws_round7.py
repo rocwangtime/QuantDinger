@@ -169,7 +169,7 @@ def test_expiry_unsubscribes_without_discovery_and_preserves_backup(feed_manager
                    'ay' in json.loads(raw)['assets_ids'] for raw in socket.sent if raw != 'PING')
 
 
-def test_byte_overloaded_btc_outcomes_split_and_fit_256k_budget(monkeypatch):
+def test_byte_overloaded_btc_pair_stays_together_and_excess_is_visible(monkeypatch):
     monkeypatch.setenv('POLYMARKET_OBSERVER_WS_SHARDS', '1')
     m = observer.MarketConnections()
     m.markets = [dict(id='btc', market_type='up_down', asset='BTC', interval='5m',
@@ -181,18 +181,10 @@ def test_byte_overloaded_btc_outcomes_split_and_fit_256k_budget(monkeypatch):
     m.balancer.measured = {key}
     owners = m.capacity_owners()
     assignment = m.assignment_for(owners)
-    assert assignment['y'] != assignment['n']
-    assert max(m.balancer.byte_loads(owners)) == 137000
-    assert m.balancer.capacity_cost(owners) == (0, 0, 0)
-    # Subsequent EWMA is measured independently per side, rather than assuming
-    # both sides forever receive the same number of bytes.
-    m.balancer.assignment = assignment
-    m.balancer.sample_at = 0
-    m.balancer.since = {k: 0 for k in owners}
-    m.balancer.receive(book('y'), assignment['y'], 200000)
-    m.balancer.receive(book('n'), assignment['n'], 74000)
-    m.balancer.sample(60)
-    assert m.balancer.byte_rates[m.balancer.groups['y']] > m.balancer.byte_rates[m.balancer.groups['n']]
+    assert assignment['y'] == assignment['n']
+    assert m.count == 1  # More sockets cannot divide this market's load.
+    assert m.balancer.capacity_cost(owners) == (0, 119, 11856)
+    assert m.balancer.groups == dict(y=key, n=key)
 
 
 def test_delivery_latency_is_message_weighted_and_separate_from_silence(feed_manager):
