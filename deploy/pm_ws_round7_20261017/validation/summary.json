@@ -1,0 +1,24 @@
+{
+  "code_commit": "4410b4d8d9b43e00f8a123bef9fb5192f5bfac00",
+  "full_pytest": {
+    "passed": 4563,
+    "skipped": 26,
+    "warnings": 59,
+    "seconds": 247.2,
+    "uncompressed_log_sha256": "6d03edfc7a2da5f5226bc322ccedd0fb06b5df6634103db7a407e852cb1d6ce2",
+    "cwd": "backend_api_python",
+    "command": "pytest -q tests ../mcp_server/tests"
+  },
+  "round7_regressions": {
+    "passed": 20,
+    "seconds": 4.07
+  },
+  "ruff_backend": "passed",
+  "ruff_mcp": {
+    "status": "13 preexisting errors in unchanged MCP files",
+    "new_errors": 0
+  },
+  "diff_check": "passed",
+  "deployment": "not performed",
+  "safety": "public observation and paper only"
+}
