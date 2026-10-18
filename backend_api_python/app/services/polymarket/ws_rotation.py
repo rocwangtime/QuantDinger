@@ -71,10 +71,54 @@ class ShadowBooks:
 
     @shadow_locked
     def receive(self, event, received):
-        from .observer import ws_apply_event
-        event = self.merge.filter(event, 'shadow', self.assets)
-        changed = ws_apply_event(event, self.books)
-        self.recorder.receive(event, changed, {}, {}, received, self.assets)
+        from .ws_payloads import materialized_book, price_rows
+        # No second fan-in, fingerprint pass, event reconstruction or Recorder
+        # metrics on a private shadow. Retain per-level timestamp protection.
+        for kind, payload in recording.events(event):
+            at = recording.exchange_time(payload.get('timestamp'))
+            changed = set()
+            if kind == 'book':
+                asset = str(payload.get('asset_id') or payload.get('assetId') or '')
+                floor = self.merge.latest.get(asset)
+                if asset not in self.assets or at is not None and floor is not None and at < floor:
+                    continue
+                levels, _ = materialized_book(payload)
+                self.books[asset] = {side: dict(rows) for side, rows in levels.items()}
+                changed.add(asset)
+                if at is not None:
+                    self.merge.latest[asset] = self.merge.snapshots[asset] = at
+                    for key in list(self.merge.levels):
+                        if key[0] == asset:
+                            del self.merge.levels[key]
+            elif kind == 'price_change':
+                for row, asset, key, _ in price_rows(payload, at):
+                    if asset not in self.assets:
+                        continue
+                    floor = self.merge.snapshots.get(asset)
+                    level_at = self.merge.levels.get(key)
+                    if level_at is not None and (floor is None or level_at > floor):
+                        floor = level_at
+                    if at is not None and floor is not None and at < floor:
+                        continue
+                    if at is not None:
+                        self.merge.levels[key] = at
+                        self.merge.levels.move_to_end(key)
+                        self.merge.latest[asset] = max(at, self.merge.latest.get(asset, at))
+                    if asset not in self.books:
+                        continue
+                    side = 'bids' if str(row.get('side', '')).upper() == 'BUY' else 'asks'
+                    price, size = str(row.get('price')), str(row.get('size', 0))
+                    if float(size) <= 0:
+                        self.books[asset][side].pop(price, None)
+                    else:
+                        self.books[asset][side][price] = size
+                    changed.add(asset)
+                while len(self.merge.levels) > 65536:
+                    self.merge.levels.popitem(last=False)
+            for asset in changed:
+                previous = self.recorder.metadata.get(asset, (None,))[0]
+                if previous is None or at is None or at >= previous:
+                    self.recorder.metadata[asset] = (at, received, 'ws')
 
     @shadow_locked
     def prune(self, assets):

@@ -4,7 +4,7 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 
-from app.services.polymarket import observer
+from app.services.polymarket import observer, ws_payloads
 
 
 def market(identity='a', **extra):
@@ -574,8 +574,8 @@ def test_reader_never_parses_or_waits_on_balancer_and_pipeline(monkeypatch):
     monkeypatch.setattr(observer, '_PIPELINE', p)
     m = observer.MarketConnections()
     parsed = []
-    loads = observer.json.loads
-    monkeypatch.setattr(observer.json, 'loads', lambda raw, **kw: parsed.append((threading.current_thread().name, raw)) or loads(raw, **kw))
+    loads = ws_payloads.loads
+    monkeypatch.setattr(ws_payloads, 'loads', lambda raw, **kw: parsed.append((threading.current_thread().name, raw)) or loads(raw, **kw))
     m.sync([market()])
     with p.lock, m.balancer.lock:  # Both downstream locks can be held while receiving.
         for _ in range(100):

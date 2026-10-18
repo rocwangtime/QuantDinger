@@ -9,10 +9,10 @@ import time
 import threading
 from functools import wraps
 from datetime import datetime, timezone
-from collections import OrderedDict
+from collections import OrderedDict, deque
 
 from . import recording
-from .ws_payloads import fingerprint, event_key
+from .ws_payloads import fingerprint, event_key, price_rows, PublicEvent
 from .ws_balance import setting
 
 
@@ -139,19 +139,33 @@ class FeedMerge:
         at = recording.exchange_time(payload.get('timestamp'))
         if kind == 'price_change':
             field = 'price_changes' if 'price_changes' in payload else 'priceChanges'
+            hint = payload.fanin if isinstance(payload, PublicEvent) else None
+            now = time.monotonic()
+            if (self.deduplicate and hint and hint[0] == id(self) and source != hint[1]
+                    and all(source not in counts and len(counts) < 4 and self.seen.get(key, (0, None))[1] is counts
+                            and self.seen[key][0] >= now - 60 for key, counts in hint[2])):
+                # First exact copy on another source. Advance the SAME row
+                # counters, preserving split-frame and repeated-source semantics.
+                for key, counts in hint[2]:
+                    counts[source] = counts.get(source, 0) + 1
+                    self.seen[key] = (now, counts)
+                    self.seen.move_to_end(key)
+                self.duplicates += len(hint[2])
+                return {}
             rows = []
-            for row in payload.get(field, []):
-                asset = str(row.get('asset_id') or row.get('assetId') or '')
-                key = (asset, row.get('side'), row.get('price'))
-                floor = max((t for t in (self.snapshots.get(asset), self.levels.get(key)) if t is not None),
-                            default=None)
+            counters = []
+            for row, asset, key, duplicate_key in price_rows(payload, at):
+                floor = self.snapshots.get(asset)
+                level_at = self.levels.get(key)
+                if level_at is not None and (floor is None or level_at > floor):
+                    floor = level_at
                 if (backup and at is None) or (at is not None and floor is not None and at < floor):
                     self.stale += 1
                     continue
                 if self.deduplicate:
-                    duplicate_key = event_key(kind, at, row)
                     if not self.unique(row, source, duplicate_key):
                         continue
+                    counters.append((duplicate_key, self.seen[duplicate_key][1]))
                 if at is not None:
                     self.levels[key] = at
                     self.levels.move_to_end(key)
@@ -162,6 +176,8 @@ class FeedMerge:
                 self.evictions += 1
             if not rows:
                 return {}
+            if isinstance(payload, PublicEvent) and self.deduplicate and len(rows) == len(payload.get(field, [])):
+                payload.fanin = (id(self), source, counters)
             filtered = {**payload, field: rows}
             return {**event, 'payload': filtered} if 'payload' in event else filtered
         if kind == 'book':
@@ -204,11 +220,13 @@ class FeedContinuity:
         self.pending = {}
         self.records = OrderedDict()
         self.published = {}
+        self.gap_waiting = {}
+        self.merged_gaps = deque(maxlen=4096)
         self.serial = self.checks = self.uncertain = self.recovered = 0
 
     @serialized
     def prune(self, assets):
-        for cache in (self.history, self.latest, self.pending, self.published):
+        for cache in (self.history, self.latest, self.pending, self.published, self.gap_waiting):
             for asset in cache.keys() - assets:
                 del cache[asset]
 
@@ -216,9 +234,16 @@ class FeedContinuity:
     def log(self, row):
         import logging
         self.serial += 1
+        row.setdefault('merged_gap_ms', self.published.get(row.get('asset'), {}).get('receipt_gap_ms'))
+        row['event_id'] = self.serial
+        row['merged_gap_final'] = False
+        self.gap_waiting.setdefault(row.get('asset'), {})[self.serial] = row
+        row['physical_evidence_alert_only'] = True
         self.records[self.serial] = row
         while len(self.records) > 128:
-            self.records.popitem(last=False)
+            serial, removed = self.records.popitem(last=False)
+            waiting = self.gap_waiting.get(removed.get('asset'), {})
+            waiting.pop(serial, None)
         logging.getLogger(__name__).info('Polymarket WS continuity %s', json.dumps(row))
 
     @serialized
@@ -234,6 +259,12 @@ class FeedContinuity:
             gap = max(0, (row[1] - previous['received']).total_seconds() * 1000) if previous else 0
             self.published[asset] = dict(received=row[1], exchange_at=row[0], receipt_gap_ms=gap,
                 max_receipt_gap_ms=max(gap, previous['max_receipt_gap_ms'] if previous else 0))
+            if previous:
+                self.merged_gaps.append(gap)
+            for event in self.gap_waiting.pop(asset, {}).values():
+                event.update(merged_gap_ms=gap if previous else None, merged_gap_final=bool(previous))
+                import logging
+                logging.getLogger(__name__).info('Polymarket WS business gap %s', json.dumps(event))
 
     @serialized
     def receive(self, event, source, received):
@@ -245,8 +276,10 @@ class FeedContinuity:
                 continue
             rows = (payload.get('price_changes', payload.get('priceChanges', []))
                     if kind == 'price_change' else [payload])
-            for row in rows:
-                asset = str(row.get('asset_id') or row.get('assetId') or '')
+            # Only the final row per asset/frame is needed for overlap evidence.
+            # Book merging still processes every row; absent overlap is uncertain.
+            final = {str(row.get('asset_id') or row.get('assetId') or ''): row for row in rows}
+            for asset, row in final.items():
                 if not asset:
                     continue
                 key = event_key(kind, at, row).hex()
@@ -321,7 +354,11 @@ class FeedContinuity:
 
     @serialized
     def metrics(self):
+        gaps = sorted(self.merged_gaps)
         return dict(checks=self.checks, unverified=self.uncertain, snapshot_restored=self.recovered,
+                    merged_gap_ms=dict(samples=len(gaps), p50=gaps[len(gaps)//2] if gaps else None,
+                        p95=gaps[min(len(gaps)-1, int(len(gaps)*.95))] if gaps else None,
+                        max=max(gaps) if gaps else None),
                     pending_assets=sorted(self.pending), events=list(self.records.values()),
                     history_assets=len(self.history), history_entries=sum(map(len, self.history.values())),
                     published={a: dict(receipt_gap_ms=r['receipt_gap_ms'], max_receipt_gap_ms=r['max_receipt_gap_ms'],

@@ -5,12 +5,28 @@ import threading
 import time
 from collections import OrderedDict
 
+try:
+    import orjson
+except ImportError:
+    orjson = None
+
+
+def loads(raw):
+    return orjson.loads(raw) if orjson is not None else json.loads(raw)
+
+
+def canonical(value):
+    return (orjson.dumps(value, option=orjson.OPT_SORT_KEYS) if orjson is not None
+            else json.dumps(value, sort_keys=True, separators=(',', ':')).encode())
+
 
 class PublicEvent(dict):
     """Workers only read these dictionaries; fingerprints are not wire fields."""
     digest = None
     identity = None
     book = None
+    changes = None
+    fanin = None
 
 
 def materialized_book(payload):
@@ -20,11 +36,16 @@ def materialized_book(payload):
         return cached
     levels = {side: {str(x['price']): str(x['size']) for x in payload.get(side, [])}
               for side in ('bids', 'asks')}
-    charge = 1024 + sum(256 + 4 * (len(p) + len(s)) for side in levels.values() for p, s in side.items())
+    charge = book_bytes(levels)
     result = (levels, charge)
     if isinstance(payload, PublicEvent):
         payload.book = result
     return result
+
+
+def book_bytes(levels):
+    return 1024 + sum(256 * len(side) + 4 * (sum(map(len, side)) + sum(map(len, side.values())))
+                      for side in levels.values())
 
 
 def event_key(kind, at, row):
@@ -32,7 +53,8 @@ def event_key(kind, at, row):
     cached = row.identity if isinstance(row, PublicEvent) else None
     if cached is not None and cached[:2] == (kind, at):
         return cached[2]
-    key = hashlib.blake2b(kind.encode() + str(at).encode() + fingerprint(row), digest_size=16).digest()
+    stamp = at.isoformat() if at is not None else ''
+    key = hashlib.blake2b(kind.encode() + stamp.encode() + fingerprint(row), digest_size=16).digest()
     if isinstance(row, PublicEvent):
         row.identity = (kind, at, key)
     return key
@@ -45,8 +67,7 @@ def prepare(event):
     for kind, payload in events(event):
         at = exchange_time(payload.get('timestamp'))
         if kind == 'price_change':
-            for row in payload.get('price_changes', payload.get('priceChanges', [])):
-                event_key(kind, at, row)
+            price_rows(payload, at)
         else:
             fingerprint(event if isinstance(event, dict) else payload)
             if kind == 'book':
@@ -56,6 +77,22 @@ def prepare(event):
                     raise ValueError('invalid public book level') from exc
                 event_key(kind, at, payload)
     return event
+
+
+def price_rows(payload, at):
+    if isinstance(payload, PublicEvent) and payload.changes is not None:
+        return payload.changes
+    result = []
+    prefix = b'price_change' + (at.isoformat().encode() if at is not None else b'')
+    for row in payload.get('price_changes', payload.get('priceChanges', [])):
+        asset = str(row.get('asset_id') or row.get('assetId') or '')
+        key = hashlib.blake2b(prefix + fingerprint(row), digest_size=16).digest()
+        if isinstance(row, PublicEvent):
+            row.identity = ('price_change', at, key)
+        result.append((row, asset, (asset, row.get('side'), row.get('price')), key))
+    if isinstance(payload, PublicEvent):
+        payload.changes = result
+    return result
 
 
 def fingerprint(event):
@@ -70,7 +107,7 @@ def fingerprint(event):
             and 'bids' in payload and 'asks' in payload):
         identity = ('book', payload.get('asset_id') or payload.get('assetId'),
                     payload.get('timestamp'), book_hash)
-    digest = hashlib.blake2b(json.dumps(identity, sort_keys=True, separators=(',', ':')).encode(),
+    digest = hashlib.blake2b(canonical(identity),
                              digest_size=16).digest()
     if isinstance(event, PublicEvent):
         event.digest = digest
@@ -96,7 +133,7 @@ def public_event(event):
 
 
 class ParsedFrames:
-    def __init__(self, maximum=512, byte_limit=1048576, ttl=2):
+    def __init__(self, maximum=512, byte_limit=4 * 1048576, ttl=2):
         self.lock = threading.Lock()
         self.items = OrderedDict()
         self.maximum, self.byte_limit, self.ttl = maximum, byte_limit, ttl
@@ -119,7 +156,7 @@ class ParsedFrames:
         if isinstance(raw, bytearray):
             raw = bytes(raw)
         # Charge UTF-8's worst case for text, independent of frame contents.
-        size = len(raw) * (4 if isinstance(raw, str) else 1)
+        size = 256 + len(raw) * 12  # Raw + decoded Python tree, conservative charge.
         with self.lock:
             now = time.monotonic()
             self._prune(now)
@@ -128,10 +165,12 @@ class ParsedFrames:
                 self.hits += 1
                 return cached[1]
         # A large decode must not serialize every other connection's parser.
-        event = prepare(public_event(json.loads(raw)))
+        event = prepare(public_event(loads(raw)))
         from .recording import events
         size += sum(payload.book[1] for kind, payload in events(event)
                     if kind == 'book' and isinstance(payload, PublicEvent) and payload.book is not None)
+        size += sum(len(payload.changes) * 2048 for kind, payload in events(event)
+                    if kind == 'price_change' and isinstance(payload, PublicEvent) and payload.changes is not None)
         with self.lock:
             cached = self.items.get(raw)
             if cached:

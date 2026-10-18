@@ -51,13 +51,13 @@ def test_large_decode_does_not_hold_shared_parser_lock(monkeypatch):
     cache = ws_payloads.ParsedFrames()
     first, second = json.dumps(book('a')), json.dumps(book('b'))
     entered, release = threading.Event(), threading.Event()
-    original = json.loads
+    original = ws_payloads.loads
     def blocked(raw):
         if raw == first:
             entered.set()
             assert release.wait(2)
         return original(raw)
-    monkeypatch.setattr(json, 'loads', blocked)
+    monkeypatch.setattr(ws_payloads, 'loads', blocked)
     worker = threading.Thread(target=cache.parse, args=(first,))
     worker.start()
     try:

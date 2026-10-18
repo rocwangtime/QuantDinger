@@ -58,10 +58,12 @@ class TransportDiagnostics:
         self.last_read_at = None
         self.pings = self.pongs = 0
         self.ping_at = self.pong_at = None
+        self.pending_ping_at = None
         self.pong_rtt_seconds = None
         self.last = {}
         self.headers = {}
         self.read_buckets = deque(maxlen=61)
+        self.burst_buckets = deque(maxlen=11)
 
     def capture_headers(self, app):
         with self.lock:
@@ -78,6 +80,34 @@ class TransportDiagnostics:
                 self.read_buckets[-1][1] += size
             else:
                 self.read_buckets.append([second, size])
+            bucket = int(now * 10)
+            if self.burst_buckets and self.burst_buckets[-1][0] == bucket:
+                self.burst_buckets[-1][1] += size
+            else:
+                self.burst_buckets.append([bucket, size])
+
+    def ping(self, now=None):
+        now = time.monotonic() if now is None else now
+        with self.lock:
+            self.ping_at = now
+            self.pings += 1
+            if self.pending_ping_at is None:
+                self.pending_ping_at = now
+
+    def pong_timed_out(self, now, last_byte_at=None, timeout=22):
+        with self.lock:
+            if self.pending_ping_at is None:
+                return False
+            last = max(at for at in (self.pending_ping_at, self.last_read_at, last_byte_at) if at is not None)
+            return now - self.pending_ping_at >= timeout and now - last >= timeout
+
+    def burst(self, now=None):
+        now = time.monotonic() if now is None else now
+        with self.lock:
+            buckets = [(tick, size) for tick, size in self.burst_buckets if tick >= int(now * 10) - 10]
+            return dict(bytes_previous_1s=sum(size for _, size in buckets), resolution_ms=100,
+                        window_error_ms=100, peak_100ms_bytes=max((size for _, size in buckets), default=0),
+                        buckets_100ms=buckets)
 
     def sample(self, app, now=None):
         with self.lock:
@@ -106,9 +136,11 @@ class TransportDiagnostics:
 
     def pong(self):
         now = time.monotonic()
-        self.pongs += 1
-        self.pong_at = now
-        self.pong_rtt_seconds = now - self.ping_at if self.ping_at is not None else None
+        with self.lock:
+            self.pongs += 1
+            self.pong_at = now
+            self.pending_ping_at = None
+            self.pong_rtt_seconds = now - self.ping_at if self.ping_at is not None else None
 
 
 def receive_buffer_options():

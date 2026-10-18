@@ -335,6 +335,8 @@ class Recorder:
                         lags.append((received - at).total_seconds() * 1000)
                     if name == 'hot':
                         hot_details.append(dict(token=token, group=groups[token],
+                            observed_at=now.isoformat(), exchange_at=at.isoformat() if at is not None else None,
+                            received_at=received.isoformat() if received is not None else None,
                             group_msg_per_s=group_rates[groups[token]],
                             book_age_ms=(now - at).total_seconds() * 1000 if at is not None else None,
                             receipt_age_ms=(now - received).total_seconds() * 1000 if received is not None else None,

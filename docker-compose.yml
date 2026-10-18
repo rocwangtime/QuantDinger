@@ -412,6 +412,7 @@ services:
     environment:
       <<: *worker-environment
       QD_PROCESS_ROLE: polymarket-observer
+      POLYMARKET_OBSERVER_MALLOC_ARENA_MAX: ${POLYMARKET_OBSERVER_MALLOC_ARENA_MAX:-}
     networks:
       - quantdinger-network
     healthcheck:

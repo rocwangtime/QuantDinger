@@ -3,9 +3,23 @@
 from __future__ import annotations
 
 import os
+import sys
+
+
+def configure_allocator():
+    """Opt-in glibc experiment must take effect before the interpreter starts."""
+    value = os.getenv('POLYMARKET_OBSERVER_MALLOC_ARENA_MAX', '').strip()
+    if not value:
+        return
+    if not value.isascii() or not value.isdigit() or not 1 <= int(value) <= 128:
+        raise ValueError('POLYMARKET_OBSERVER_MALLOC_ARENA_MAX must be an integer from 1 to 128')
+    if os.getenv('MALLOC_ARENA_MAX') != value:
+        environment = dict(os.environ, MALLOC_ARENA_MAX=value)
+        os.execve(sys.executable, [sys.executable, '-m', 'app.commands.polymarket_observer'], environment)
 
 
 def main() -> None:
+    configure_allocator()
     os.environ["QD_PROCESS_ROLE"] = "polymarket-observer"
 
     from app import create_app
