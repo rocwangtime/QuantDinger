@@ -27,11 +27,12 @@ class HotBackupCoverage:
         self.rows = {key: dict(active=False, ready=False, observed_seconds=0., ready_seconds=0.,
                               time_without_backup_seconds=0., without_since=None,
                               zero_ready_backup_seconds=0., zero_ready=False, zero_active=False,
-                              zero_ready_by_phase_seconds=dict(before=0., after=0., steady=0.)) for key in groups}
+                              zero_ready_by_phase_seconds=dict(before=0., after=0., steady=0.),
+                              unready_reasons=set(), unready_reason_seconds={}, unready_reason_entries={}) for key in groups}
         self.required, self.ready_shards = {}, set()
         self.at = time.monotonic()
 
-    def update(self, required, ready_shards, now, backup_counts=None, wall_now=None, zero_required=None):
+    def update(self, required, ready_shards, now, backup_counts=None, wall_now=None, zero_required=None, blockers=None):
         with self.lock:
             now = max(now, self.at)
             elapsed = now - self.at
@@ -54,6 +55,15 @@ class HotBackupCoverage:
                         stop = min(wall_now, start + edge - phase)
                         row['zero_ready_by_phase_seconds'][label] += stop - start
                         start = stop
+                for reason in row['unready_reasons']:
+                    seconds = row['unready_reason_seconds']
+                    seconds[reason] = seconds.get(reason, 0.) + elapsed
+                if blockers is not None:
+                    reasons = set(blockers.get(key, ()))
+                    for reason in reasons - row['unready_reasons']:
+                        counts = row['unready_reason_entries']
+                        counts[reason] = counts.get(reason, 0) + 1
+                    row['unready_reasons'] = reasons
                 active = bool(required.get(key))
                 ready = active and required[key] <= ready_shards
                 count = (min((backup_counts.get(i, 0) for i in zero_required.get(key, set())), default=0)
@@ -68,6 +78,10 @@ class HotBackupCoverage:
             self.ready_shards = set(ready_shards)
             self.at = now
             return {key: dict(active=row['active'], ready=row['ready'],
+                        unready_reasons=sorted(row['unready_reasons']),
+                        unready_reason_seconds=dict(row['unready_reason_seconds']),
+                        unready_reason_entries=dict(row['unready_reason_entries']),
+                        unready_reason_scope='group_without_ready_backup_overlapping_reasons',
                         required_shards=sorted(required.get(key, set())),
                         ready_shards=sorted(required.get(key, set()) & ready_shards),
                         observed_seconds=row['observed_seconds'], ready_seconds=row['ready_seconds'],

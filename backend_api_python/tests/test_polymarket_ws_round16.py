@@ -332,6 +332,8 @@ def test_pressure_refresh_starts_before_close_and_retains_live_watermarks(feed_m
     with m.lifecycle_lock:
         before = dict(p.books)
         state['inbox'].processing_received_at = datetime.now(timezone.utc)-timedelta(seconds=.5)
+        for row in m.continuity.published.values():
+            row['received'] = datetime.now(timezone.utc)-timedelta(seconds=.8)
         m.tick()
         state['inbox'].processing_received_at = None
     pressure = [(a, k) for a, k in calls if k.get('pressure')]
@@ -345,6 +347,7 @@ def test_warm_schedule_is_off_reader_and_never_publishes(feed_manager, monkeypat
     m, _, _ = feed_manager;make_hot(m);state = m.states[0]
     calls = []
     monkeypatch.setattr(m.snapshot_recovery, 'request', lambda *args, **kwargs: calls.append((args, kwargs)) or True)
+    monkeypatch.setenv('POLYMARKET_OBSERVER_WS_REST_WARM_SECONDS', '60')
     state['rest_warm_at'] = 0;m.tick()
     assert len(calls) == 1 and calls[0][1] == dict(warm=True) and calls[0][0][2] is None
     assert state['rest_warm_at'] > time.monotonic()

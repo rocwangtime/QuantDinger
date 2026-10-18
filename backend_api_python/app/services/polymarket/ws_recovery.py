@@ -1,7 +1,7 @@
 """Prepared, pooled unauthenticated /books repairs, off the reader/supervisor."""
 import threading
 import time
-from collections import deque
+from collections import deque, Counter
 from datetime import datetime, timezone
 
 import requests
@@ -19,6 +19,22 @@ class SnapshotRecovery:
         self.closed = False
         self.requests = self.failures = self.completed = self.throttled = self.warmups = self.pressure_requests = 0
         self.latencies = deque(maxlen=128)
+        self.counts = {kind: Counter() for kind in ('recovery', 'warmup', 'pressure')}
+        # Rolling hour at one-second resolution; fixed 3600 bucket bound.
+        self.hour = {}
+        self.background_starts = deque()
+        self.background_active = 0
+        self.last_http_at = -float('inf')
+
+    def count(self, kind, field, now, amount=1):
+        self.counts[kind][field] += amount
+        bucket = self.hour.setdefault(int(now), Counter())
+        bucket[kind, field] += amount
+        self.expire_hour(now)
+
+    def expire_hour(self, now):
+        while self.hour and next(iter(self.hour)) <= int(now) - 3600:
+            del self.hour[next(iter(self.hour))]
 
     def prepare(self, state, assets, parallel=False):
         """Prepare current token bodies before a fault; never cache old quotes."""
@@ -37,29 +53,57 @@ class SnapshotRecovery:
         if state.get('_rest_assets') != assets:
             self.prepare(state, assets, state.get('_rest_parallel', False))
         prepared = state['_rest_prepared']
-        now = time.monotonic()
         with self.lock:
+            now = time.monotonic()
             while self.starts and self.starts[0] <= now - 10:
                 self.starts.popleft()
-            identity = ('warm', id(state)) if warm else id(state)
-            retry_key = '_rest_warm_retry_at' if warm else 'rest_retry_at'
+            kind = 'warmup' if warm else 'pressure' if pressure else 'recovery'
+            background = warm or pressure
+            identity = (kind, id(state))
+            retry_key = {'warmup': '_rest_warm_retry_at', 'pressure': '_rest_pressure_retry_at',
+                         'recovery': 'rest_retry_at'}[kind]
             if self.closed or identity in self.active or now < state.get(retry_key, 0):
                 return False
-            # Warm only an idle pool; leave slots available for actual outages.
-            if warm and self.active:
+            # A background job never owns the recovery identity or cooldown.
+            # Keep two HTTP slots and at least eight sliding-window credits
+            # available for actual outages. No background task queue.
+            self.count(kind, 'attempts', now)
+            while self.background_starts and self.background_starts[0] <= now - 3600:
+                self.background_starts.popleft()
+            if background and (self.background_active or len(self.slots) < 3 or self.active
+                               or warm and now - self.last_http_at < 60):
+                state[retry_key] = now + 1
+                self.count(kind, 'deferred', now)
                 return False
-            parallel = state.get('_rest_parallel') and len(assets) == 2 and len(self.slots) >= 2
+            parallel = (not pressure and state.get('_rest_parallel')
+                        and len(assets) == 2 and len(self.slots) >= 2)
             groups = [(a,) for a in assets] if parallel else [assets]
             budget = 24 if warm else 32 if pressure else 40
-            if len(self.slots) < len(groups) or len(self.starts) + len(groups) > budget:
+            if len(self.slots) < len(groups) + (2 if background else 0):
+                state[retry_key] = now + .05
                 self.throttled += 1
+                self.count(kind, 'throttled', now)
+                self.count(kind, 'deferred', now)
+                return False
+            if (len(self.starts) + len(groups) > budget
+                    or background and len(self.background_starts) + len(groups) > 120):
+                self.throttled += 1
+                self.count(kind, 'throttled', now)
+                state[retry_key] = max(now + .5, self.starts[0] + 10 if self.starts else now)
+                if background and len(self.background_starts) + len(groups) > 120:
+                    state[retry_key] = max(state[retry_key], self.background_starts[0] + 3600)
                 return False
             self.active.add(identity)
             remaining = [len(groups)]
-            state[retry_key] = now + .5
+            state[retry_key] = now + (60 if warm else 30 if pressure else .5)
             jobs = [(group, self.slots.pop()) for group in groups]
             self.starts.extend([now] * len(jobs))
+            self.last_http_at = now
+            if background:
+                self.background_active += 1
+                self.background_starts.extend([now] * len(jobs))
             self.requests += len(jobs)
+            self.count(kind, 'requests', now, len(jobs))
             self.warmups += int(warm)
             self.pressure_requests += int(pressure)
 
@@ -102,15 +146,19 @@ class SnapshotRecovery:
                     publish(events, started)
                 with self.lock:
                     self.completed += 1
+                    self.count(kind, "completed", time.monotonic())
             except (requests.RequestException, ValueError, TypeError, KeyError, AttributeError):
                 with self.lock:
                     self.failures += 1
+                    self.count(kind, "failures", time.monotonic())
             finally:
                 with self.lock:
                     self.latencies.append((time.monotonic() - began) * 1000)
                     remaining[0] -= 1
                     if remaining[0] == 0:
                         self.active.discard(identity)
+                        if background:
+                            self.background_active -= 1
                     if self.closed:
                         if slot['session']:
                             slot['session'].close()
@@ -119,6 +167,8 @@ class SnapshotRecovery:
         with self.lock:
             if self.closed:
                 self.active.discard(identity)
+                if background:
+                    self.background_active -= 1
                 for _, slot in jobs:
                     if slot['session']:
                         slot['session'].close()
@@ -138,8 +188,15 @@ class SnapshotRecovery:
 
     def metrics(self):
         with self.lock:
+            self.expire_hour(time.monotonic())
+            hourly = sum(self.hour.values(), Counter())
+            fields = ('attempts', 'requests', 'completed', 'failures', 'throttled', 'deferred')
+            categories = {kind: dict(total={f: counts[f] for f in fields},
+                rolling_hour={f: hourly[kind, f] for f in fields}) for kind, counts in self.counts.items()}
             samples = sorted(self.latencies)
-            return dict(requests=self.requests, completed=self.completed, failures=self.failures,
+            return dict(categories=categories, rolling_hour_seconds=3600, hour_buckets=len(self.hour),
+                        background_limit_per_hour=120, reserved_recovery_slots=2,
+                        requests=self.requests, completed=self.completed, failures=self.failures,
                         inflight=len(self.active), inflight_http=4-len(self.slots) if not self.closed else 0,
                         throttled=self.throttled, limit_per_10s=40, warmups=self.warmups, pressure_requests=self.pressure_requests,
                         warm_limit_per_10s=24, pressure_limit_per_10s=32,

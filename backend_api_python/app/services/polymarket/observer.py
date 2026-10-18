@@ -2201,8 +2201,22 @@ class MarketConnections:
         # Catalogue absence during rollover must not hide zero-spare time.
         # The legacy coverage denominator still excludes unsubscribed periods.
         zero_required = {key: required.get(key, {None}) for key in self.observed_hot_groups}
+        blockers = {}
+        for key, indices in zero_required.items():
+            reasons = set()
+            for index in indices - ready:
+                candidates = [c for i, c in self.backup_items() if i == index]
+                if not candidates:
+                    reasons.add('no_backup')
+                for candidate in candidates:
+                    reasons.update(self.readiness_blockers(candidate))
+                    if not self.backup_ready(candidate) and self.subscriptions.pressured(candidate):
+                        reasons.add('ingress_pressure')
+                if candidates and not reasons:
+                    reasons.add('primary_unhealthy')
+            blockers[key] = reasons
         rows = self.hot_backup_coverage.update(required, ready, now, backup_counts=counts,
-                                              zero_required=zero_required)
+                                              zero_required=zero_required, blockers=blockers)
         for key, row in rows.items():
             row['ready_backup_count'] = min((sum(i == index and self.backup_ready(c)
                 for i, c in self.backup_items()) for index in required.get(key, set())), default=0)
@@ -2241,6 +2255,17 @@ class MarketConnections:
                     return
                 event = recording.owned_events(event, {a for a in state['assets']
                     if received_at >= getattr(inbox, 'activated', {}).get(a, received_at)})
+                repaired = set()
+                for kind, payload in recording.events(event):
+                    if kind == 'book':
+                        asset = str(payload.get('asset_id') or payload.get('assetId') or '')
+                        metadata = shadow.recorder.metadata.get(asset)
+                        if (asset in shadow.books and metadata and metadata[1] == received_at
+                                and shadow.merge.snapshots.get(asset) == recording.exchange_time(payload.get('timestamp'))):
+                            repaired.add(asset)
+                if not inbox.delivery_gap:
+                    state.setdefault('recover_assets', set()).difference_update(repaired)
+                    state.setdefault('_rest_missing_assets', set()).difference_update(repaired)
                 required = set(self.states[index]['assets'])
                 live_event = recording.owned_events(event, required)
                 self.continuity.receive(live_event, state['source'], received_at)
@@ -2562,6 +2587,7 @@ class MarketConnections:
                             inbox.delivery_gap = False
                             inbox.resyncs += 1
                             state.setdefault('recover_assets', set()).update(state['assets'])
+                            state.setdefault('_rest_missing_assets', set()).update(state['assets'])
                         continue
                     with self.lifecycle_lock:
                         if self.migration and index in self.migration['shadows']:
@@ -2848,6 +2874,44 @@ class MarketConnections:
         with self.lifecycle_lock:
             self._tick()
 
+    def background_snapshot_tick(self, now):
+        # Outage dispatch always precedes optional background work.
+        if any('outage_at' in s for s in self.states.values()):
+            return
+        for index, state in self.states.items():
+            inbox = state.get('inbox')
+            if not state.get('connected') or not inbox:
+                continue
+            pending = inbox.pending_wait_seconds()
+            if pending < .35:
+                state.pop('rest_pressure_episode', None)
+            btc = any(self.balancer.groups.get(a, '').startswith('up_down:BTC:') for a in state['assets'])
+            # Backlog alone is not a business outage: either physical feed may
+            # still be advancing the merged books. Measure actual publication.
+            receipts = [self.continuity.published.get(a, {}).get('received') for a in state['assets']]
+            stale = bool(receipts) and any(at is None or
+                (datetime.now(timezone.utc)-at).total_seconds() >= .7 for at in receipts)
+            if (btc and pending >= .35 and stale and not state.get('rest_pressure_episode')
+                    and now >= state.get('rest_pressure_at', 0)
+                    and not any(i == index and self.backup_ready(c) for i, c in self.backup_items())):
+                state['rest_pressure_at'] = now + 1  # Includes rejected attempts.
+                self.snapshot_recovery.prepare(state, state['assets'], parallel=True)
+                if self.request_snapshot(index, state, set(state['assets']), pressure=True):
+                    state['rest_pressure_episode'] = True
+                    state['rest_pressure_at'] = now + 30
+        # Default off: round15 did not require polling to keep its HTTP pool
+        # warm. Optional warmup only runs after pool idleness.
+        interval = ws_setting('REST_WARM_SECONDS', 0, 0)
+        if interval <= 0:
+            return
+        for index, state in self.states.items():
+            if (self.hot_shard(index) and state.get('connected') and
+                    not self.subscriptions.pressured(state) and now >= state.get('rest_warm_at', 0)):
+                state['rest_warm_at'] = now + max(60, interval)
+                self.snapshot_recovery.prepare(state, state['assets'], parallel=True)
+                if self.snapshot_recovery.request(state, state['assets'], None, warm=True):
+                    break
+
     def _tick(self):
         if self.closed or _STOP.is_set():
             return
@@ -2912,19 +2976,33 @@ class MarketConnections:
                     missing = (set(state['assets']) - state['shadow'].books.keys() - set(state.get('subscribe_pending', [])) if state.get('redundant')
                                else set(state['assets']) & self.continuity.pending_assets())
                     state.setdefault('recover_assets', set()).update(missing)
+                    if state.get('redundant'):
+                        state.setdefault('_rest_missing_assets', set()).update(missing)
                     state['snapshot_retry_at'] = now + (.5 if state.get('redundant') else 10)
                 recover = state.pop('recover_assets', set()) & set(state['assets'])
                 if recover and state['connected'] and not state.get('subscribe_initial'):
                     if state.get('redundant'):
                         # Repair full snapshots without tearing down the live stream.
-                        state['ready'] = False
-                        for asset in recover:
-                            state['shadow'].books.pop(asset, None)
-                            state['shadow'].recorder.metadata.pop(asset, None)
-                        self.update_hot_coverage(now)
-                        self.request_snapshot(index, state, recover)
+                        # Recheck after dequeueing the repair intent: WS may
+                        # already have delivered the missing full snapshot.
+                        # Never erase a usable ladder to start an HTTP repair.
+                        automatic = state.pop('_rest_missing_assets', set()) & recover
+                        if not state['inbox'].delivery_gap:
+                            recover -= automatic & state['shadow'].books.keys()
+                        if recover:
+                            # Explicit gap/continuity repairs remain mandatory.
+                            # Only obsolete automatic missing-book work cancels.
+                            state['ready'] = False
+                            for asset in recover:
+                                state['shadow'].books.pop(asset, None)
+                                state['shadow'].recorder.metadata.pop(asset, None)
+                            self.update_hot_coverage(now)
+                            if not self.request_snapshot(index, state, recover):
+                                state.setdefault('recover_assets', set()).update(recover)
+                                state.setdefault('_rest_missing_assets', set()).update(automatic & recover)
                     elif self.hot_shard(index):
-                        self.request_snapshot(index, state, recover)
+                        if not self.request_snapshot(index, state, recover):
+                            state.setdefault('recover_assets', set()).update(recover)
                     else:
                         state['socket'].send(json.dumps(dict(operation='unsubscribe', assets_ids=sorted(recover))))
                         self.subscriptions.enqueue(state, sorted(recover))
@@ -2945,23 +3023,7 @@ class MarketConnections:
                     merge.expire()
             self.continuity.expire(now)
         self.update_double_kicks()
-        for index, state in self.states.items():
-            inbox = state.get('inbox')
-            btc = any(self.balancer.groups.get(a, '').startswith('up_down:BTC:') for a in state['assets'])
-            if (btc and state.get('connected') and inbox and inbox.pending_wait_seconds() >= .35
-                    and now >= state.get('rest_pressure_at', 0)
-                    and not any(i == index and self.backup_ready(c) for i, c in self.backup_items())):
-                # Refresh business watermarks before a burst turns into a close;
-                # never replay a pre-fault cached quote as a recovery snapshot.
-                self.snapshot_recovery.prepare(state, state['assets'], parallel=True)
-                if self.request_snapshot(index, state, set(state['assets']), pressure=True):
-                    state['rest_pressure_at'] = now + 1
-        for index, state in self.states.items():
-            if self.hot_shard(index) and state.get('connected') and now >= state.get('rest_warm_at', 0):
-                self.snapshot_recovery.prepare(state, state['assets'], parallel=True)
-                if self.snapshot_recovery.request(state, state['assets'], None, warm=True):
-                    state['rest_warm_at'] = now + 15
-                    break
+        self.background_snapshot_tick(now)
         self.rotation_tick(now)
         for index, state in self.states.items():
             if 'outage_at' in state:
