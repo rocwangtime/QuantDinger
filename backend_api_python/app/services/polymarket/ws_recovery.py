@@ -41,8 +41,9 @@ class SnapshotRecovery:
         with self.lock:
             while self.starts and self.starts[0] <= now - 10:
                 self.starts.popleft()
-            identity = id(state)
-            if self.closed or identity in self.active or now < state.get('rest_retry_at', 0):
+            identity = ('warm', id(state)) if warm else id(state)
+            retry_key = '_rest_warm_retry_at' if warm else 'rest_retry_at'
+            if self.closed or identity in self.active or now < state.get(retry_key, 0):
                 return False
             # Warm only an idle pool; leave slots available for actual outages.
             if warm and self.active:
@@ -55,7 +56,7 @@ class SnapshotRecovery:
                 return False
             self.active.add(identity)
             remaining = [len(groups)]
-            state['rest_retry_at'] = now + .5
+            state[retry_key] = now + .5
             jobs = [(group, self.slots.pop()) for group in groups]
             self.starts.extend([now] * len(jobs))
             self.requests += len(jobs)

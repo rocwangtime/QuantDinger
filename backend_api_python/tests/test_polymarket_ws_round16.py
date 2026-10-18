@@ -401,3 +401,46 @@ def test_hot_warmup_prepares_both_http_sessions_without_publishing(monkeypatch):
     assert len(sessions) == 2 and {tuple(c[1]) for c in calls} == {('a',), ('b',)}
     assert r.metrics()['completed'] == 2 and r.metrics()['warmups'] == 1
     r.close()
+
+
+
+def test_inflight_warmup_cannot_suppress_or_delay_same_state_fault_request(monkeypatch):
+    warm_entered, release = threading.Barrier(3), threading.Event()
+    sequence, lock = [0], threading.Lock()
+    def handler(assets):
+        with lock:
+            sequence[0] += 1
+            warm = sequence[0] <= 2
+        if warm:
+            warm_entered.wait(1)
+            assert release.wait(2)
+        return [book(a) for a in assets]
+    http_pool(monkeypatch, handler)
+    r = ws_recovery.SnapshotRecovery();state = {};published = []
+    r.prepare(state, {'a', 'b'}, parallel=True)
+    assert r.request(state, {'a', 'b'}, None, warm=True)
+    warm_entered.wait(1)
+    try:
+        assert r.request(state, {'a', 'b'}, lambda rows, started: published.extend(rows))
+        wait_for(lambda: len(published) == 2)
+        wait_for(lambda: r.metrics()['inflight'] == 1)  # Only the blocked warmup remains.
+    finally:
+        release.set()
+    wait_for(lambda: not r.metrics()['inflight'])
+    assert r.metrics()['requests'] == 4
+    r.close()
+
+
+
+@pytest.mark.parametrize('kind,ready', [('last_trade_price', False), ('book', True)])
+def test_queue_grace_requires_actual_recent_merged_book_publication(feed_manager, kind, ready):
+    m, _, sockets = feed_manager;c = ready_backup(m, sockets)
+    now = datetime.now(timezone.utc)
+    event = book('ay', '8') if kind == 'book' else dict(event_type=kind, asset_id='ay',
+        price='.4', size='1', side='BUY', timestamp=int(now.timestamp()*1000))
+    with m.lifecycle_lock:
+        c.pop('merged_supply_at', None)
+        c['inbox'].processing_received_at = now-timedelta(seconds=1.2)
+        m.redundant_receive(0, c, event, now, c['inbox'])
+        assert m.backup_ready(c) is ready
+        c['inbox'].processing_received_at = None

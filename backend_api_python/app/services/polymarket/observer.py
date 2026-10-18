@@ -1310,7 +1310,7 @@ class MarketConnections:
             groups = {self.balancer.groups.get(a, '').split(':outcome:')[0] for a in state['assets']} & HOT_SERIES
             for group in groups:
                 paired = self.double_kicks.record(group, state.get('source'),
-                    'backup' if state.get('standby') else 'primary', code, state['remote_failure_at'], state['remote_failure_wall'])
+                    state['role_at_failure'], code, state['remote_failure_at'], state['remote_failure_wall'])
                 if paired is not None:
                     paired['_assets'] = set(state['assets'])
                     paired['_previous'] = {a: dict(self.continuity.published.get(a, {})) for a in state['assets']}
@@ -2247,9 +2247,13 @@ class MarketConnections:
                 if _PIPELINE:
                     merged = self.merges[index].filter(live_event, state['source'], required, backup=True)
                     if merged:
+                        before = {a: self.continuity.published.get(a, {}).get('received') for a in required}
                         _PIPELINE.receive(merged, required, received_at, inbox, inbox.epoch)
-                        state['merged_supply_at'] = time.monotonic()
                         self.continuity.publication(_PIPELINE.recording.metadata, required)
+                        if any((after := self.continuity.published.get(a, {}).get('received')) is not None
+                                and (before[a] is None or after > before[a])
+                                and (datetime.now(timezone.utc)-after).total_seconds() <= 1 for a in required):
+                            state['merged_supply_at'] = time.monotonic()
                         self.update_merged_gap(self.states[index])
                 old = self.states[index]
                 # No simultaneous all-asset timestamp equality barrier on busy
