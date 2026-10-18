@@ -126,6 +126,7 @@ def test_real_backlog_remains_unready_independent_of_admission_budget(feed_manag
     backup = ready_backup(m, sockets)
     with m.lifecycle_lock:
         inbox = backup['inbox']
+        backup.pop('merged_supply_at', None)  # No recent publication to qualify for r16 grace.
         inbox.queue_wait_seconds = 1.01
         assert not m.backup_ready(backup)
         assert 'queue_wait' in m.readiness_blockers(backup)

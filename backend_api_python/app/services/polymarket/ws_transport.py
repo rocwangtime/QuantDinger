@@ -64,6 +64,8 @@ class TransportDiagnostics:
         self.headers = {}
         self.read_buckets = deque(maxlen=61)
         self.burst_buckets = deque(maxlen=11)
+        self.fast_samples = deque(maxlen=100)
+        self.dispatch_max_seconds = 0
 
     def capture_headers(self, app):
         with self.lock:
@@ -85,6 +87,32 @@ class TransportDiagnostics:
                 self.burst_buckets[-1][1] += size
             else:
                 self.burst_buckets.append([bucket, size])
+
+    def dispatch(self, seconds):
+        with self.lock:
+            self.dispatch_max_seconds = max(self.dispatch_max_seconds, seconds)
+
+    def sample_fast(self, pending_bytes, queue_depth, queue_age, scheduler_lag, now=None):
+        now = time.monotonic() if now is None else now
+        with self.lock:
+            self.fast_samples.append(dict(monotonic=now, at=datetime.now(timezone.utc).isoformat(),
+                scheduler_lag_ms=max(0, scheduler_lag)*1000, tcp_pending_bytes=pending_bytes,
+                queue_depth=queue_depth, queue_age_ms=max(0, queue_age)*1000,
+                reader_dispatch_max_ms=self.dispatch_max_seconds*1000))
+            self.dispatch_max_seconds = 0
+
+    def fast_metrics(self, details=False):
+        with self.lock:
+            rows = list(self.fast_samples)
+            metrics = dict(resolution_ms=100, capacity=100, samples=len(rows),
+                scheduler_lag_max_ms=max((r['scheduler_lag_ms'] for r in rows), default=0),
+                tcp_pending_max_bytes=max((r['tcp_pending_bytes'] or 0 for r in rows), default=0),
+                queue_age_max_ms=max((r['queue_age_ms'] for r in rows), default=0),
+                reader_dispatch_max_ms=max((r['reader_dispatch_max_ms'] for r in rows), default=0),
+                latest=rows[-1] if rows else None)
+            if details:
+                metrics['samples_100ms'] = rows
+            return metrics
 
     def ping(self, now=None):
         now = time.monotonic() if now is None else now

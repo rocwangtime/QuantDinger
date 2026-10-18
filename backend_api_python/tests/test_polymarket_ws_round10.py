@@ -164,17 +164,19 @@ def test_retired_rest_result_and_removed_asset_never_publish(feed_manager, monke
 def fake_http(monkeypatch, rows, block=None, error=None):
     calls = []
     class Session:
+        def close(self):
+            pass
         def __enter__(self):
             return self
         def __exit__(self, *args):
             pass
-        def post(self, url, **kwargs):
-            calls.append((url, kwargs, self.trust_env))
+        def send(self, prepared, **kwargs):
+            calls.append((prepared.url, dict(kwargs, json=json.loads(prepared.body)), self.trust_env))
             if block:
                 block.wait(2)
             if error:
                 raise error
-            return SimpleNamespace(content=b'[]', raise_for_status=lambda: None, json=lambda: rows)
+            return SimpleNamespace(content=b'[]', raise_for_status=lambda: None, json=lambda: rows, close=lambda: None)
     monkeypatch.setattr(ws_recovery.requests, 'Session', Session)
     return calls
 
@@ -313,7 +315,7 @@ def test_readiness_metrics_reject_current_pressure_even_if_old_ready_flag_is_tru
         if problem == 'gap':
             inbox.delivery_gap = True
         elif problem == 'lag':
-            inbox.queue_wait_seconds = 1.1
+            inbox.queue_wait_seconds = 1.6
         else:
             inbox.resync.set()
         assert not m.backup_ready(candidate)

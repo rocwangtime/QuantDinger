@@ -346,6 +346,7 @@ def test_readiness_uses_live_age_of_outstanding_work_not_last_dequeued_sample(fe
     inbox = candidate['inbox']
     old = datetime.now(timezone.utc) - timedelta(seconds=1.1)
     with m.lifecycle_lock:
+        candidate.pop('merged_supply_at', None)  # No recent supply: retain the 1s age bound.
         inbox.queue_wait_seconds = 0
         if where == 'queued':
             # Keep the worker out while installing the synthetic oldest frame.

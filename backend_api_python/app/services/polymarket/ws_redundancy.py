@@ -89,7 +89,7 @@ class HotBackupCoverage:
 class FeedMerge:
     def __init__(self, metadata, deduplicate=True):
         self.deduplicate = deduplicate
-        self.maximum = min(65536, int(setting('MERGE_CACHE_MAX', 16384, 1024)))
+        self.maximum = min(65536, int(setting('MERGE_CACHE_MAX', 4096, 1024)))
         self.latest = {a: row[0] for a, row in metadata.items() if row[0] is not None}
         self.snapshots = dict(self.latest)
         self.levels = OrderedDict()
@@ -104,7 +104,7 @@ class FeedMerge:
 
     def expire(self):
         now = time.monotonic()
-        while self.seen and (len(self.seen) > self.maximum or next(iter(self.seen.values()))[0] < now - 60):
+        while self.seen and (len(self.seen) > self.maximum or next(iter(self.seen.values()))[0] < now - 15):
             self.seen.popitem(last=False)
             self.evictions += 1
 
@@ -113,7 +113,7 @@ class FeedMerge:
             return True
         now = time.monotonic()
         key = fingerprint(event) if key is None else key
-        while self.seen and (len(self.seen) >= self.maximum and key not in self.seen or next(iter(self.seen.values()))[0] < now - 60):
+        while self.seen and (len(self.seen) >= self.maximum and key not in self.seen or next(iter(self.seen.values()))[0] < now - 15):
             self.seen.popitem(last=False)
             self.evictions += 1
         _, counts = self.seen.get(key, (now, {}))
@@ -143,7 +143,7 @@ class FeedMerge:
             now = time.monotonic()
             if (self.deduplicate and hint and hint[0] == id(self) and source != hint[1]
                     and all(source not in counts and len(counts) < 4 and self.seen.get(key, (0, None))[1] is counts
-                            and self.seen[key][0] >= now - 60 for key, counts in hint[2])):
+                            and self.seen[key][0] >= now - 15 for key, counts in hint[2])):
                 # First exact copy on another source. Advance the SAME row
                 # counters, preserving split-frame and repeated-source semantics.
                 for key, counts in hint[2]:
@@ -217,6 +217,10 @@ class FeedContinuity:
         self.lock = threading.RLock()
         self.history = {}
         self.latest = {}
+        self.history_order = OrderedDict()
+        self.history_limit = 4096
+        self.history_ttl = 30
+        self.history_evictions = 0
         self.pending = {}
         self.records = OrderedDict()
         self.published = {}
@@ -229,6 +233,21 @@ class FeedContinuity:
         for cache in (self.history, self.latest, self.pending, self.published, self.gap_waiting):
             for asset in cache.keys() - assets:
                 del cache[asset]
+        for key in list(self.history_order):
+            if key[0] not in assets:
+                del self.history_order[key]
+
+    @serialized
+    def expire(self, now=None):
+        now = time.monotonic() if now is None else now
+        while self.history_order and (len(self.history_order) > self.history_limit
+                or next(iter(self.history_order.values())) < now - self.history_ttl):
+            (asset, key), _ = self.history_order.popitem(last=False)
+            history = self.history.get(asset, {})
+            history.pop(key, None)
+            if not history:
+                self.history.pop(asset, None)
+            self.history_evictions += 1
 
     @serialized
     def log(self, row):
@@ -289,8 +308,13 @@ class FeedContinuity:
                 while len(sources) > 4:
                     sources.remove(next(s for s in sources if s != source))
                 history.move_to_end(key)
+                self.history_order[asset, key] = time.monotonic()
+                self.history_order.move_to_end((asset, key))
                 while len(history) > 512:
-                    history.popitem(last=False)
+                    removed, _ = history.popitem(last=False)
+                    self.history_order.pop((asset, removed), None)
+                    self.history_evictions += 1
+                self.expire()
                 latest = self.latest.setdefault(asset, {})
                 if source not in latest or at >= latest[source][0]:
                     latest[source] = (at, key, received)
@@ -361,7 +385,52 @@ class FeedContinuity:
                         max=max(gaps) if gaps else None),
                     pending_assets=sorted(self.pending), events=list(self.records.values()),
                     history_assets=len(self.history), history_entries=sum(map(len, self.history.values())),
+                    history_limit=self.history_limit, history_ttl_seconds=self.history_ttl,
+                    history_evictions=self.history_evictions,
                     published={a: dict(receipt_gap_ms=r['receipt_gap_ms'], max_receipt_gap_ms=r['max_receipt_gap_ms'],
                         receipt_age_ms=max(0, (datetime.now(timezone.utc) - r['received']).total_seconds() * 1000))
                         for a, r in self.published.items()},
                     sequence_available=False)
+
+
+class DoubleKicks:
+    """Pair physical generations, including a backup promoted before its close."""
+    def __init__(self):
+        self.recent = {}
+        self.events = deque(maxlen=256)
+        self.total = 0
+        self.hourly = OrderedDict()
+
+    def record(self, group, source, role, code, now, wall):
+        recent = self.recent.setdefault(group, deque(maxlen=8))
+        if any(row['source'] == source for row in recent):
+            return
+        peer = next((r for r in reversed(recent) if 0 <= now-r['monotonic'] <= 1 and not r['paired']), None)
+        row = dict(source=source, role=role, code=code, monotonic=now, paired=peer is not None)
+        recent.append(row)
+        if peer is None:
+            return
+        peer['paired'] = True
+        hour = int(wall // 3600) * 3600
+        self.hourly[hour] = self.hourly.get(hour, 0) + 1
+        while len(self.hourly) > 48:
+            self.hourly.popitem(last=False)
+        self.total += 1
+        event = dict(group=group, at=wall, sources=[peer['source'], source],
+                     roles=[peer['role'], role], codes=[peer['code'], code],
+                     separation_ms=(now-peer['monotonic'])*1000, merged_gap_ms=None,
+                     merged_gap_final=False, business_gap=False)
+        self.events.append(event)
+        return event
+
+    def metrics(self, wall):
+        hour = int(wall // 3600) * 3600
+        events = [e for e in self.events if e['at'] > wall-3600]
+        return dict(total=self.total, count_current_hour=self.hourly.get(hour, 0),
+                    count_rolling_hour=len(events),
+                    rolling_hour_count_capped=bool(self.total > len(self.events) and self.events and self.events[0]['at'] > wall-3600),
+                    business_gaps_rolling_hour=sum(e['business_gap'] for e in events),
+                    business_gaps_current_hour=sum(e['business_gap'] for e in events if e['at'] >= hour),
+                    pending_rolling_hour=sum(not e['merged_gap_final'] for e in events),
+                    hourly=[dict(hour_start_utc=h, count=n) for h, n in self.hourly.items()],
+                    events=[{k: v for k, v in e.items() if not k.startswith('_')} for e in self.events], pair_window_seconds=1)
