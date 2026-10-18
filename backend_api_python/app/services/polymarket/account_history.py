@@ -3,6 +3,8 @@ import copy
 import os
 from collections import deque
 
+from .ws_payloads import materialized_book
+
 
 def max_pair_skew_ms():
     value = int(os.getenv('POLYMARKET_OBSERVER_MAX_PAIR_SKEW_MS', '250'))
@@ -35,9 +37,72 @@ def apply(book, event):
 
 
 class BookHistory:
-    def __init__(self, seconds=10, maximum=2000):
+    def __init__(self, seconds=10, maximum=2000, byte_limit=16 * 1024 * 1024):
         self.seconds, self.maximum = seconds, maximum
+        self.byte_limit = max(1024, byte_limit)
+        self.charged_bytes = self.byte_evictions = self.idle_evictions = 0
         self.assets = {}
+
+    @staticmethod
+    def level_bytes(price, size):
+        # Conservative charge for strings, dict capacity and allocator overhead.
+        return 256 + 4 * (len(price) + len(size))
+
+    def forget(self, asset):
+        state = self.assets.pop(asset, None)
+        if state:
+            self.charged_bytes -= state['charged_bytes']
+
+    def retain(self, assets):
+        for asset in self.assets.keys() - set(assets):
+            self.forget(asset)
+
+    def pop(self, state):
+        at, record = state['events'].popleft()
+        before = state['base_bytes']
+        if record['kind'] == 'book':
+            state['base_bytes'] = record['_bytes'] - 512
+        else:
+            levels = state['base'][record['side']]
+            price, size = record['price'], record['size']
+            if price in levels:
+                state['base_bytes'] -= self.level_bytes(price, levels[price])
+            if float(size) > 0:
+                state['base_bytes'] += self.level_bytes(price, size)
+        state['base'] = apply(state['base'], record)
+        state['base_at'], state['base_exchange_ms'] = at, record.get('exchange_ms')
+        change = state['base_bytes'] - before - record['_bytes']
+        state['charged_bytes'] += change
+        self.charged_bytes += change
+
+    def trim_bytes(self):
+        while self.charged_bytes > self.byte_limit and self.assets:
+            # Fold the oldest event into its timestamped base. Requests older
+            # than that base fail closed rather than replaying incomplete data.
+            asset, state = min(self.assets.items(), key=lambda item:
+                item[1]['events'][0][0] if item[1]['events'] else item[1]['base_at'])
+            if state['events']:
+                self.pop(state)
+            else:
+                self.forget(asset)  # A single oversized anchor cannot evade the cap.
+            self.byte_evictions += 1
+
+    def prune(self, at):
+        cutoff = at - self.seconds * 1000
+        for asset, state in list(self.assets.items()):
+            last = state['events'][-1][0] if state['events'] else state['base_at']
+            if last is not None and last < cutoff:
+                self.forget(asset)
+                self.idle_evictions += 1
+                continue
+            while state['events'] and state['events'][0][0] < cutoff:
+                self.pop(state)
+        self.trim_bytes()
+
+    def metrics(self):
+        return dict(history_events=sum(len(s['events']) for s in self.assets.values()),
+                    history_charged_bytes=self.charged_bytes, history_byte_limit=self.byte_limit,
+                    history_byte_evictions=self.byte_evictions, history_idle_evictions=self.idle_evictions)
 
     def record(self, event, at):
         if isinstance(event, list):
@@ -54,23 +119,30 @@ class BookHistory:
         kind = event.get('event_type') or event.get('type')
         if kind == 'book':
             event = event.get('payload') or event
-            records.append((str(event.get('asset_id') or event.get('assetId') or ''), dict(kind='book', **{
-                side: {str(x['price']): str(x['size']) for x in event.get(side, [])} for side in ('asks', 'bids')})))
+            levels, charge = materialized_book(event)
+            records.append((str(event.get('asset_id') or event.get('assetId') or ''), dict(kind='book',
+                _bytes=512 + charge, **{side: dict(rows) for side, rows in levels.items()})))
         elif kind == 'price_change':
             for item in event.get('price_changes') or (event.get('payload') or {}).get('priceChanges') or []:
                 records.append((str(item.get('asset_id') or item.get('assetId') or ''), dict(kind='delta',
                     side='bids' if str(item.get('side', '')).upper() == 'BUY' else 'asks', price=str(item['price']), size=str(item['size']))))
         for asset, record in records:
             record['exchange_ms'] = exchange_ms
-            state = self.assets.setdefault(asset, {'base': {'asks': {}, 'bids': {}}, 'base_at': None, 'events': deque()})
+            if record['kind'] == 'delta' and asset not in self.assets:
+                continue
+            state = self.assets.setdefault(asset, {'base': {'asks': {}, 'bids': {}}, 'base_at': None,
+                'base_bytes': 0, 'charged_bytes': 0, 'events': deque()})
             if record['kind'] == 'delta' and state['base_at'] is None and not state['events']:
                 continue
+            if record['kind'] != 'book':
+                record['_bytes'] = 512 + self.level_bytes(record['price'], record['size'])
             state['events'].append((at, record))
-            while len(state['events']) > self.maximum or state['events'][0][0] < at - self.seconds * 1000:
-                popped_at, popped = state['events'].popleft()
-                state['base'] = apply(state['base'], popped)
-                state['base_at'] = popped_at
-                state['base_exchange_ms'] = popped.get('exchange_ms')
+            state['charged_bytes'] += record['_bytes']
+            self.charged_bytes += record['_bytes']
+            while state['events'] and (len(state['events']) > self.maximum
+                    or state['events'][0][0] < at - self.seconds * 1000):
+                self.pop(state)
+            self.trim_bytes()
 
     def record_rest(self, asset, book, at):
         """Adapt a public REST snapshot without replacing its exchange time."""

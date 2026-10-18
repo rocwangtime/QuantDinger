@@ -303,7 +303,7 @@ def test_three_copies_share_parse_and_fingerprints_but_preserve_trade_multiplici
         assert merge.filter(copies[0], 'primary', {'a'})
         assert not merge.filter(copies[1], 'backup', {'a'})
         assert not merge.filter(copies[2], 'reserve', {'a'})
-    assert len(calls) == 1
+    assert len(calls) == 0  # Fingerprints are now prepared before publication locks.
     assert cache.metrics()['hits'] == 2 and cache.metrics()['misses'] == 1
 
 

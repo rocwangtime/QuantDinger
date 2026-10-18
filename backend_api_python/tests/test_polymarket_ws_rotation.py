@@ -38,6 +38,8 @@ def feed_manager(monkeypatch):
     monkeypatch.setenv('POLYMARKET_OBSERVER_WS_COLD_ROTATION_ENABLED', '1')
     # Historical two-spare contracts remain covered with the explicit A/B option.
     monkeypatch.setenv('POLYMARKET_OBSERVER_WS_HOT_BACKUP_COUNT', '2')
+    # Individual admission tests cover the production bootstrap phase.
+    monkeypatch.setenv('POLYMARKET_OBSERVER_WS_HOT_BACKUP_STAGGER_SECONDS', '0')
     sockets = []
     class Socket:
         def __init__(self, url, **callbacks):

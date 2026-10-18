@@ -8,6 +8,7 @@ rebates are scenarios only: they never enter cash or PnL.
 import copy
 import hashlib
 import json
+import logging
 import math
 import os
 import statistics
@@ -21,6 +22,8 @@ from . import maker_model as mm
 from .engine import ZERO, number
 from .paper_account import day_key, utc
 from .updown import timestamp
+
+_LOG = logging.getLogger(__name__)
 
 TAG = 'maker_fair_value_v3'
 VERSION = 3
@@ -286,7 +289,7 @@ def displayed(book, price):
     return sum((z for p, z in levels if p == price), ZERO)
 
 
-def select(summaries, previous, p, now):
+def select(summaries, previous, p, now, recorded_cells=None):
     """Daily active-cell review from settled per-market summaries (no lookahead).
 
     Score: half-life weighted mean per-market PnL of live-eligible target-level
@@ -303,9 +306,13 @@ def select(summaries, previous, p, now):
         if today - timedelta(days=int(p.lookback_days)) <= end < today and s.get('outcome') is not None:
             by_cell.setdefault(s['cell'], []).append((s, (today - end).days))
     scores = {}
+    unavailable = []
     for asset in p.assets:
         for interval in p.intervals:
             cell = asset + ':' + interval
+            if recorded_cells is not None and cell not in recorded_cells:
+                unavailable.append(cell)
+                continue
             rows = by_cell.get(cell, [])
             traded = [(s, age) for s, age in rows if number(s['shadow']['eligible']['shares']) > 0]
             samples = [(s['end'], float(s['shadow']['eligible']['pnl']), .5 ** (age / p.halflife_days)) for s, age in traded]
@@ -335,7 +342,11 @@ def select(summaries, previous, p, now):
             scores[cell] = score
     key = today.isoformat()
     cooloff = {c: d for c, d in previous.get('cooloff', {}).items() if d > key}
-    history = {c: (previous.get('lcb_history', {}).get(c, []) + [s['lcb']])[-2:] for c, s in scores.items()}
+    # A same-day scope repair replaces today's observation; it cannot count as
+    # a second negative daily LCB and accidentally trip the two-day exit rule.
+    history = {c: ((previous.get('lcb_history', {}).get(c, [])[:-1]
+                   if previous.get('reviewed') == key else previous.get('lcb_history', {}).get(c, []))
+                   + [s['lcb']])[-2:] for c, s in scores.items()}
     breakers = previous.get('breakers', {})
     until = lambda days: (today + timedelta(days=int(days))).isoformat()
     active = {}
@@ -363,9 +374,19 @@ def select(summaries, previous, p, now):
         if fits(cell):
             active[cell] = dict(source='admitted', since=key, probation_until=until(p.probation_days), mode='full')
     for cell, mode in p.cold_start.items():
-        if cell not in active and cell not in cooloff and scores[cell]['markets'] < p.min_markets and fits(cell):
+        if cell in scores and cell not in active and cell not in cooloff and scores[cell]['markets'] < p.min_markets and fits(cell):
             active[cell] = dict(source='cold_start', since=key, mode=mode)
-    return dict(reviewed=key, at=now, active=active, cooloff=cooloff, lcb_history=history, scores=scores, breakers={})
+    return dict(reviewed=key, at=now, active=active, cooloff=cooloff, lcb_history=history, scores=scores, breakers={},
+                unavailable_cells=unavailable)
+
+
+def recorded_cells():
+    """Selection must fit the observer's configured recording AND discovery scope."""
+    from . import recording, updown
+    assets, intervals = recording.recording_scope()
+    discovered_assets = updown.selections('ASSETS', updown.ASSETS, updown.ASSETS)
+    discovered_intervals = updown.selections('INTERVALS', updown.INTERVALS, updown.INTERVALS)
+    return {a + ':' + i for a in assets if a in discovered_assets for i in intervals if i in discovered_intervals}
 
 
 class Maker:
@@ -511,7 +532,7 @@ class Maker:
         self.risk = dict(at=now, soft=False, hard=False, stopped={})
         self.contrib = {}  # Landed cancels drop out of worst-case exposure each poll.
         if not self.state['selection']:
-            self.state['selection'] = select([], {}, p, now)
+            self.state['selection'] = select([], {}, p, now, recorded_cells())
             self.state['selection']['reviewed'] = None  # Priors only; the dated review still runs.
         unreal, by_cell = self.unrealized()
         daily = number(day['net_pnl']) + unreal
@@ -1505,12 +1526,17 @@ class Maker:
 
     def review_due(self, now):
         moment = utc(now)
-        return (self.state['selection'].get('reviewed') != day_key(now)
+        return ((self.state['selection'].get('reviewed') != day_key(now)
+                 or bool(set(self.state['selection'].get('active', {})) - recorded_cells()))
                 and moment.hour * 60 + moment.minute >= self.p.review_minutes)
 
     def review(self, summaries, now):
         previous = self.state['selection']
-        self.state['selection'] = select(summaries, previous, self.p, now)
+        self.state['selection'] = select(summaries, previous, self.p, now, recorded_cells())
+        skipped = self.state['selection']['unavailable_cells']
+        if skipped:
+            _LOG.warning('Polymarket paper selection skipped unrecorded cells=%s', ','.join(skipped))
+            self.audit('selection_scope_warning', 'selection', now, dict(reason='observer_not_recording', cells=skipped))
         self.audit('selection', 'selection', now, dict(active=self.state['selection']['active'],
                                                        cooloff=self.state['selection']['cooloff'],
                                                        scores=self.state['selection']['scores']))

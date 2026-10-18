@@ -4,7 +4,6 @@ There is no exchange sequence number. Match copies by canonical event content
 and timestamp, retaining same-source multiplicity for identical trade prints.
 Older snapshots/levels cannot overwrite newer state. Trades may arrive late.
 """
-import hashlib
 import json
 import time
 import threading
@@ -13,7 +12,7 @@ from datetime import datetime, timezone
 from collections import OrderedDict
 
 from . import recording
-from .ws_payloads import fingerprint
+from .ws_payloads import fingerprint, event_key
 from .ws_balance import setting
 
 
@@ -150,8 +149,7 @@ class FeedMerge:
                     self.stale += 1
                     continue
                 if self.deduplicate:
-                    duplicate_key = hashlib.blake2b(b'price_change' + str(payload.get('timestamp')).encode()
-                                                    + fingerprint(row), digest_size=16).digest()
+                    duplicate_key = event_key(kind, at, row)
                     if not self.unique(row, source, duplicate_key):
                         continue
                 if at is not None:
@@ -251,8 +249,7 @@ class FeedContinuity:
                 asset = str(row.get('asset_id') or row.get('assetId') or '')
                 if not asset:
                     continue
-                key = hashlib.blake2b(kind.encode() + at.isoformat().encode() + fingerprint(row),
-                                      digest_size=16).hexdigest()
+                key = event_key(kind, at, row).hex()
                 history = self.history.setdefault(asset, OrderedDict())
                 sources = history.setdefault(key, set())
                 sources.add(source)

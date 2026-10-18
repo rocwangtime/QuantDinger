@@ -9,6 +9,53 @@ from collections import OrderedDict
 class PublicEvent(dict):
     """Workers only read these dictionaries; fingerprints are not wire fields."""
     digest = None
+    identity = None
+    book = None
+
+
+def materialized_book(payload):
+    """Immutable parsed levels; each mutable live/shadow/history book copies them."""
+    cached = payload.book if isinstance(payload, PublicEvent) else None
+    if cached is not None:
+        return cached
+    levels = {side: {str(x['price']): str(x['size']) for x in payload.get(side, [])}
+              for side in ('bids', 'asks')}
+    charge = 1024 + sum(256 + 4 * (len(p) + len(s)) for side in levels.values() for p, s in side.items())
+    result = (levels, charge)
+    if isinstance(payload, PublicEvent):
+        payload.book = result
+    return result
+
+
+def event_key(kind, at, row):
+    """Share the source-independent overlap/dedup work across both consumers."""
+    cached = row.identity if isinstance(row, PublicEvent) else None
+    if cached is not None and cached[:2] == (kind, at):
+        return cached[2]
+    key = hashlib.blake2b(kind.encode() + str(at).encode() + fingerprint(row), digest_size=16).digest()
+    if isinstance(row, PublicEvent):
+        row.identity = (kind, at, key)
+    return key
+
+
+def prepare(event):
+    # Compute JSON fingerprints off the lifecycle/Pipeline locks. In particular,
+    # continuity and merge must not each hash every price-change row again.
+    from .recording import events, exchange_time
+    for kind, payload in events(event):
+        at = exchange_time(payload.get('timestamp'))
+        if kind == 'price_change':
+            for row in payload.get('price_changes', payload.get('priceChanges', [])):
+                event_key(kind, at, row)
+        else:
+            fingerprint(event if isinstance(event, dict) else payload)
+            if kind == 'book':
+                try:
+                    materialized_book(payload)
+                except KeyError as exc:
+                    raise ValueError('invalid public book level') from exc
+                event_key(kind, at, payload)
+    return event
 
 
 def fingerprint(event):
@@ -80,7 +127,16 @@ class ParsedFrames:
             if cached:
                 self.hits += 1
                 return cached[1]
-            event = public_event(json.loads(raw))
+        # A large decode must not serialize every other connection's parser.
+        event = prepare(public_event(json.loads(raw)))
+        from .recording import events
+        size += sum(payload.book[1] for kind, payload in events(event)
+                    if kind == 'book' and isinstance(payload, PublicEvent) and payload.book is not None)
+        with self.lock:
+            cached = self.items.get(raw)
+            if cached:
+                self.hits += 1
+                return cached[1]
             self.misses += 1
             if size <= self.byte_limit:
                 self.items[raw] = (now, event, size)

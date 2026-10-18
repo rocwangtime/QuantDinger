@@ -2,6 +2,8 @@
 import math
 import random
 import time
+import threading
+from functools import wraps
 
 from . import recording
 from .ws_balance import setting
@@ -48,9 +50,18 @@ class DataHealth:
         return now - self.started >= 120 and self.low_seconds >= setting('ROTATE_QUIET_SECONDS', 20, 1)
 
 
+def shadow_locked(method):
+    @wraps(method)
+    def wrapped(self, *args, **kwargs):
+        with self.lock:
+            return method(self, *args, **kwargs)
+    return wrapped
+
+
 class ShadowBooks:
     """Keep only current subscribed books, never a replay buffer or trade writer."""
     def __init__(self, assets):
+        self.lock = threading.RLock()
         self.assets = frozenset(assets)
         self.books = {}
         self.minimum_times = {}
@@ -58,12 +69,14 @@ class ShadowBooks:
         self.recorder.enabled = False
         self.merge = FeedMerge({}, deduplicate=False)
 
+    @shadow_locked
     def receive(self, event, received):
         from .observer import ws_apply_event
         event = self.merge.filter(event, 'shadow', self.assets)
         changed = ws_apply_event(event, self.books)
         self.recorder.receive(event, changed, {}, {}, received, self.assets)
 
+    @shadow_locked
     def prune(self, assets):
         self.assets = frozenset(assets)
         self.books = {a: b for a, b in self.books.items() if a in self.assets}
@@ -71,6 +84,7 @@ class ShadowBooks:
         self.recorder.prune(self.assets)
         self.merge.prune(self.assets)
 
+    @shadow_locked
     def observe_active(self, metadata):
         # Keep the live watermark even if its failed worker clears live books.
         for asset in self.assets:
@@ -79,6 +93,7 @@ class ShadowBooks:
             if at is not None and (previous is None or at > previous):
                 self.minimum_times[asset] = at
 
+    @shadow_locked
     def ready(self, active_metadata):
         self.observe_active(active_metadata)
         if not self.assets or self.books.keys() != self.assets:

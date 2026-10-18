@@ -38,7 +38,7 @@ def test_two_backups_same_assets_no_extra_per_connection_load(feed_manager):
     assert reserve['socket'].opened.wait(1)
     for c in (first, reserve):
         assert set(c['assets']) == set(m.states[0]['assets'])
-        assert json.loads(c['socket'].sent[0])['assets_ids'] == c['assets']
+        assert json.loads(c['socket'].sent[0])['assets_ids'] == c['assets'][::-1]
     assert len(m.backup_items()) == 2
 
 

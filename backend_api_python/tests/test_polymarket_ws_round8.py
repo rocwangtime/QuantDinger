@@ -23,7 +23,7 @@ def test_first_hot_backup_is_eager_and_ready_before_42s(feed_manager, key):
     assert sockets[1].opened.wait(1)
     candidate = m.backups[0]
     assert 0 <= candidate['opened_at'] - old['opened_at'] < 2
-    assert json.loads(sockets[1].sent[0]) == dict(type='market', assets_ids=old['assets'])
+    assert json.loads(sockets[1].sent[0]) == dict(type='market', assets_ids=old['assets'][::-1])
     sockets[1].emit([book(a) for a in old['assets']])
     wait_for(lambda: candidate.get('ready'))
     m.tick()
