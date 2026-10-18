@@ -7,7 +7,7 @@ import time
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from app.utils.db import get_db_connection
+from .observer_db import connection as get_db_connection
 
 
 def setting(name, default, minimum):

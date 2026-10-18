@@ -14,6 +14,7 @@ from collections import OrderedDict
 
 from . import recording
 from .ws_payloads import fingerprint
+from .ws_balance import setting
 
 
 class HotBackupCoverage:
@@ -89,6 +90,7 @@ class HotBackupCoverage:
 class FeedMerge:
     def __init__(self, metadata, deduplicate=True):
         self.deduplicate = deduplicate
+        self.maximum = min(65536, int(setting('MERGE_CACHE_MAX', 16384, 1024)))
         self.latest = {a: row[0] for a, row in metadata.items() if row[0] is not None}
         self.snapshots = dict(self.latest)
         self.levels = OrderedDict()
@@ -103,7 +105,7 @@ class FeedMerge:
 
     def expire(self):
         now = time.monotonic()
-        while self.seen and next(iter(self.seen.values()))[0] < now - 60:
+        while self.seen and (len(self.seen) > self.maximum or next(iter(self.seen.values()))[0] < now - 60):
             self.seen.popitem(last=False)
             self.evictions += 1
 
@@ -111,13 +113,15 @@ class FeedMerge:
         if not self.deduplicate:
             return True
         now = time.monotonic()
-        while self.seen and (len(self.seen) >= 65536 or next(iter(self.seen.values()))[0] < now - 60):
+        key = fingerprint(event) if key is None else key
+        while self.seen and (len(self.seen) >= self.maximum and key not in self.seen or next(iter(self.seen.values()))[0] < now - 60):
             self.seen.popitem(last=False)
             self.evictions += 1
-        key = fingerprint(event) if key is None else key
         _, counts = self.seen.get(key, (now, {}))
         previous = max(counts.values(), default=0)
         counts[source] = counts.get(source, 0) + 1
+        while len(counts) > 4:
+            del counts[next(s for s in counts if s != source)]
         self.seen[key] = (now, counts)
         self.seen.move_to_end(key)
         if counts[source] <= previous:
@@ -201,11 +205,12 @@ class FeedContinuity:
         self.latest = {}
         self.pending = {}
         self.records = OrderedDict()
+        self.published = {}
         self.serial = self.checks = self.uncertain = self.recovered = 0
 
     @serialized
     def prune(self, assets):
-        for cache in (self.history, self.latest, self.pending):
+        for cache in (self.history, self.latest, self.pending, self.published):
             for asset in cache.keys() - assets:
                 del cache[asset]
 
@@ -217,6 +222,20 @@ class FeedContinuity:
         while len(self.records) > 128:
             self.records.popitem(last=False)
         logging.getLogger(__name__).info('Polymarket WS continuity %s', json.dumps(row))
+
+    @serialized
+    def publication(self, metadata, assets):
+        """Actual merged book receipt cadence, independent of physical sources."""
+        for asset in assets:
+            row = metadata.get(asset)
+            if not row or row[0] is None:
+                continue
+            previous = self.published.get(asset)
+            if previous and row[1] <= previous['received']:
+                continue
+            gap = max(0, (row[1] - previous['received']).total_seconds() * 1000) if previous else 0
+            self.published[asset] = dict(received=row[1], exchange_at=row[0], receipt_gap_ms=gap,
+                max_receipt_gap_ms=max(gap, previous['max_receipt_gap_ms'] if previous else 0))
 
     @serialized
     def receive(self, event, source, received):
@@ -288,6 +307,9 @@ class FeedContinuity:
                               destination_silence_ms=max(0, (now - after[2]).total_seconds() * 1000) if after else None,
                               destination_exchange_gap_ms=(after[0] - before[0]).total_seconds() * 1000
                                   if before and after else None,
+                              merged_receipt_age_ms=max(0, (now - self.published[asset]['received']).total_seconds() * 1000)
+                                  if asset in self.published else None,
+                              merged_max_receipt_gap_ms=self.published.get(asset, {}).get('max_receipt_gap_ms'),
                               book_preserved=book_preserved and caught_up,
                               book_unavailable_ms=0 if book_preserved and caught_up else None,
                               market_silence_compatible=bool(caught_up and after[0] == before[0]),
@@ -304,4 +326,8 @@ class FeedContinuity:
     def metrics(self):
         return dict(checks=self.checks, unverified=self.uncertain, snapshot_restored=self.recovered,
                     pending_assets=sorted(self.pending), events=list(self.records.values()),
+                    history_assets=len(self.history), history_entries=sum(map(len, self.history.values())),
+                    published={a: dict(receipt_gap_ms=r['receipt_gap_ms'], max_receipt_gap_ms=r['max_receipt_gap_ms'],
+                        receipt_age_ms=max(0, (datetime.now(timezone.utc) - r['received']).total_seconds() * 1000))
+                        for a, r in self.published.items()},
                     sequence_available=False)

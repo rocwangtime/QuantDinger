@@ -286,7 +286,8 @@ def test_shard_byte_peak_survives_a_later_quiet_window(feed_manager, monkeypatch
     assert observer.STATUS['ws_receive_queues'][0]['peak_receive_bytes_per_second'] == 10000
 
 
-def test_merge_cache_capacity_bounds_memory_under_unique_traffic():
+def test_merge_cache_capacity_bounds_memory_under_unique_traffic(monkeypatch):
+    monkeypatch.setenv('POLYMARKET_OBSERVER_WS_MERGE_CACHE_MAX', '65536')
     merge = FeedMerge({})
     now = observer.time.monotonic()
     for i in range(65536):

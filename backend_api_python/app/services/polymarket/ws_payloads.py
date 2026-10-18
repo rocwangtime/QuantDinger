@@ -14,7 +14,16 @@ class PublicEvent(dict):
 def fingerprint(event):
     if isinstance(event, PublicEvent) and event.digest is not None:
         return event.digest
-    digest = hashlib.blake2b(json.dumps(event, sort_keys=True, separators=(',', ':')).encode(),
+    payload = (event.get('payload') or event) if isinstance(event, dict) else {}
+    book_hash = payload.get('hash')
+    # Exchange full-book hashes are shared across copies. Avoid serializing
+    # thousands of levels again merely to compare two identical snapshots.
+    identity = event
+    if (isinstance(book_hash, str) and 0 < len(book_hash) <= 128
+            and 'bids' in payload and 'asks' in payload):
+        identity = ('book', payload.get('asset_id') or payload.get('assetId'),
+                    payload.get('timestamp'), book_hash)
+    digest = hashlib.blake2b(json.dumps(identity, sort_keys=True, separators=(',', ':')).encode(),
                              digest_size=16).digest()
     if isinstance(event, PublicEvent):
         event.digest = digest

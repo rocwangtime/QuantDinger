@@ -55,6 +55,7 @@ class TransportDiagnostics:
         self.samples = deque(maxlen=60)
         self.last_at = None
         self.read_bytes = 0
+        self.last_read_at = None
         self.pings = self.pongs = 0
         self.ping_at = self.pong_at = None
         self.pong_rtt_seconds = None
@@ -71,6 +72,8 @@ class TransportDiagnostics:
         now = time.monotonic() if now is None else now
         second = int(now)
         with self.lock:
+            if size:
+                self.last_read_at = now
             if self.read_buckets and self.read_buckets[-1][0] == second:
                 self.read_buckets[-1][1] += size
             else:
@@ -91,6 +94,7 @@ class TransportDiagnostics:
         metrics.update(at=datetime.now(timezone.utc).isoformat(),
                        sample_gap_seconds=elapsed,
                        scheduler_lag_seconds=max(0, elapsed - 1) if elapsed is not None else 0,
+                       byte_silence_seconds=now - self.last_read_at if self.last_read_at is not None else None,
                        read_bytes=total, read_calls=getattr(app, 'read_calls', 0),
                        read_bytes_per_second=(total - self.read_bytes) / elapsed if elapsed and elapsed > 0 else None,
                        pings=self.pings, pongs=self.pongs, pong_rtt_seconds=self.pong_rtt_seconds,

@@ -14,7 +14,7 @@ from queue import Queue, Full, Empty
 from threading import RLock, Event
 from datetime import datetime, timezone
 
-from app.utils.db import get_db_connection
+from .observer_db import connection as get_db_connection
 from .account_history import max_pair_skew_ms, pair_rejection
 from .client import PublicClient
 from .engine import number, sweep
@@ -27,6 +27,7 @@ from .ws_recovery import SnapshotRecovery
 from .ws_payloads import ParsedFrames
 from .ws_redundancy import FeedMerge, FeedContinuity, HotBackupCoverage
 from .ws_balance import setting as ws_setting
+from .observer_db import metrics as database_metrics
 
 STATUS = {"enabled": False, "running": False, "mode": "stopped", "connected": False, "markets_subscribed": 0,
           "last_message_at": None, "rebalance_count": 0, "reconnect_count": 0, "ws_connections": 0, "slow_consumer_count": 0, "last_error": None, "started_at": None}
@@ -127,10 +128,11 @@ def ws_apply_event(event, books):
 
 def _persist_status():
     _DAILY_STATS.persist()
+    status = json.dumps(snapshot())
     with get_db_connection() as db:
         cur = db.cursor()
         try:
-            cur.execute("INSERT INTO qd_polymarket_observer_status (singleton,status,updated_at) VALUES (true,%s::jsonb,NOW()) ON CONFLICT (singleton) DO UPDATE SET status=EXCLUDED.status,updated_at=NOW()", (json.dumps(snapshot()),))
+            cur.execute("INSERT INTO qd_polymarket_observer_status (singleton,status,updated_at) VALUES (true,%s::jsonb,NOW()) ON CONFLICT (singleton) DO UPDATE SET status=EXCLUDED.status,updated_at=NOW()", (status,))
             db.commit()
         finally:
             cur.close()
@@ -920,6 +922,12 @@ class Pipeline:
                       'messages_per_second': self.messages / max(.001, time.monotonic() - self.started),
                       'last_message_age_seconds': time.monotonic() - self.last_message if self.last_message else None,
                       'evaluator_cycle_ms': self.cycle_ms,
+                      'ws_book_memory': dict(assets=len(self.books),
+                          levels=sum(len(levels) for b in self.books.values() for levels in b.values()),
+                          pending_records=len(self.recording.pending),
+                          delivery_samples=len(self.recording.delivery_samples),
+                          history_events=sum(len(r['events']) for r in self.paper_account.history.assets.values())
+                              if self.paper_account else 0),
                       'pair_rejections': dict(self.pair_rejections),
                       **self.recording.metrics(self.books,
                           {a: balance_key(self.markets[m]) for a, m in self.asset_markets.items()},
@@ -978,10 +986,38 @@ def shard_markets(markets, count, previous=None, rates=None, owners=None):
     return {i: result[i] for i in sorted(result) if result[i]}
 
 
+class WireQueue(Queue):
+    """Bound raw-frame storage by bytes as well as frame count."""
+    def __init__(self, maximum, byte_limit):
+        super().__init__(maximum)
+        self.byte_limit = byte_limit
+        self.charged_bytes = self.byte_high_water = 0
+
+    @staticmethod
+    def charge(item):
+        raw = item[0]
+        # Include receipt/tuple overhead and text's worst-case storage width.
+        return 256 + (len(raw) * (4 if isinstance(raw, str) else 1)
+                      if isinstance(raw, (str, bytes, bytearray)) else sys.getsizeof(raw))
+
+    def _put(self, item):
+        size = self.charge(item)
+        if self.charged_bytes + size > self.byte_limit:
+            raise Full
+        super()._put(item)
+        self.charged_bytes += size
+        self.byte_high_water = max(self.byte_high_water, self.charged_bytes)
+
+    def _get(self):
+        item = super()._get()
+        self.charged_bytes -= self.charge(item)
+        return item
+
+
 class ReceiveQueue:
     """Elastic bounded FIFO; a gap requests snapshots on the existing socket."""
     def __init__(self, maximum, ceiling=None):
-        self.queue = Queue(maximum)
+        self.queue = WireQueue(maximum, int(ws_setting('RECEIVE_QUEUE_BYTES', 16 * 1024 * 1024, 1024)))
         self.ceiling = max(maximum, ceiling or maximum)
         self.lock = RLock()
         self.resync = Event()
@@ -1004,6 +1040,7 @@ class ReceiveQueue:
         self.peak_byte_rate = 0
         self.peak_at, self.peak_bytes = self.metric_at, 0
         self.invalid = Event()
+        self.last_byte_at = self.last_data_at = None
 
     def put(self, raw):
         with self.lock:
@@ -1033,6 +1070,7 @@ class ReceiveQueue:
         with self.lock, self.queue.mutex:
             discarded = self.queue.queue
             self.queue.queue = deque()
+            self.queue.charged_bytes = 0
             count = len(discarded)
             self.queue.not_full.notify_all()
             self.dropped += count
@@ -1210,6 +1248,21 @@ class MarketConnections:
                     and not required.intersection(candidate.get('subscribe_pending', []))
                     and not required.intersection(candidate.get('recover_assets', [])))
 
+    def readiness_blockers(self, state):
+        """Explain publication readiness separately from adding subscriptions."""
+        inbox = state['inbox']
+        required = set(self.states[state['primary_index']]['assets'])
+        shadow = state['shadow']
+        return [name for name, blocked in (
+            ('disconnected', not state.get('connected')),
+            ('invalid', inbox.invalid.is_set()), ('resync', inbox.resync.is_set()),
+            ('delivery_gap', inbox.delivery_gap), ('queue_wait', inbox.queue_wait_seconds > 1),
+            ('current_subscription', bool(required.intersection(state.get('subscribe_pending', [])))),
+            ('snapshot_repair', bool(required.intersection(state.get('recover_assets', [])))),
+            ('missing_snapshot', not required <= shadow.books.keys()),
+            ('missing_timestamp', any(shadow.recorder.metadata.get(a, (None,))[0] is None for a in required)),
+            ('catchup', not state.get('ready'))) if blocked]
+
     def record_primary_failure(self, index, state, code):
         if self.closed or state.get('standby') or state.get('retired') or self.states.get(index) is not state:
             return
@@ -1233,8 +1286,14 @@ class MarketConnections:
                 row['total'] += 1
                 row['without_ready_backup'] += not ready
                 event = dict(code=code, ready_backup_at_kick=bool(ready), ready_backups=ready,
-                             takeover_gap_ms=None, receipt_gap_ms=None, recovery=None)
-                event['_last_receipt'] = min(receipts, default=state['outage_wall'])
+                             takeover_gap_ms=None, receipt_gap_ms=None, recovery=None, gap_final=False)
+                source_receipts = [self.continuity.latest.get(a, {}).get(state.get('source'), (None, None, None))[2]
+                                   for a in state['assets']]
+                source_receipts = [at for at in source_receipts if at is not None]
+                event['_last_receipt'] = min(source_receipts or receipts, default=state['outage_wall'])
+                event['source_silence_ms'] = max(0, (state['outage_wall'] - event['_last_receipt']).total_seconds() * 1000)
+                event['merged_receipt_gap_ms'] = max(0, (state['outage_wall'] - min(receipts, default=state['outage_wall'])).total_seconds() * 1000)
+                event['reason'] = state.get('failure_reason', 'transport')
                 row['events'].append(event)
                 _LOG.warning('Polymarket WS hot primary failure group=%s shard=%s code=%s ready_backups=%s',
                              key, index, code, ready)
@@ -1258,16 +1317,20 @@ class MarketConnections:
             return
         owned = {a for a in state['assets'] if self.balancer.assignment.get(a) == index}
         wall = state['outage_wall']
+        if owned & self.continuity.pending_assets():
+            return
         if not owned or not all(a in _PIPELINE.books and
                 _PIPELINE.recording.metadata.get(a, (None, datetime.min.replace(tzinfo=timezone.utc)))[1] >= wall
                 for a in owned):
             return
         gap = max(0, (time.monotonic() - state['outage_at']) * 1000)
         for event in state.pop('outage_events', []):
-            if event['takeover_gap_ms'] is None:
+            if event.get('_last_receipt') is not None:
                 last = event.pop('_last_receipt', wall)
-                event.update(takeover_gap_ms=gap, recovery=method,
-                             receipt_gap_ms=max(0, (datetime.now(timezone.utc) - last).total_seconds() * 1000))
+                receipt_gap = max(0, (datetime.now(timezone.utc) - last).total_seconds() * 1000)
+                event.update(takeover_gap_ms=receipt_gap, detection_to_takeover_ms=event.get('detection_to_takeover_ms', gap),
+                             recovery=event.get('recovery', method) or method,
+                             receipt_gap_ms=receipt_gap, gap_final=True)
         state.pop('outage_at', None)
 
     def request_snapshot(self, index, state, assets):
@@ -1294,6 +1357,7 @@ class MarketConnections:
                         if merged:
                             self.continuity.receive(merged, 'rest', datetime.now(timezone.utc))
                             _PIPELINE.receive(merged, owned, datetime.now(timezone.utc))
+                            self.continuity.publication(_PIPELINE.recording.metadata, owned)
                         self.complete_recovery(index, state, 'rest_snapshot')
         self.snapshot_recovery.request(state, assets, publish)
 
@@ -1541,7 +1605,7 @@ class MarketConnections:
                     source_merge = self.merges.get(origin)
                     if source_merge and source_merge is not merge:
                         merge.seen.update(source_merge.seen)
-                merge.seen = type(merge.seen)(sorted(merge.seen.items(), key=lambda item: item[1][0])[-65536:])
+                merge.seen = type(merge.seen)(sorted(merge.seen.items(), key=lambda item: item[1][0])[-merge.maximum:])
                 for asset, book in shadow.books.items():
                     at, receipt, _ = shadow.recorder.metadata[asset]
                     event = dict(event_type='book', asset_id=asset, timestamp=int(at.timestamp() * 1000),
@@ -1809,9 +1873,11 @@ class MarketConnections:
                     shadow_assets=len(state['shadow'].merge.latest), shadow_levels=len(state['shadow'].merge.levels),
                     queue_depth=inbox.queue.qsize(), queue_wait_seconds=inbox.queue_wait_seconds,
                     queue_capacity=inbox.queue.maxsize, queue_high_water=inbox.high_water, drops=inbox.dropped,
+                    queue_charged_bytes=inbox.queue.charged_bytes, queue_byte_limit=inbox.queue.byte_limit,
                     drop_reasons=dict(inbox.drop_reasons), resyncs=inbox.resyncs,
                     receive_bytes_per_second=self.ingress_rate(state),
                     admission_pressure_reasons=self.subscriptions.pressure_reasons(state),
+                    readiness_blockers=self.readiness_blockers(state),
                     lifecycle_wait_seconds=inbox.lifecycle_wait_seconds,
                     process_max_seconds=inbox.process_max_seconds, discard_max_seconds=inbox.discard_max_seconds,
                     delivery_gap=inbox.delivery_gap, resync=inbox.resync.is_set(),
@@ -1940,6 +2006,7 @@ class MarketConnections:
                     merged = self.merges[index].filter(live_event, state['source'], required, backup=True)
                     if merged:
                         _PIPELINE.receive(merged, required, received_at, inbox, inbox.epoch)
+                        self.continuity.publication(_PIPELINE.recording.metadata, required)
                 old = self.states[index]
                 # No simultaneous all-asset timestamp equality barrier on busy
                 # feeds. Each asset has its own full snapshot; the merge guards
@@ -1982,6 +2049,18 @@ class MarketConnections:
                             asks=[dict(price=p, size=q) for p, q in levels['asks'].items()])
                         self.continuity.receive(restored, state['source'], receipt)
                         _PIPELINE.receive(restored, required, receipt, inbox, inbox.epoch)
+                now = time.monotonic()
+                old_transport = getattr(old.get('socket'), 'transport', None)
+                last_byte = max((at for at in (old['inbox'].last_byte_at,
+                    getattr(old_transport, 'last_read_at', None)) if at is not None), default=None)
+                quiet = min(5, ws_setting('HOT_BYTE_SILENCE_SECONDS', 4, 3))
+                if (old['connected'] and last_byte is not None and now - last_byte >= quiet
+                        and inbox.last_data_at is not None and inbox.last_data_at > last_byte
+                        and now - inbox.last_data_at <= 1
+                        and self.backup_ready(state)):
+                    old.update(data_suspect=True, failure_reason='byte_silence')
+                    old.setdefault('failed_at', now)
+                    self.record_primary_failure(index, old, None)
                 maximum = ws_setting('HOT_ROTATE_SECONDS', 0, 0)
                 due = maximum > 0 and time.monotonic() - old.get('opened_at', time.monotonic()) >= maximum
                 if old['connected'] and not old['inbox'].invalid.is_set() and not old.get('data_suspect') and not due:
@@ -1998,11 +2077,14 @@ class MarketConnections:
                 self.check_continuity(index, old, state, 'failover' if not old['connected'] else 'data_collapse' if old.get('data_suspect') else 'hot_age')
                 self.failover_ms = max(0, (time.monotonic() - old.get('failed_at', time.monotonic())) * 1000)
                 if 'outage_at' in old:
-                    for event in old.pop('outage_events', []):
-                        last = event.pop('_last_receipt', old['outage_wall'])
-                        event.update(takeover_gap_ms=self.failover_ms, recovery='backup',
-                            receipt_gap_ms=max(0, (datetime.now(timezone.utc) - last).total_seconds() * 1000))
-                    old.pop('outage_at', None)
+                    state.update(outage_at=old.pop('outage_at'), outage_wall=old['outage_wall'],
+                                 outage_events=old.pop('outage_events', []))
+                    for event in state['outage_events']:
+                        last = event['_last_receipt']
+                        receipt_gap = max(0, (datetime.now(timezone.utc) - last).total_seconds() * 1000)
+                        event.update(takeover_gap_ms=receipt_gap, detection_to_takeover_ms=self.failover_ms,
+                                     recovery='backup', receipt_gap_ms=receipt_gap)
+                    self.complete_recovery(index, state, 'backup')
                 state.update(standby=False, redundant=False, rotate_failures=0, rotate_retry_at=0,
                              backup_started=True, backup_failures=0, backup_retry_at=0)
                 state['unsubscribe_pending'] = extra
@@ -2020,7 +2102,9 @@ class MarketConnections:
                 self.redundancy_tick(time.monotonic())
 
     def check_continuity(self, index, old, new, reason):
-        assets = self.continuity.switch(old.get('source'), new.get('source'), new['assets'], reason)
+        preserved = bool(_PIPELINE and self.backup_ready(new) and set(new['assets']) <= _PIPELINE.books.keys())
+        assets = self.continuity.switch(old.get('source'), new.get('source'), new['assets'], reason,
+                                        book_preserved=preserved)
         if assets:
             new.setdefault('recover_assets', set()).update(assets)
 
@@ -2279,6 +2363,7 @@ class MarketConnections:
                                 merged = merge.filter(event, state['source'], owned) if merge else event
                                 if merged:
                                     _PIPELINE.receive(merged, owned, received_at, inbox, epoch)
+                                    self.continuity.publication(_PIPELINE.recording.metadata, owned)
                                     self.complete_recovery(index, state, 'ws')
                                 migration = self.migration
                                 if migration:
@@ -2317,6 +2402,7 @@ class MarketConnections:
         def received(_sock, raw):
             if state.get('retired') or state.get('inbox') is not inbox:
                 return
+            inbox.last_byte_at = time.monotonic()
             if raw in ('PONG', b'PONG'):
                 if hasattr(_sock, 'transport'):
                     _sock.transport.pong()
@@ -2325,6 +2411,7 @@ class MarketConnections:
             # Raw ingress totals remain accurate even when the FIFO overflows;
             # group rates are sampled only across healthy drain windows below.
             raw_bytes = len(raw.encode('utf-8')) if isinstance(raw, str) else len(raw)
+            inbox.last_data_at = inbox.last_byte_at
             state['data_health'].total += raw_bytes
             began = time.monotonic()
             inbox.received_frames += 1
@@ -2623,6 +2710,7 @@ class MarketConnections:
             STATUS.setdefault('rebalance_count', 0)
             STATUS.update(self.balancer.metrics())
             STATUS.update(ws_process_cpu_cores=cpu_cores, ws_process_rss_bytes=process_rss_bytes(),
+                          ws_observer_database=database_metrics(),
                           ws_metrics_session_id=self.stats.session,
                           ws_metrics_scope='observer_process_session',
                           ws_retiring_connections=len(self.retiring), ws_parsed_frames=self.parsed_frames.metrics(),
@@ -2634,6 +2722,7 @@ class MarketConnections:
             STATUS['ws_receive_queues'] = {
                 i: dict(depth=s['inbox'].queue.qsize(), drops=s.get('receive_drops', 0) + s['inbox'].dropped,
                         high_water=s['inbox'].high_water, capacity=s['inbox'].queue.maxsize,
+                        charged_bytes=s['inbox'].queue.charged_bytes, byte_limit=s['inbox'].queue.byte_limit,
                         resyncs=s['inbox'].resyncs, lag_seconds=s['inbox'].lag_seconds,
                         drop_reasons=dict(s['inbox'].drop_reasons),
                         queue_wait_seconds=s['inbox'].queue_wait_seconds,
@@ -2655,6 +2744,7 @@ class MarketConnections:
                           ws_hot_primary_failures={k: dict(total=v['total'], without_ready_backup=v['without_ready_backup'],
                               events=[{field: value for field, value in e.items() if not field.startswith('_')}
                                   for e in v['events']]) for k, v in self.primary_failures.items()},
+                          ws_takeover_gap_scope='failed_source_receipt_to_recovery; detection_to_takeover_ms_is_control_time',
                           ws_rest_recovery=self.snapshot_recovery.metrics(),
                           ws_reserves={i: self.backup_metrics(i, c, now) for i, c in self.reserves.items()},
                           ws_required_hot_groups=sorted(HOT_SERIES),
@@ -2664,10 +2754,12 @@ class MarketConnections:
                           ws_rotation_count=self.rotations, ws_rotation_failures=self.rotation_failures,
                           ws_rotation_last_failure=self.rotation_last_failure,
                           ws_hot_rotate_seconds=ws_setting('HOT_ROTATE_SECONDS', 0, 0),
+                          ws_hot_byte_silence_seconds=min(5, ws_setting('HOT_BYTE_SILENCE_SECONDS', 4, 3)),
                           ws_backup_promotions=self.backup_promotions,
                           ws_backups={i: self.backup_metrics(i, s, now) for i, s in self.backups.items()},
                           ws_merge_metrics={i: dict(duplicates=m.duplicates, stale=m.stale, evictions=m.evictions,
-                              entries=len(m.seen), assets=len(m.latest), levels=len(m.levels)) for i, m in self.merges.items()},
+                              entries=len(m.seen), capacity=m.maximum, sources_per_entry_limit=4,
+                              assets=len(m.latest), levels=len(m.levels)) for i, m in self.merges.items()},
                           ws_standby_slow_consumer_count=self.standby_slow_consumers,
                           ws_rotation_pending=self.standby[0] if self.standby else None,
                           ws_connection_ages_seconds={i: max(0, now - s.get('opened_at', now))

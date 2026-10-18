@@ -65,7 +65,11 @@ def test_all_four_hot_groups_start_with_paced_initial_subscriptions(feed_manager
         assert commands[0]['type'] == 'market' and len(commands[0]['assets_ids']) == 2
         assert all(len(c['assets_ids']) <= 2 for c in commands)
         assert {a for c in commands for a in c['assets_ids']} == set(s['assets'])
-        s['socket'].emit([book(a) for a in s['assets']])
+        events = [book(a) for a in s['assets']]
+        # This test measures paced admission on healthy primaries. Subscription
+        # pacing can exceed the half-open detector's four-second threshold.
+        m.states[s['primary_index']]['socket'].emit(events)
+        s['socket'].emit(events)
     wait_for(lambda: all(s.get('ready') for s in candidates))
     wait_for(lambda: all(row['ready'] for row in observer.STATUS['ws_hot_backup_by_group'].values()))
 

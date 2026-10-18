@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from uuid import uuid4
 
-from app.utils.db import get_db_connection
+from .observer_db import connection as get_db_connection
 from .client import PublicClient, GAMMA
 from .maker_model import parse_rules
 from .updown import ASSETS, INTERVALS, setting
@@ -79,8 +79,11 @@ def owned_events(event, owned):
         return event if token in owned else {}
     if kind == 'price_change':
         field = 'price_changes' if 'price_changes' in payload else 'priceChanges'
-        filtered = {**payload, field: [p for p in payload.get(field, [])
-                    if str(p.get('asset_id') or p.get('assetId') or '') in owned]}
+        rows = payload.get(field, [])
+        selected = [p for p in rows if str(p.get('asset_id') or p.get('assetId') or '') in owned]
+        if len(selected) == len(rows):
+            return event
+        filtered = {**payload, field: selected}
         return {**event, 'payload': filtered} if 'payload' in event else filtered
     return event
 
