@@ -54,6 +54,10 @@ def test_all_four_hot_groups_start_with_paced_initial_subscriptions(feed_manager
     p.set_markets(markets)
     m.sync(markets)
     m.start_supervisor()
+    wait_for(lambda: all(s['connected'] and not s.get('subscribe_pending') for s in m.states.values()), 8)
+    for state in m.states.values():
+        state['socket'].emit([book(a) for a in state['assets']])
+    wait_for(lambda: len(p.books) == 16)
     wait_for(lambda: len(m.backups) == 4 and all(s.get('opened_at') for s in m.backups.values()), 8)
     with m.lifecycle_lock:
         candidates = list(m.backups.values())

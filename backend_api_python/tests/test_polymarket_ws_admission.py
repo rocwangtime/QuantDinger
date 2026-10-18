@@ -1,7 +1,7 @@
 """Production pacing, rollover rejection and whole-group socket capacity."""
 import json
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -51,6 +51,7 @@ def test_new_subscription_pauses_under_pressure(pressure):
         s['socket'].transport.last['tcp_pending_bytes'] = 65536
     elif pressure == 'scheduler':
         s['socket'].transport.last['scheduler_lag_seconds'] = .2
+        s['inbox'].processing_received_at = datetime.now(timezone.utc) - timedelta(seconds=.3)
     else:
         s['retired'] = True
     pacer.drain(s, 100)

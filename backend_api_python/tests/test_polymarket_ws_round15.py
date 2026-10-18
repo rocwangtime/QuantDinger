@@ -190,13 +190,16 @@ def test_dead_backup_is_removed_and_replaced(feed_manager, monkeypatch):
     wait_for(lambda: m.backups.get(0) is not None and m.backups[0] is not c)
 
 
-def test_backup_lag_discards_old_epoch_and_restores_fresh_snapshots(feed_manager):
+def test_backup_loss_discards_old_epoch_and_restores_fresh_snapshots(feed_manager):
     m, p, sockets = feed_manager
     c = ready_backup(m, sockets)
     old_shadow, inbox = c['shadow'], c['inbox']
     with m.lifecycle_lock, inbox.lock:
         inbox.queue.put_nowait((json.dumps(delta(999999, '99')), datetime.now(timezone.utc)-timedelta(seconds=3), inbox.epoch))
         inbox.queue.put_nowait((json.dumps(delta(999999, '99')), datetime.now(timezone.utc)-timedelta(seconds=3), inbox.epoch))
+        inbox.epoch += 1
+        inbox.delivery_gap = True
+        inbox.resync.set()
     wait_for(lambda: c['shadow'] is not old_shadow)
     assert inbox.resyncs == 1 and not c.get('ready')
     assert p.books['ay']['asks']['.4'] == '1'
@@ -262,9 +265,9 @@ def test_merged_gap_keeps_physical_receipt_gap_unchanged(feed_manager):
     event = state['outage_events'][0]
     assert event['source_silence_ms'] >= 30000 and event['merged_gap_ms'] < 100
     for a in state['assets']:
-        m.continuity.published[a] = dict(received=now+timedelta(milliseconds=30), receipt_gap_ms=50)
         p.books[a] = {'asks':{}, 'bids':{}}
         p.recording.metadata[a] = (now, now+timedelta(milliseconds=30), 'ws')
+    m.continuity.publication(p.recording.metadata, set(state['assets']))
     m.complete_recovery(0, state, 'backup')
     assert event['merged_gap_ms'] < 100 and event['merged_gap_final']
     assert event['receipt_gap_ms'] >= 30000
