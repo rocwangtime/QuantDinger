@@ -120,15 +120,17 @@ def test_text_heartbeat_send_failure_wakes_reader(monkeypatch):
     app = observer.read_ahead_app(websocket.WebSocketApp)('ws://127.0.0.1')
     app.keep_running, app.ping_interval = True, 0
     app.stop_ping = SimpleNamespace(wait=lambda _: False)
-    errors, shutdowns = [], []
+    errors, ops = [], []
     app.on_error = lambda app, error: errors.append(str(error))
     def fail(raw):
         raise OSError('send failed')
-    app.sock = SimpleNamespace(send=fail, shutdown=lambda: shutdowns.append(True))
+    raw = SimpleNamespace(shutdown=lambda how: ops.append(how), close=lambda: ops.append('close'))
+    app.sock = SimpleNamespace(send=fail, sock=raw)
     app.subscription_ready.set()
     app._send_ping()
     assert errors == ['send failed']
-    assert shutdowns == [True]
+    assert ops == [socket.SHUT_RDWR]
+    assert app.keep_running is False and app.generation_retired is True
     assert app.text_heartbeat_active is False
 
 
