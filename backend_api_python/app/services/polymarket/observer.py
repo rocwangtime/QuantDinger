@@ -1975,7 +1975,43 @@ class MarketConnections:
             accounting='conservative_retained_cache_estimates_not_rss')
         return self.aux_memory
 
+    def ended_assets(self, assets, now=None):
+        """Assets whose market is past its end time.
+
+        /books keeps serving a cached book for a market that stopped trading,
+        seconds old (1.6-4.4s seen on 2026-10-20), so a repair fails the stale
+        check and retries. The WS push or retirement handles these assets.
+        An asset of no known market is not ended.
+        """
+        markets = self.markets
+        if getattr(self, '_end_by_asset_for', None) is not markets:
+            ends = {}
+            for market in markets or []:
+                end = market.get('endDate')
+                if not end:
+                    continue
+                try:
+                    at = updown.timestamp(end)
+                except (TypeError, ValueError):
+                    continue
+                for asset in (market.get('yesAssetId'), market.get('noAssetId')):
+                    if asset is not None:
+                        ends[str(asset)] = at
+            self._end_by_asset, self._end_by_asset_for = ends, markets
+        now = now or datetime.now(timezone.utc)
+        ends = self._end_by_asset
+        return {a for a in assets if (at := ends.get(str(a))) is not None and at <= now}
+
     def request_snapshot(self, index, state, assets, pressure=False):
+        ended = self.ended_assets(assets)
+        if ended:
+            self.snapshot_recovery.skipped_ended('pressure' if pressure else 'recovery', len(ended))
+            assets = [a for a in assets if a not in ended]
+            if not assets:
+                if (state.get('need_book') and self.states.get(index) is state
+                        and not state.get('retired')):
+                    self._resubscribe_books(index, state)
+                return False
         generation = state.get('inbox')
         epoch = generation.epoch if generation else None
         def publish(events, started):

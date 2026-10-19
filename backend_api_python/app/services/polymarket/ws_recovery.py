@@ -1,4 +1,5 @@
 """Prepared, pooled unauthenticated /books repairs, off the reader/supervisor."""
+import logging
 import threading
 import time
 from collections import deque, Counter
@@ -8,6 +9,43 @@ import requests
 
 from .client import CLOB
 from . import recording
+
+_LOG = logging.getLogger(__name__)
+# A /books answer whose book timestamp is this far from local time is stale.
+STALE_SECONDS = 2
+# Retry delay after a stale answer. The server keeps serving the same cached
+# book for a while (1.6-4.4s seen on 2026-10-20), so 0.5s retries only fail.
+STALE_RETRY_SECONDS = 5
+FAILURE_LOG_SECONDS = 30
+
+
+class SnapshotRejected(ValueError):
+    """A /books answer that cannot be used. `reason` is the counter key."""
+
+    def __init__(self, reason, message, age_s=None):
+        super().__init__(message)
+        self.reason = reason
+        self.age_s = age_s
+
+
+def failure_reason(exc):
+    """Stable counter key for a failed /books repair."""
+    if isinstance(exc, SnapshotRejected):
+        return exc.reason
+    if isinstance(exc, requests.ConnectTimeout):
+        return 'connect_timeout'
+    if isinstance(exc, requests.ReadTimeout):
+        return 'read_timeout'
+    if isinstance(exc, requests.HTTPError):
+        status = getattr(getattr(exc, 'response', None), 'status_code', None)
+        return f'http_{status}' if status else 'http_error'
+    if isinstance(exc, requests.ConnectionError):
+        return 'connection_error'
+    if isinstance(exc, requests.RequestException):
+        return 'request_error'
+    if isinstance(exc, ValueError):
+        return 'bad_json'
+    return 'error_' + type(exc).__name__
 
 
 class SnapshotRecovery:
@@ -28,6 +66,10 @@ class SnapshotRecovery:
         self.background_starts = deque()
         self.background_active = 0
         self.last_http_at = -float('inf')
+        self.failure_reasons = {kind: Counter() for kind in self.counts}
+        self.last_failure = None
+        self.logged_at = -float('inf')
+        self.unlogged = Counter()
 
     def count(self, kind, field, now, amount=1):
         self.counts[kind][field] += amount
@@ -129,37 +171,39 @@ class SnapshotRecovery:
                 try:
                     response.raise_for_status()
                     if len(response.content) > 8 * 1024 * 1024:
-                        raise ValueError('oversize public snapshot')
+                        raise SnapshotRejected('oversize', 'oversize public snapshot')
                     rows = response.json()
                 finally:
                     response.close()
                 if not isinstance(rows, list) or len(rows) != len(group):
-                    raise ValueError('incomplete public snapshot')
+                    raise SnapshotRejected('incomplete', 'incomplete public snapshot')
                 events, seen = [], set()
                 for row in rows:
                     asset = str(row.get('asset_id', ''))
                     at = recording.exchange_time(row.get('timestamp'))
                     if asset not in group or asset in seen or at is None:
-                        raise ValueError('invalid public snapshot identity/time')
-                    if abs((datetime.now(timezone.utc) - at).total_seconds()) > 2:
-                        raise ValueError('stale public snapshot')
+                        raise SnapshotRejected('identity', 'invalid public snapshot identity/time')
+                    age = (datetime.now(timezone.utc) - at).total_seconds()
+                    if abs(age) > STALE_SECONDS:
+                        raise SnapshotRejected('stale', 'stale public snapshot', age)
                     seen.add(asset)
                     for side in ('bids', 'asks'):
                         if not isinstance(row.get(side), list) or any(
                                 not isinstance(level, dict) or 'price' not in level or 'size' not in level
                                 for level in row[side]):
-                            raise ValueError('invalid public snapshot levels')
+                            raise SnapshotRejected('levels', 'invalid public snapshot levels')
                     events.append(dict(event_type='book', asset_id=asset, timestamp=row['timestamp'],
                                        bids=row['bids'], asks=row['asks']))
                 if not warm:
-                    publish(events, started)
+                    try:
+                        publish(events, started)
+                    except (ValueError, TypeError, KeyError, AttributeError) as exc:
+                        raise SnapshotRejected('publish_' + type(exc).__name__, str(exc)[:200]) from exc
                 with self.lock:
                     self.completed += 1
                     self.count(kind, "completed", time.monotonic())
-            except (requests.RequestException, ValueError, TypeError, KeyError, AttributeError):
-                with self.lock:
-                    self.failures += 1
-                    self.count(kind, "failures", time.monotonic())
+            except (requests.RequestException, ValueError, TypeError, KeyError, AttributeError) as exc:
+                self._failed(kind, state, retry_key, group, exc, began)
             finally:
                 with self.lock:
                     self.latencies.append((time.monotonic() - began) * 1000)
@@ -187,6 +231,36 @@ class SnapshotRecovery:
                     name='polymarket-public-book', daemon=True).start()
         return True
 
+    def _failed(self, kind, state, retry_key, group, exc, began):
+        reason = failure_reason(exc)
+        now = time.monotonic()
+        detail = dict(at=datetime.now(timezone.utc).isoformat(), kind=kind, reason=reason,
+                      assets=len(group), latency_ms=round((now - began) * 1000, 1),
+                      age_s=round(exc.age_s, 3) if getattr(exc, 'age_s', None) is not None else None,
+                      message=str(exc)[:160])
+        with self.lock:
+            self.failures += 1
+            self.count(kind, "failures", now)
+            self.failure_reasons[kind][reason] += 1
+            self.last_failure = detail
+            if reason == 'stale':
+                # Same cached book for seconds: do not burn the 10s budget.
+                state[retry_key] = max(state.get(retry_key, 0), now + STALE_RETRY_SECONDS)
+                self.count(kind, 'stale_backoff', now)
+            self.unlogged[reason] += 1
+            emit = now - self.logged_at >= FAILURE_LOG_SECONDS
+            if emit:
+                summary, self.unlogged = dict(self.unlogged), Counter()
+                self.logged_at = now
+        if emit:
+            _LOG.warning('Polymarket REST book repair failed kind=%s reason=%s assets=%s latency_ms=%s age_s=%s '
+                         'since_last_log=%s', kind, reason, len(group), detail['latency_ms'], detail['age_s'], summary)
+
+    def skipped_ended(self, kind, count):
+        """Assets of a market past its end time: left to the WS push or retirement."""
+        with self.lock:
+            self.count(kind, 'skipped_ended', time.monotonic(), count)
+
     def close(self):
         with self.lock:
             self.closed = True
@@ -199,7 +273,8 @@ class SnapshotRecovery:
         with self.lock:
             self.expire_hour(time.monotonic())
             hourly = self.hour_totals  # O(1); equals sum(self.hour.values(), Counter())
-            fields = ('attempts', 'requests', 'completed', 'failures', 'throttled', 'deferred')
+            fields = ('attempts', 'requests', 'completed', 'failures', 'throttled', 'deferred',
+                      'stale_backoff', 'skipped_ended')
             categories = {kind: dict(total={f: counts[f] for f in fields},
                 rolling_hour={f: hourly[kind, f] for f in fields}) for kind, counts in self.counts.items()}
             samples = sorted(self.latencies)
@@ -207,6 +282,8 @@ class SnapshotRecovery:
                         background_limit_per_hour=120, reserved_recovery_slots=2,
                         requests=self.requests, completed=self.completed, failures=self.failures,
                         inflight=len(self.active), inflight_http=4-len(self.slots) if not self.closed else 0,
+                        failure_reasons={kind: dict(reasons) for kind, reasons in self.failure_reasons.items()},
+                        last_failure=dict(self.last_failure) if self.last_failure else None,
                         throttled=self.throttled, limit_per_10s=40, warmups=self.warmups, pressure_requests=self.pressure_requests,
                         warm_limit_per_10s=24, pressure_limit_per_10s=32,
                         latency_ms=dict(samples=len(samples), max=max(samples, default=0),
