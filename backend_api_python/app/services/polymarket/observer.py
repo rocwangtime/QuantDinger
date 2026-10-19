@@ -1215,6 +1215,32 @@ def socket_pending_bytes(app):
         return None
 
 
+def book_fallback_seconds():
+    """After this long with no snapshot, resubscribe so the server pushes a book."""
+    return 1.5
+
+
+class _LivenessShadow:
+    """Placeholder so status can read a backup that does not rebuild a ladder."""
+
+    def __init__(self, assets):
+        self.assets = set(assets)
+        self.books = {}
+        self.lock = RLock()
+        self.merge = FeedMerge({}, deduplicate=False)
+        self.recorder = recording.Recorder()
+        self.recorder.enabled = False
+
+    def prune(self, assets):
+        self.assets = set(assets)
+
+    def observe_active(self, metadata):
+        return None
+
+    def receive(self, event, received):
+        return None
+
+
 class MarketConnections:
     """Own independent public receive threads and per-socket subscription sets."""
     def __init__(self):
@@ -1342,15 +1368,141 @@ class MarketConnections:
             self.update_hot_coverage(time.monotonic())
         self._promote_liveness_backup(index, state)
 
+    def _remember_books(self, state, event):
+        marks = state.setdefault('book_marks', {})
+        for kind, payload in recording.events(event):
+            if kind != 'book':
+                continue
+            asset = str(payload.get('asset_id') or payload.get('assetId') or '')
+            if asset:
+                marks[asset] = (recording.exchange_time(payload.get('timestamp')), payload.get('hash'),
+                                payload.get('timestamp'))
+
+    def _flush_held(self, state):
+        from .ws_payloads import snapshot_keeps_change
+        pending = set(state.get('need_book') or ())
+        marks = state.get('book_marks') or {}
+        waiting, ready = [], []
+        for item in state.get('held_changes') or []:
+            payload = item.get('payload') or item
+            field = 'price_changes' if 'price_changes' in payload else 'priceChanges' if 'priceChanges' in payload else None
+            rows = [row for row in (payload.get(field) or []) if isinstance(row, dict)] if field else []
+            stamp = recording.exchange_time(payload.get('timestamp'))
+            keep, hold = [], []
+            for row in rows:
+                asset = str(row.get('asset_id') or row.get('assetId') or '')
+                if asset in pending:
+                    hold.append(row)
+                    continue
+                mark = marks.get(asset)
+                if mark and not snapshot_keeps_change(stamp, row.get('hash'), mark[0], mark[1]):
+                    continue
+                keep.append(row)
+            if hold and field:
+                body = dict(payload)
+                body[field] = hold
+                waiting.append(dict(item, payload=body) if 'payload' in item else body)
+            if keep and field:
+                body = dict(payload)
+                body[field] = keep
+                ready.append(body)
+        state['held_changes'] = waiting
+        return ready
+
     def _release_resync(self, state, event):
-        from .ws_payloads import hold_until_snapshot
+        """Apply books now. Buffer price changes until that asset's snapshot."""
+        pending = state.get('need_book')
+        if not pending and not state.get('held_changes'):
+            self._remember_books(state, event)
+            return event
+        apply = []
+        items = event if isinstance(event, list) else [event]
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            kind = item.get('event_type') or item.get('type')
+            payload = item.get('payload') or item
+            if kind == 'book':
+                asset = str(payload.get('asset_id') or payload.get('assetId') or '')
+                if asset:
+                    state.setdefault('book_marks', {})[asset] = (
+                        recording.exchange_time(payload.get('timestamp')), payload.get('hash'),
+                        payload.get('timestamp'))
+                    if pending and asset in pending:
+                        pending.discard(asset)
+                apply.append(item)
+                continue
+            if kind == 'price_change' and pending:
+                field = 'price_changes' if 'price_changes' in payload else 'priceChanges' if 'priceChanges' in payload else None
+                rows = payload.get(field) or [] if field else []
+                assets = {str(row.get('asset_id') or row.get('assetId') or '') for row in rows if isinstance(row, dict)}
+                if assets & set(pending):
+                    state.setdefault('held_changes', []).append(item)
+                    continue
+            apply.append(item)
+        apply.extend(self._flush_held(state))
+        if pending is not None and not pending:
+            state.pop('need_book', None)
+            self._cancel_book_fallback(state)
+        if not apply:
+            return None
+        if len(apply) == 1 and not isinstance(event, list):
+            return apply[0]
+        return apply
+
+    def _accept_rest_books(self, state, events):
+        """Release each asset whose REST book is not older than the last applied one."""
         pending = state.get('need_book')
         if not pending:
-            return event
-        released = hold_until_snapshot(event, pending)
+            return []
+        for kind, payload in recording.events(events):
+            if kind != 'book':
+                continue
+            asset = str(payload.get('asset_id') or payload.get('assetId') or '')
+            if asset not in pending:
+                continue
+            at = recording.exchange_time(payload.get('timestamp'))
+            previous = (state.get('book_marks') or {}).get(asset)
+            if previous and previous[0] is not None and at is not None and at < previous[0]:
+                continue
+            state.setdefault('book_marks', {})[asset] = (at, payload.get('hash'), payload.get('timestamp'))
+            pending.discard(asset)
+        extra = self._flush_held(state)
         if not pending:
             state.pop('need_book', None)
-        return released
+            self._cancel_book_fallback(state)
+        return extra
+
+    def _cancel_book_fallback(self, state):
+        state['book_fallback_token'] = state.get('book_fallback_token', 0) + 1
+
+    def _arm_book_fallback(self, index, state):
+        """Resubscribe assets still waiting, so the server pushes a book."""
+        if not state.get('need_book'):
+            return
+        token = state.get('book_fallback_token', 0) + 1
+        state['book_fallback_token'] = token
+        delay = book_fallback_seconds()
+
+        def fire():
+            if delay > 0:
+                time.sleep(delay)
+            with self.lifecycle_lock:
+                if state.get('book_fallback_token') != token or not state.get('need_book'):
+                    return
+                if self.states.get(index) is not state or state.get('retired') or not state.get('connected'):
+                    return
+                sock = state.get('socket')
+                pending = sorted(state.get('need_book') or ())
+                if sock is None or not pending:
+                    return
+                try:
+                    sock.send(json.dumps(dict(assets_ids=pending, operation='unsubscribe')))
+                    sock.send(json.dumps(dict(assets_ids=pending, type='market', operation='subscribe')))
+                except Exception:
+                    _LOG.exception('Polymarket WS book resubscribe failed shard=%s', index)
+
+        threading.Thread(target=fire, name='polymarket-book-fallback', daemon=True).start()
 
     def _promote_liveness_backup(self, index, state):
         """Hand the socket to the primary role and wait for a fresh book."""
@@ -1374,6 +1526,13 @@ class MarketConnections:
             extra = set(state.get('assets') or []) - set(required)
             state['assets'] = list(required)
             state['need_book'] = set(required)
+            # The promoted socket never parsed a ladder, so it has no hash to echo.
+            # Carry the primary's last book so REST can release each asset immediately.
+            required_ids = {str(asset) for asset in required}
+            carried = {str(asset): mark for asset, mark in (old.get('book_marks') or {}).items()
+                       if str(asset) in required_ids}
+            if carried:
+                state['book_marks'] = {**dict(state.get('book_marks') or {}), **carried}
             state.update(standby=False, redundant=False,
                          promoted_at=datetime.now(timezone.utc).isoformat(),
                          rotate_failures=0, rotate_retry_at=0, backup_started=True,
@@ -1390,6 +1549,8 @@ class MarketConnections:
             self.update_hot_coverage(time.monotonic())
             self.retire(old)
             self.request_snapshot(index, state, required)
+            if state.get('need_book'):
+                self._arm_book_fallback(index, state)
             self.redundancy_tick(time.monotonic())
         return True
 
@@ -1668,6 +1829,8 @@ class MarketConnections:
                         or generation and (generation.epoch != epoch or generation.resync.is_set())):
                     return
                 if state.get('redundant'):
+                    if self.liveness_backup:
+                        return
                     if not any(i == index and c is state for i, c in self.backup_items()):
                         return
                     inbox = state['inbox']
@@ -1675,6 +1838,8 @@ class MarketConnections:
                         return
                     self.redundant_receive(index, state, events, started, inbox)
                 elif self.states.get(index) is state and _PIPELINE:
+                    with state['lock']:
+                        extra = self._accept_rest_books(state, events) if state.get('need_book') else []
                     with _PIPELINE.lock:
                         owned = {a for a in assets if self.balancer.assignment.get(a) == index}
                         # Seed from live watermarks: late REST may never roll back WS.
@@ -1684,7 +1849,15 @@ class MarketConnections:
                             self.continuity.receive(merged, 'rest', datetime.now(timezone.utc))
                             _PIPELINE.receive(merged, owned, datetime.now(timezone.utc))
                             self.continuity.publication(_PIPELINE.recording.metadata, owned)
+                        if extra:
+                            kept = merge.filter(extra, state.get('source') or 'rest', owned)
+                            if kept:
+                                self.continuity.receive(kept, state.get('source') or 'rest', datetime.now(timezone.utc))
+                                _PIPELINE.receive(kept, owned, datetime.now(timezone.utc))
+                                self.continuity.publication(_PIPELINE.recording.metadata, owned)
                         self.complete_recovery(index, state, 'rest_snapshot')
+                    if state.get('need_book'):
+                        self._arm_book_fallback(index, state)
         if pressure:
             return self.snapshot_recovery.request(state, assets, publish, pressure=True)
         return self.snapshot_recovery.request(state, assets, publish)
@@ -1765,7 +1938,10 @@ class MarketConnections:
                 candidate['inbox'].invalid.set()
                 _LOG.warning('Polymarket WS backup subscription failed shard=%s reason=%s', index, str(exc)[:160])
                 break
-        self.redundant_receive(index, candidate, [], datetime.now(timezone.utc), candidate['inbox'])
+        if self.liveness_backup:
+            candidate['liveness_assets'] = set(candidate.get('liveness_assets') or ()) & set(assets)
+        else:
+            self.redundant_receive(index, candidate, [], datetime.now(timezone.utc), candidate['inbox'])
 
     def _sync(self, markets):
         self.markets = markets = self.active_catalogue(markets)
@@ -2331,7 +2507,9 @@ class MarketConnections:
             candidate = dict(assets=owned_assets, socket=None, thread=None, connected=False,
                 required_assets=set(old['assets']), primary_index=index,
                 lock=RLock(), attempts=0, retry_at=0, ping_at=0, standby=True, redundant=True,
-                busy=True, source=f'backup-{self.backup_serial}', shadow=ShadowBooks(owned_assets), created_at=now)
+                busy=True, source=f'backup-{self.backup_serial}',
+                shadow=_LivenessShadow(owned_assets) if self.liveness_backup else ShadowBooks(owned_assets),
+                created_at=now)
             (self.reserves if first else self.backups)[index] = candidate
             old['backup_started'] = True
             initial = max(int(ws_setting('SUBSCRIBE_BATCH_ASSETS', 2, 1)),
@@ -2385,6 +2563,8 @@ class MarketConnections:
         return rows
 
     def redundant_receive(self, index, state, event, received_at, inbox, epoch=None):
+        if self.liveness_backup and state.get('redundant'):
+            return
         # Building a private ladder must not hold every feed's publication lock.
         # ShadowBooks has its own short lock; release it before lifecycle entry.
         shadow = state.get('shadow')
@@ -2745,7 +2925,11 @@ class MarketConnections:
                             self.update_hot_coverage(time.monotonic())
                             inbox.discard()
                             inbox.queue_wait_seconds = inbox.lag_seconds = 0
-                            state['shadow'] = ShadowBooks(state['assets'])
+                            if self.liveness_backup:
+                                state['liveness_assets'] = set()
+                                state['liveness_hash'] = {}
+                            else:
+                                state['shadow'] = ShadowBooks(state['assets'])
                             state['ready'] = False
                             inbox.resync.clear()
                             inbox.delivery_gap = False
@@ -2821,11 +3005,14 @@ class MarketConnections:
                         self.shadow_receive(index, state, event, received_at, inbox, epoch)
                         self._charge('backup_apply', apply_cpu)
                         continue
-                    if state.get('need_book'):
-                        event = self._release_resync(state, event)
-                        if not event:
-                            self._charge('primary_apply', apply_cpu)
-                            continue
+                    if state.get('need_book') or state.get('held_changes'):
+                        with state['lock']:
+                            event = self._release_resync(state, event)
+                    else:
+                        self._remember_books(state, event)
+                    if not event:
+                        self._charge('primary_apply', apply_cpu)
+                        continue
                     event = self.migration_receive(index, state, event, received_at, inbox)
                     self.balancer.receive(event, index, len(raw.encode('utf-8')) if isinstance(raw, str) else len(raw) if isinstance(raw, (bytes, bytearray)) else 0)
                     self.stats.message(index)

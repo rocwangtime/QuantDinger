@@ -13,7 +13,7 @@ from app.services.polymarket.ws_group_process import (
     partition, planned_events, primary_first_enabled, process_per_group_enabled,
     queue_age_series, restart_backoff_seconds, weighted_counts, wire_event,
     without_stale_books)
-from app.services.polymarket.ws_payloads import cheap_envelope, hold_until_snapshot
+from app.services.polymarket.ws_payloads import cheap_envelope, hold_until_snapshot, snapshot_keeps_change
 
 _FEED_ID = re.compile(r'^feed-\d+$')
 
@@ -119,6 +119,11 @@ def test_restart_backoff_caps_and_alerts_on_the_third_death():
     alive = type('Proc', (), {'is_alive': lambda self: True, 'exitcode': None})()
     child.proc = alive
     assert feeds._consider_restart('g', child, 200.0) is False
+    feeds.restart_stable_since['g'] = 200.0
+    assert feeds._consider_restart('g', child, 200.0 + 599) is False
+    assert feeds.restarts['g'] == 3 and 'g' in feeds.restart_alert
+    assert feeds._consider_restart('g', child, 200.0 + 600) is False
+    assert feeds.restarts['g'] == 0 and 'g' not in feeds.restart_alert
 
 
 def test_cheap_envelope_skips_the_ladder():
@@ -173,6 +178,134 @@ def test_liveness_backup_promotes_and_holds_until_a_book():
     book = dict(event_type='book', asset_id='ay', timestamp=6, hash='next', bids=[], asks=[])
     assert manager._release_resync(backup, book) is book
     assert backup['need_book'] == {'an'}
+
+
+def test_snapshot_orders_changes_by_timestamp_and_hash():
+    book_at = datetime(2026, 10, 19, tzinfo=timezone.utc)
+    older = book_at.timestamp() * 1000 - 5
+    same = int(book_at.timestamp() * 1000)
+    newer = same + 5
+    assert snapshot_keeps_change(older, 'h', book_at, 'book') is False
+    assert snapshot_keeps_change(same, 'book', book_at, 'book') is False
+    assert snapshot_keeps_change(same, 'other', book_at, 'book') is True
+    assert snapshot_keeps_change(newer, 'h', book_at, 'book') is True
+    assert snapshot_keeps_change(None, 'h', book_at, 'book') is False
+
+
+def test_rest_snapshot_releases_price_changes_within_1_5s(monkeypatch):
+    from app.services.polymarket.ws_redundancy import FeedMerge
+    manager = observer.MarketConnections()
+    manager.liveness_backup = True
+    manager.update_hot_coverage = lambda now: None
+    manager.retire = lambda state: None
+    manager.redundancy_tick = lambda now: None
+    sent = []
+
+    class Sock:
+        def send(self, raw):
+            sent.append(json.loads(raw))
+
+    inbox = _Inbox()
+    inbox.epoch = 1
+    backup = dict(redundant=True, connected=True, standby=True, assets=['ay', 'an'],
+                  worker=threading.current_thread(), inbox=inbox, source='backup',
+                  subscribe_pending=[], recover_assets=[], lock=threading.RLock(), socket=Sock())
+    primary = dict(connected=False, assets=['ay', 'an'], inbox=_Inbox(), source='primary')
+    manager.states[0] = primary
+    manager.backups[0] = backup
+    manager.balancer.assignment = {'ay': 0, 'an': 0}
+    pipeline = observer.Pipeline()
+    pipeline.recording.enabled = False
+    monkeypatch.setattr(observer, '_PIPELINE', pipeline)
+    pipeline.set_markets([dict(id='0', yesAssetId='ay', noAssetId='an')])
+    manager.merges[0] = FeedMerge({})
+    stamp = int(datetime(2026, 10, 19, tzinfo=timezone.utc).timestamp() * 1000)
+    backup['book_marks'] = {
+        'ay': (datetime.fromtimestamp(stamp / 1000, timezone.utc), 'hay', stamp),
+        'an': (datetime.fromtimestamp(stamp / 1000, timezone.utc), 'han', stamp),
+    }
+    backup['need_book'] = {'ay', 'an'}
+    older = dict(event_type='price_change', timestamp=stamp - 5, price_changes=[
+        dict(asset_id='ay', price='.4', size='1', hash='old')])
+    newer = dict(event_type='price_change', timestamp=stamp + 5, price_changes=[
+        dict(asset_id='ay', price='.41', size='2', hash='new'),
+        dict(asset_id='an', price='.59', size='2', hash='new2')])
+    assert manager._release_resync(backup, older) is None
+    assert manager._release_resync(backup, newer) is None
+    backup['redundant'] = False
+    manager.states[0] = backup
+    arrived = time.monotonic()
+
+    def publish_rest(state, assets, publish, warm=False, pressure=False):
+        publish([
+            dict(event_type='book', asset_id='ay', timestamp=stamp, hash='hay', bids=[], asks=[]),
+            dict(event_type='book', asset_id='an', timestamp=stamp, hash='han', bids=[], asks=[]),
+        ], datetime.now(timezone.utc))
+        return True
+
+    manager.snapshot_recovery.request = publish_rest
+    assert manager.request_snapshot(0, backup, ['ay', 'an']) is True
+    assert 'need_book' not in backup
+    assert time.monotonic() - arrived < 1.5
+    released = manager._release_resync(backup, dict(
+        event_type='price_change', timestamp=stamp + 9, price_changes=[
+            dict(asset_id='ay', price='.42', size='3', hash='live')]))
+    assert released['price_changes'][0]['hash'] == 'live'
+    applied = json.dumps(pipeline.books)
+    assert 'old' not in applied
+    assert pipeline.books['ay']['asks']['.41'] == '2'
+    monkeypatch.setattr(observer, 'book_fallback_seconds', lambda: 0.05)
+    backup['need_book'] = {'ay'}
+    manager._arm_book_fallback(0, backup)
+    deadline = time.monotonic() + 1
+    while time.monotonic() < deadline and not any(row.get('operation') == 'subscribe' for row in sent):
+        time.sleep(0.01)
+    assert any(row.get('operation') == 'subscribe' and row.get('assets_ids') == ['ay'] for row in sent)
+
+
+def test_promotion_replays_the_primary_book_within_1_5s(monkeypatch):
+    """The promoted socket has no ladder. REST must echo the primary's last book."""
+    from app.services.polymarket.ws_group_process import _replay_snapshot
+    from app.services.polymarket.ws_redundancy import FeedMerge
+    manager = observer.MarketConnections()
+    manager.liveness_backup = True
+    manager.update_hot_coverage = lambda now: None
+    manager.retire = lambda state: None
+    manager.redundancy_tick = lambda now: None
+    inbox = _Inbox()
+    inbox.epoch = 1
+    backup = dict(redundant=True, connected=True, standby=True, assets=['ay', 'an'],
+                  worker=threading.current_thread(), inbox=inbox, source='backup',
+                  subscribe_pending=[], recover_assets=[], lock=threading.RLock())
+    stamp = int(datetime(2026, 10, 19, tzinfo=timezone.utc).timestamp() * 1000)
+    primary = dict(connected=True, assets=['ay', 'an'], inbox=_Inbox(), source='primary',
+                   book_marks={
+                       'ay': (datetime.fromtimestamp(stamp / 1000, timezone.utc), 'hay', stamp),
+                       'an': (datetime.fromtimestamp(stamp / 1000, timezone.utc), 'han', stamp),
+                   })
+    manager.states[0] = primary
+    manager.backups[0] = backup
+    manager.balancer.assignment = {'ay': 0, 'an': 0}
+    pipeline = observer.Pipeline()
+    pipeline.recording.enabled = False
+    monkeypatch.setattr(observer, '_PIPELINE', pipeline)
+    pipeline.set_markets([dict(id='0', yesAssetId='ay', noAssetId='an')])
+    manager.merges[0] = FeedMerge({})
+    manager.snapshot_recovery.request = _replay_snapshot
+    raw = json.dumps([dict(event_type='book', asset_id=asset, timestamp=stamp, hash=f'h{asset}',
+                           bids=[dict(price='.4', size='1')], asks=[]) for asset in ('ay', 'an')])
+    manager.liveness_receive(0, backup, raw, datetime.now(timezone.utc), inbox)
+    primary['connected'] = False
+    arrived = time.monotonic()
+    manager.liveness_receive(0, backup, raw, datetime.now(timezone.utc), inbox)
+    assert manager.states[0] is backup
+    assert 'need_book' not in backup
+    assert time.monotonic() - arrived < 1.5
+    assert backup['book_marks']['ay'][1] == 'hay'
+    released = manager._release_resync(backup, dict(
+        event_type='price_change', timestamp=stamp + 5, price_changes=[
+            dict(asset_id='ay', price='.41', size='2', hash='live')]))
+    assert released['price_changes'][0]['hash'] == 'live'
 
 
 def test_liveness_books_count_as_snapshots_for_repair():

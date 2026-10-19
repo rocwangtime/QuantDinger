@@ -95,6 +95,9 @@ def primary_first_enabled():
     return os.getenv('POLYMARKET_OBSERVER_PRIMARY_FIRST', '0').lower() in {'1', 'true', 'yes'}
 
 
+RESTART_STABLE_SECONDS = 600
+
+
 def restart_backoff_seconds(attempt):
     """1-based restart count. 0.5s, then doubles, capped at 30s."""
     if attempt < 1:
@@ -180,9 +183,17 @@ def weighted_counts(total, weights):
     return counts
 
 
+def book_every():
+    """WS book spacing for the replay. Production books are far sparser than 5."""
+    try:
+        return max(1, int(os.getenv('QD_REPLAY_BOOK_EVERY', '5') or 5))
+    except (TypeError, ValueError):
+        return 5
+
+
 def wire_event(identity, sequence, assets, levels, at):
     """Prod-shaped public book / price_change. `identity` keeps hashes unique."""
-    if sequence % 5 == 0:
+    if sequence % book_every() == 0:
         return [dict(event_type='book', asset_id=asset, timestamp=at, hash=f'{identity}{asset}',
                      bids=[dict(price=str(level / 1000), size='3') for level in range(400 - levels // 2, 400)],
                      asks=[dict(price=str(level / 1000), size='4') for level in range(600, 600 + levels // 2)])
@@ -412,6 +423,42 @@ def _merge_recovery(left, right):
     return merged
 
 
+_REPLAY_BOOKS = {}
+_REPLAY_BOOKS_LOCK = threading.Lock()
+
+
+def _remember_replay_frame(raw):
+    """Keep the latest full book per asset so a new subscribe can push one.
+
+    Production sends a book on subscribe. The scheduled stream is much sparser,
+    and a backup opened after failover would otherwise stay dark until the next
+    scheduled book.
+    """
+    try:
+        event = json.loads(raw)
+    except (TypeError, ValueError):
+        return
+    found = {}
+    for item in event if isinstance(event, list) else [event]:
+        if not isinstance(item, dict) or (item.get('event_type') or item.get('type')) != 'book':
+            continue
+        asset = str(item.get('asset_id') or item.get('assetId') or '')
+        if asset and item.get('hash') is not None and item.get('timestamp') is not None:
+            found[asset] = item
+    if found:
+        with _REPLAY_BOOKS_LOCK:
+            _REPLAY_BOOKS.update(found)
+
+
+def _replay_books_for(assets):
+    wanted = [str(asset) for asset in assets or []]
+    with _REPLAY_BOOKS_LOCK:
+        books = [_REPLAY_BOOKS[asset] for asset in wanted if asset in _REPLAY_BOOKS]
+    if not books:
+        return None
+    return json.dumps(books if len(books) > 1 else books[0], separators=(',', ':'))
+
+
 class ReplaySocket:
     """In-process stand-in for websocket-client. The child emits frames the parent schedules."""
 
@@ -443,6 +490,11 @@ class ReplaySocket:
                 self.assets = list(dict.fromkeys([*self.assets, *message['assets_ids']]))
             else:
                 self.assets = list(message['assets_ids'])
+            # The exchange pushes a book immediately. Echo the last full book when
+            # this process has already seen one; the opener only queues the frame.
+            frame = _replay_books_for(message.get('assets_ids'))
+            if frame and not self.stopped.is_set():
+                self.emit(frame)
 
     def close(self):
         self.keep_running = False
@@ -596,6 +648,30 @@ def without_stale_books(event, metadata):
     return event
 
 
+def _replay_snapshot(state, assets, publish, warm=False, pressure=False):
+    """Echo the last applied book hash so failover does not wait for the next WS book.
+
+    The fingerprint is asset, timestamp and hash. FeedMerge drops that copy
+    instead of rebuilding the ladder from the empty bids below. The publish
+    callback still releases `need_book` and the newer buffered price changes.
+    Assets with no carried mark stay held; the caller arms the resubscribe fallback.
+    """
+    if warm or pressure:
+        return False
+    marks = state.get('book_marks') or {}
+    books = []
+    for asset in assets:
+        mark = marks.get(str(asset))
+        if not mark or len(mark) < 3 or mark[0] is None or not mark[1] or mark[2] is None:
+            continue
+        books.append(dict(event_type='book', asset_id=str(asset),
+                          timestamp=mark[2], hash=mark[1], bids=[], asks=[]))
+    if not books:
+        return False
+    publish(books, datetime.now(timezone.utc))
+    return True
+
+
 def _resync_dropped(manager, assets):
     """Ask the live primary for a fresh book after an IPC drop."""
     wanted = set(assets or [])
@@ -680,7 +756,9 @@ def _drive(manager, spec):
         if stopped is not None and stopped.is_set():
             continue
         try:
-            sock.emit(json.dumps(wire_event(*args), separators=(',', ':')))
+            raw = json.dumps(wire_event(*args), separators=(',', ':'))
+            _remember_replay_frame(raw)
+            sock.emit(raw)
         except Exception:
             _LOG.exception('replay emit failed role=%s', role)
 
@@ -850,6 +928,8 @@ def child_main(spec, data_conn, control_conn):
         if replay:
             os.environ['POLYMARKET_OBSERVER_WS_REPLAY'] = '1'
             install_replay_transport()
+            with _REPLAY_BOOKS_LOCK:
+                _REPLAY_BOOKS.clear()
         from . import observer
         observer.tune_switch_interval()
         observer._STOP = threading.Event()
@@ -866,7 +946,7 @@ def child_main(spec, data_conn, control_conn):
         if spec.get('rates'):
             manager.seed_rates(spec['rates'])
         if replay:
-            manager.snapshot_recovery.request = lambda *args, **kwargs: False
+            manager.snapshot_recovery.request = _replay_snapshot
         manager.sync(spec.get('markets') or [], prewarm=spec.get('prewarm') or [])
         manager.start_supervisor()
         outbox.add(dict(op='hello', pid=os.getpid(), key=spec['key']))
@@ -1047,6 +1127,7 @@ class GroupFeeds:
         self.published = 0
         self.restart_after = {}
         self.restart_alert = {}
+        self.restart_stable_since = {}
         self.drop_totals = {}
         self.resync_assets = set()
         self.watchdog = None
@@ -1133,6 +1214,11 @@ class GroupFeeds:
     def _consider_restart(self, key, child, now):
         proc = child.proc
         if proc is not None and proc.is_alive():
+            since = self.restart_stable_since.get(key)
+            if since is not None and self.restarts.get(key) and now - since >= RESTART_STABLE_SECONDS:
+                self.restarts[key] = 0
+                self.restart_alert.pop(key, None)
+                self.restart_after.pop(key, None)
             return False
         if now < self.restart_after.get(key, 0):
             return False
@@ -1151,6 +1237,7 @@ class GroupFeeds:
             child.stop(0.2)
         except Exception:
             _LOG.exception('stopping dead feed %s', key)
+        self.restart_stable_since[key] = now
         self._spawn_locked(dict(child.spec))
         return True
 

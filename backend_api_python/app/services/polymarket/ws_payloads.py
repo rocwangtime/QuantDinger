@@ -224,6 +224,33 @@ def cheap_envelope(raw):
     return tips
 
 
+def _as_exchange_time(value):
+    if value is None or hasattr(value, 'timestamp'):
+        return value
+    from .recording import exchange_time
+    return exchange_time(value)
+
+
+def snapshot_keeps_change(change_stamp, change_hash, book_stamp, book_hash):
+    """Whether a price change still has to be applied after a snapshot.
+
+    Older than the snapshot is already in the book. The same timestamp and
+    hash is the snapshot itself. A missing change timestamp cannot be ordered,
+    so the snapshot wins.
+    """
+    book_at = _as_exchange_time(book_stamp)
+    change_at = _as_exchange_time(change_stamp)
+    if book_at is None:
+        return True
+    if change_at is None:
+        return False
+    if change_at < book_at:
+        return False
+    if change_at == book_at and change_hash and book_hash and change_hash == book_hash:
+        return False
+    return True
+
+
 def hold_until_snapshot(event, pending):
     """Keep books. Hold price changes that still touch an asset in `pending`.
 
