@@ -4,7 +4,7 @@ import random
 import threading
 
 from app.services.polymarket import observer, ws_payloads
-from app.services.polymarket.ws_group_process import merge_feed_status
+from app.services.polymarket.ws_group_process import merge_feed_status, wire_event
 from app.services.polymarket.ws_payloads import _cheap_envelope_regex, cheap_envelope
 
 A1 = '71321045679252212594626385532706912750332728571942532289631379312455583992563'
@@ -39,6 +39,9 @@ def _frames():
         _dump(dict(book, hash='q\\"x')), json.dumps(dict(book, hash='h\u00e9')),
         _dump(dict(book, bids=[dict(asset_id='inner', price='1', size='1')])),
         '{"event_type":"book","asset_id":"a","asset_id":"b","timestamp":"1"}',
+        '{"event_type":"book","asset_id":"a","timestamp":-0,"hash":7}',
+        '{"event_type":"book","asset_id":"a","timestamp":1e3,"hash":-12}',
+        '{"event_type":"book","asset_id":"a","timestamp":18446744073709551616}',
         json.dumps(change), _dump(dict(change, timestamp=True)), _dump(dict(change, timestamp=False)),
     ]
     return normal, abnormal
@@ -56,6 +59,9 @@ def test_fast_envelope_uses_orjson_on_normal_frames(monkeypatch):
     if ws_payloads.orjson is None:
         return
     normal, _ = _frames()
+    # The replay harness stamps integer timestamps; they must not take the slow path.
+    normal += [_dump(wire_event(3, 3, ('ay', 'an'), 140, 1_700_000_000_000)),
+               _dump(wire_event(3, 0, ('ay', 'an'), 140, 1_700_000_000_000))]
     calls = []
     monkeypatch.setattr(ws_payloads, '_cheap_envelope_regex', lambda raw: calls.append(raw) or [])
     for raw in normal:

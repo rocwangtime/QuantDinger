@@ -290,8 +290,12 @@ def _envelope_value(value):
         return 'false'
     if type(value) is str and _PLAIN_VALUE.match(value):
         return value
-    # Numbers (-0, 1e5), empty or spaced strings and containers: the regex
-    # result depends on the source text, so only the regex can answer.
+    if type(value) is int and value:
+        # JSON has no leading zeros or '+', so a nonzero integer's text is
+        # str(value). Zero may have been written -0.
+        return str(value)
+    # Floats (1e5, 1.0), zero, empty or spaced strings and containers: the
+    # regex result depends on the source text, so only the regex can answer.
     raise _Fallback
 
 
