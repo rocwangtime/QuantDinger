@@ -241,6 +241,7 @@ def run(seconds=15, rate=1896, levels=140, cold_pairs=19, stage_profile=False, l
         began, cpu = time.monotonic(), time.process_time()
         wall_began = time.time()
         schedule.update(epoch=epoch, wall_ms=wall_began*1000)
+        rss_began = observer.process_rss_bytes()
         try:
             for burst in range(int(seconds/.05)+7):
                 time.sleep(max(0, began + burst*.05-time.monotonic()))
@@ -290,6 +291,7 @@ def run(seconds=15, rate=1896, levels=140, cold_pairs=19, stage_profile=False, l
                                            max=max(primary_waits)*1000, samples=len(primary_waits)),
                 backup_queue_wait_ms=dict(p50=pct(backup_waits, .5)*1000, p99=pct(backup_waits, .99)*1000,
                                           max=max(backup_waits)*1000, samples=len(backup_waits)),
+                rss_bytes=dict(began=rss_began, drained=observer.process_rss_bytes()),
                 merged_publication_lag_ms=dict(p50=pct(merged_lag, .5), p99=pct(merged_lag, .99),
                                                max=max(merged_lag, default=None), samples=len(merged_lag)),
                 backup_lifecycle_wait_sampled_ms=dict(p99=pct(backup_lifecycle, .99)*1000,
