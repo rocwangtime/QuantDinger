@@ -425,6 +425,46 @@ def _merge_recovery(left, right):
 
 _REPLAY_BOOKS = {}
 _REPLAY_BOOKS_LOCK = threading.Lock()
+# A liveness-only replay keeps subscribe-echo off until the primary is kicked.
+_REPLAY_ECHO_BOOKS = False
+
+
+def suppress_backup_books():
+    """Replay-only. The backup must become ready from price changes, with no WS book."""
+    return os.getenv('QD_REPLAY_SUPPRESS_BOOKS', '').strip().lower() in {'1', 'true', 'yes', 'on'}
+
+
+def _echo_books_enabled():
+    return not suppress_backup_books() or _REPLAY_ECHO_BOOKS
+
+
+def _arm_replay_echo():
+    global _REPLAY_ECHO_BOOKS
+    _REPLAY_ECHO_BOOKS = True
+
+
+def _as_price_change(raw):
+    """Turn a scheduled book into a price change so a liveness spare never sees a ladder."""
+    try:
+        event = json.loads(raw)
+    except (TypeError, ValueError):
+        return raw
+    items = event if isinstance(event, list) else [event]
+    if not any(isinstance(item, dict) and (item.get('event_type') or item.get('type')) == 'book' for item in items):
+        return raw
+    changes = []
+    stamp = None
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        stamp = item.get('timestamp', stamp)
+        asset = str(item.get('asset_id') or item.get('assetId') or '')
+        if asset:
+            changes.append(dict(asset_id=asset, price='.4', size='1', hash=item.get('hash') or f'pc{asset}'))
+    if not changes:
+        return raw
+    return json.dumps(dict(event_type='price_change', timestamp=stamp or int(time.time() * 1000),
+                           price_changes=changes), separators=(',', ':'))
 
 
 def _remember_replay_frame(raw):
@@ -493,7 +533,7 @@ class ReplaySocket:
             # The exchange pushes a book immediately. Echo the last full book when
             # this process has already seen one; the opener only queues the frame.
             frame = _replay_books_for(message.get('assets_ids'))
-            if frame and not self.stopped.is_set():
+            if frame and not self.stopped.is_set() and _echo_books_enabled():
                 self.emit(frame)
 
     def close(self):
@@ -721,9 +761,18 @@ def _bootstrap(manager):
             if not sock or not assets or not hasattr(sock, 'emit'):
                 continue
             at = int(time.time() * 1000)
-            event = [dict(event_type='book', asset_id=asset, timestamp=at, hash=f'boot{asset}',
-                          bids=[dict(price='.4', size='1')], asks=[dict(price='.6', size='1')]) for asset in assets]
-            sock.emit(json.dumps(event, separators=(',', ':')))
+            # A liveness-only replay still gives the primary a book (REST marks
+            # and the post-kick echo). The spare gets a price change only.
+            if suppress_backup_books() and state.get('redundant'):
+                event = dict(event_type='price_change', timestamp=at, price_changes=[
+                    dict(asset_id=asset, price='.4', size='1', hash=f'boot{asset}') for asset in assets])
+                sock.emit(json.dumps(event, separators=(',', ':')))
+            else:
+                event = [dict(event_type='book', asset_id=asset, timestamp=at, hash=f'boot{asset}',
+                              bids=[dict(price='.4', size='1')], asks=[dict(price='.6', size='1')]) for asset in assets]
+                raw = json.dumps(event, separators=(',', ':'))
+                _remember_replay_frame(raw)
+                sock.emit(raw)
         try:
             manager.tick(status=False)
         except Exception:
@@ -773,7 +822,10 @@ def _drive(manager, spec):
             continue
         try:
             raw = json.dumps(wire_event(*args), separators=(',', ':'))
-            _remember_replay_frame(raw)
+            if role == 'backup' and suppress_backup_books():
+                raw = _as_price_change(raw)
+            else:
+                _remember_replay_frame(raw)
             sock.emit(raw)
         except Exception:
             _LOG.exception('replay emit failed role=%s', role)
@@ -850,6 +902,8 @@ def _control_loop(manager, outbox, control, replay):
         elif op == 'rates':
             manager.seed_rates(message.get('rates') or {})
         elif op == 'kick':
+            if suppress_backup_books():
+                _arm_replay_echo()
             outbox.mark_kick()
             sock = _socket_for(manager, 'primary')
             if sock is not None and hasattr(sock, 'kick'):
@@ -944,6 +998,8 @@ def child_main(spec, data_conn, control_conn):
         if replay:
             os.environ['POLYMARKET_OBSERVER_WS_REPLAY'] = '1'
             install_replay_transport()
+            global _REPLAY_ECHO_BOOKS
+            _REPLAY_ECHO_BOOKS = False
             with _REPLAY_BOOKS_LOCK:
                 _REPLAY_BOOKS.clear()
         from . import observer

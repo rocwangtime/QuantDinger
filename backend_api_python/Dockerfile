@@ -69,6 +69,10 @@ RUN set -eux; \
 
 COPY . .
 
+# Git stores some app files as mode 600 (startup.py did). The runtime user
+# cannot import them until the tree is world-readable and directories are executable.
+RUN chmod -R a+rX /app
+
 RUN groupadd --gid 10001 quantdinger \
     && useradd --uid 10001 --gid quantdinger --create-home --shell /usr/sbin/nologin quantdinger
 

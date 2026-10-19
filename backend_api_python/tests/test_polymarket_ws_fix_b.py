@@ -9,10 +9,11 @@ from datetime import datetime, timezone
 
 from app.services.polymarket import observer
 from app.services.polymarket.ws_group_process import (
-    HOT_ORDER, PROD_FRAME_WEIGHTS, GroupFeeds, even_plan, merge_feed_status,
+    HOT_ORDER, PROD_FRAME_WEIGHTS, GroupFeeds, _arm_replay_echo, _as_price_change,
+    _echo_books_enabled, even_plan, merge_feed_status,
     partition, planned_events, primary_first_enabled, process_per_group_enabled,
-    queue_age_series, restart_backoff_seconds, weighted_counts, wire_event,
-    without_stale_books)
+    queue_age_series, restart_backoff_seconds, suppress_backup_books, weighted_counts,
+    wire_event, without_stale_books)
 from app.services.polymarket.ws_payloads import cheap_envelope, hold_until_snapshot, snapshot_keeps_change
 
 _FEED_ID = re.compile(r'^feed-\d+$')
@@ -135,7 +136,9 @@ def test_cheap_envelope_skips_the_ladder():
     ]
     assert '0.33' not in json.dumps(tips)
     change = wire_event(8, 1, ('ay', 'an'), 140, 1_700_000_000_001)
-    assert {row[1] for row in cheap_envelope(json.dumps(change, separators=(',', ':')))} == {'ay', 'an'}
+    tips = cheap_envelope(json.dumps(change, separators=(',', ':')))
+    assert {row[1] for row in tips} == {'ay', 'an'}
+    assert {row[2] for row in tips} == {'1700000000001'}
 
 
 class _Inbox:
@@ -178,6 +181,114 @@ def test_liveness_backup_promotes_and_holds_until_a_book():
     book = dict(event_type='book', asset_id='ay', timestamp=6, hash='next', bids=[], asks=[])
     assert manager._release_resync(backup, book) is book
     assert backup['need_book'] == {'an'}
+
+
+def _price_change(*assets, stamp=1_700_000_000_000):
+    return json.dumps(dict(event_type='price_change', timestamp=stamp, price_changes=[
+        dict(asset_id=asset, price='.4', size='1', hash=f'h{asset}') for asset in assets]),
+        separators=(',', ':'))
+
+
+def _liveness_manager():
+    """Primary stays up. The spare has a deep queue and an empty ladder."""
+    manager = observer.MarketConnections()
+    manager.liveness_backup = True
+    manager.balancer.assignment = {'ay': 0, 'an': 0}
+    manager.balancer.groups = {'ay': 'up_down:BTC:5m', 'an': 'up_down:BTC:5m'}
+    now = time.monotonic()
+    primary_inbox = observer.ReceiveQueue(16, 64)
+    backup_inbox = observer.ReceiveQueue(16, 64)
+    backup_inbox.queue_wait_seconds = 5
+    primary = dict(connected=True, assets=['ay', 'an'], inbox=primary_inbox, source='primary',
+                   thread=threading.current_thread(), subscribe_initial=True, socket=None,
+                   ping_at=now + 100, lock=threading.RLock())
+    shadow = observer._LivenessShadow(['ay', 'an'])
+    backup = dict(redundant=True, connected=True, standby=True, assets=['ay', 'an'],
+                  worker=threading.current_thread(), thread=threading.current_thread(),
+                  inbox=backup_inbox, source='backup', subscribe_pending=[], subscribe_initial=False,
+                  recover_assets={'ay', 'an'}, primary_index=0, shadow=shadow, lock=threading.RLock(),
+                  initial_sent_at=now, created_at=now, snapshot_retry_at=0, required_assets={'ay', 'an'},
+                  admission_observed=True)
+    manager.states[0] = primary
+    manager.backups[0] = backup
+    return manager, primary, backup, shadow
+
+
+def test_liveness_backup_reaches_ready_without_a_shadow_book():
+    manager, primary, backup, shadow = _liveness_manager()
+    assert manager._queue_lag_breaks_backup(backup, backup['inbox']) is False
+    plain = observer.MarketConnections()
+    assert plain._queue_lag_breaks_backup(dict(redundant=True), backup['inbox']) is True
+    assert backup['inbox'].pending_wait_seconds() == 5
+    manager.liveness_receive(0, backup, _price_change('ay', 'an'), datetime.now(timezone.utc), backup['inbox'])
+    assert backup['ready'] is True and manager.backup_ready(backup)
+    assert shadow.books == {} and not backup.get('liveness_hash')
+    assert backup['liveness_assets'] == {'ay', 'an'}
+    blockers = set(manager.readiness_blockers(backup))
+    assert blockers.isdisjoint({'queue_wait', 'snapshot_repair', 'missing_snapshot', 'catchup', 'missing_envelope'})
+    manager.status_at = time.monotonic()
+    manager._tick()
+    assert backup['ready'] is True and manager.backup_ready(backup)
+    assert backup['liveness_assets'] == {'ay', 'an'} and shadow.books == {}
+    assert manager.states[0] is primary and manager.backup_promotions == 0
+
+
+def test_primary_1013_promotes_a_ready_liveness_backup_without_a_ws_book():
+    manager, primary, backup, shadow = _liveness_manager()
+    snaps, retired = [], []
+    manager.request_snapshot = lambda index, state, assets, pressure=False: snaps.append(list(assets)) or True
+    manager.retire = lambda state: retired.append(state)
+    manager.redundancy_tick = lambda now: None
+    manager.update_hot_coverage = lambda now: None
+    manager.liveness_receive(0, backup, _price_change('ay', 'an'), datetime.now(timezone.utc), backup['inbox'])
+    assert manager.backup_ready(backup) and shadow.books == {}
+    # closed() on 1013: the primary is down and its generation is invalid.
+    primary['connected'] = False
+    primary['inbox'].invalid.set()
+    primary['failed_at'] = time.monotonic()
+    started = time.monotonic()
+    assert manager._promote_liveness_backup(0, backup) is True
+    assert time.monotonic() - started <= 1.5
+    assert manager.states[0] is backup and manager.backup_promotions == 1
+    assert backup['need_book'] == {'ay', 'an'} and snaps == [['ay', 'an']] and retired == [primary]
+    assert shadow.books == {} and not backup.get('liveness_hash')
+
+
+def test_ready_backup_count_includes_a_liveness_spare():
+    manager, primary, backup, shadow = _liveness_manager()
+    manager.liveness_receive(0, backup, _price_change('ay', 'an'), datetime.now(timezone.utc), backup['inbox'])
+    assert primary['connected'] and not primary['inbox'].invalid.is_set()
+    rows = manager.update_hot_coverage(time.monotonic())
+    assert rows['up_down:BTC:5m']['ready_backup_count'] == 1
+    manager.hot_coverage_rows = rows
+    manager.publish_status()
+    assert observer.STATUS['ws_hot_backup_by_group']['up_down:BTC:5m']['ready_backup_count'] == 1
+    assert observer.STATUS['ws_backups'][0]['ready'] is True
+    assert shadow.books == {}
+
+
+def test_image_makes_the_app_tree_readable():
+    text = open('Dockerfile', encoding='utf-8').read()
+    copied = text.find('COPY . .')
+    mode = text.find('chmod -R a+rX /app')
+    assert copied != -1 and mode > copied
+
+
+def test_liveness_replay_suppresses_backup_books_until_the_kick(monkeypatch):
+    from app.services.polymarket import ws_group_process as feeds
+    monkeypatch.delenv('QD_REPLAY_SUPPRESS_BOOKS', raising=False)
+    feeds._REPLAY_ECHO_BOOKS = False
+    assert suppress_backup_books() is False and _echo_books_enabled() is True
+    monkeypatch.setenv('QD_REPLAY_SUPPRESS_BOOKS', '1')
+    feeds._REPLAY_ECHO_BOOKS = False
+    assert suppress_backup_books() is True and _echo_books_enabled() is False
+    book = json.dumps([dict(event_type='book', asset_id='ay', timestamp=5, hash='h', bids=[], asks=[])])
+    change = json.loads(_as_price_change(book))
+    assert change['event_type'] == 'price_change'
+    assert {row['asset_id'] for row in change['price_changes']} == {'ay'}
+    _arm_replay_echo()
+    assert _echo_books_enabled() is True
+    feeds._REPLAY_ECHO_BOOKS = False
 
 
 def test_snapshot_orders_changes_by_timestamp_and_hash():
@@ -717,7 +828,12 @@ def test_group_processes_keep_status_shape_and_reap(monkeypatch):
         observer.STATUS['mode'] = 'starting'
         feeds.publish_status()
         assert observer.STATUS['mode'] == 'ws'
-        missing = inprocess - _paths(observer.snapshot())
+        # Reason names are samples. Liveness does not emit shadow-book
+        # blockers (missing_snapshot, catchup); the document shape still matches.
+        def _schema(paths):
+            skip = ('unready_reason_entries.', 'unready_reason_seconds.')
+            return {path for path in paths if not any(part in path for part in skip)}
+        missing = _schema(inprocess) - _schema(_paths(observer.snapshot()))
         assert not missing, sorted(missing)[:50]
         assert 'ws_group_processes' in observer.snapshot()
         key = feeds.order[0]
