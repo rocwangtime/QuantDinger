@@ -2,6 +2,7 @@
 import json
 import logging
 import os
+import socket
 import sys
 import threading
 import time
@@ -1107,6 +1108,44 @@ class ReceiveQueue:
 READ_AHEAD_BYTES = 65536
 
 
+def wake_reader(app):
+    """Unblock the reader from another thread without freeing its fd.
+
+    websocket-client's ``shutdown()`` / ``close()`` close the SSL socket. The
+    next handshake can reuse that number while this reader, or its heartbeat,
+    is still on the old SSL object (WRONG_VERSION_NUMBER,
+    DECRYPTION_FAILED_OR_BAD_RECORD_MAC). Callers outside the reader only
+    ``shutdown(SHUT_RDWR)``. ``run_forever`` teardown, on the reader, closes.
+    """
+    if app is None:
+        return
+    app.generation_retired = True
+    try:
+        app.keep_running = False
+    except Exception:
+        pass
+    stop = getattr(app, 'stop_ping', None)
+    if stop is not None and hasattr(stop, 'set'):
+        stop.set()
+    wire = getattr(app, 'sock', None)
+    raw = getattr(wire, 'sock', None) if wire is not None else None
+    if raw is not None and hasattr(raw, 'shutdown'):
+        try:
+            raw.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+        return
+    # Doubles and replay sockets have no SSL fd. close() only sets their stop
+    # event. A live WebSocket object is left for the reader.
+    if wire is None:
+        closer = getattr(app, 'close', None)
+        if closer is not None:
+            try:
+                closer()
+            except Exception:
+                pass
+
+
 def read_ahead_app(base):
     """WebSocketApp whose reader drains buffered frames with few syscalls.
 
@@ -1180,18 +1219,19 @@ def read_ahead_app(base):
             self.text_heartbeat_active = True
             deadline = time.monotonic() + getattr(self, 'heartbeat_phase', self.ping_interval)
             try:
-                while not stop_ping.wait(1) and self.keep_running:
+                while (not stop_ping.wait(1) and self.keep_running
+                       and not getattr(self, 'generation_retired', False)):
                     now = time.monotonic()
                     self.transport.sample(self, now)
-                    if now >= deadline and self.sock and self.subscription_ready.is_set():
+                    if (now >= deadline and self.sock and self.subscription_ready.is_set()
+                            and self.keep_running and not getattr(self, 'generation_retired', False)):
                         self.transport.ping(now)
                         self.sock.send('PING')
                         deadline = now + self.ping_interval
             except Exception as exc:
                 self._callback(self.on_error, exc)
-                # shutdown wakes a blocked reader without a close handshake.
-                if self.sock:
-                    self.sock.shutdown()
+                # Wake the reader. This thread must not close the SSL fd.
+                wake_reader(self)
             finally:
                 self.text_heartbeat_active = False
 
@@ -1808,14 +1848,7 @@ class MarketConnections:
             state['pong_dead'] = True
             if not any(i == index and self.promotable_backup(c) for i, c in self.backup_items()):
                 inbox.invalid.set()
-            # Wake the old reader, without waiting for a network close handshake.
-            sock = state['socket']
-            sock.keep_running = False
-            wire = getattr(sock, 'sock', None)
-            if wire and hasattr(wire, 'shutdown'):
-                wire.shutdown()
-            else:
-                sock.close()
+            wake_reader(state.get('socket'))
             _LOG.warning('Polymarket WS PONG timeout shard=%s timeout_seconds=22', index)
 
     def memory_metrics(self, now):
@@ -2224,7 +2257,7 @@ class MarketConnections:
                                     state['connected'] = False
                                     if state.get('inbox'):
                                         state['inbox'].invalid.set()
-                                    state['socket'].close()
+                                    wake_reader(state.get('socket'))
                                     _ws_error(exc)
                                     break
 
@@ -2369,14 +2402,7 @@ class MarketConnections:
         self.subscriptions.forget(state)
         if state.get('inbox'):
             state['inbox'].invalid.set()
-        sock = state.get('socket')
-        if sock:
-            sock.keep_running = False
-            wire = getattr(sock, 'sock', None)
-            if wire and hasattr(wire, 'shutdown'):
-                wire.shutdown()
-            else:
-                sock.close()
+        wake_reader(state.get('socket'))
         if not any(s is state for s in self.retiring):
             self.retiring.append(state)
 
@@ -2879,7 +2905,7 @@ class MarketConnections:
             self.continuity.switch(state.get('source'), None, state['assets'], 'reconnect')
             if state.get('inbox'):
                 state['inbox'].invalid.set()
-            state['socket'].close()
+            wake_reader(state.get('socket'))
             if state['thread'] and state['thread'].is_alive():
                 state['thread'].join(5)
             if state.get('worker') and state['worker'].is_alive():
@@ -3451,7 +3477,7 @@ class MarketConnections:
                 state['connected'] = False
                 if state.get('inbox'):
                     state['inbox'].invalid.set()
-                state['socket'].close()
+                wake_reader(state.get('socket'))
                 _ws_error(exc)
         self.redundancy_tick(now)
         if now - self.cache_maintenance_at >= 1:
@@ -3474,7 +3500,7 @@ class MarketConnections:
                     _LOG.warning('Polymarket WS generation invalidated shard=%s drops=%s reasons=%s resyncs=%s',
                                  index, state['inbox'].dropped, state['inbox'].drop_reasons, state['inbox'].resyncs)
                     state['queue_logged'] = True
-                state['socket'].close()
+                wake_reader(state.get('socket'))
             if not state['connected'] and state.get('failed_at') is not None:
                 if now >= state['retry_at']:
                     if any(i == index and (self.backup_ready(c) or state.get('pong_dead') and self.promotable_backup(c))
@@ -3508,7 +3534,7 @@ class MarketConnections:
                     state['ping_at'] = now + 10
                 except Exception as exc:
                     state['connected'] = False
-                    state['socket'].close()
+                    wake_reader(state.get('socket'))
                     _ws_error(exc)
         for state in list(self.states.values()) + [c for _, c in self.backup_items()]:
             inbox = state.get('inbox')
@@ -3641,8 +3667,8 @@ class MarketConnections:
         for state in closing:
             if state.get('inbox'):
                 state['inbox'].invalid.set()
-            if state['socket']:
-                state['socket'].close()
+            if state.get('socket'):
+                wake_reader(state.get('socket'))
         for state in closing:
             if state['thread'] and state['thread'].is_alive():
                 state['thread'].join(max(0, deadline - time.monotonic()))
