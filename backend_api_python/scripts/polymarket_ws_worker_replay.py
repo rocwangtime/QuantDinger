@@ -4,8 +4,14 @@ Run with PYTHONPATH=. from backend_api_python. Synthetic public books/deltas:
 four hot pairs, eight workers, 1896 physical / 948 published frames/s,
 50ms bursts, 300ms skew. --stage-profile measures inclusive thread CPU per stage.
 Includes real supervisor/status, recording metadata and bounded book history.
-TLS, SQL/evaluation and upstream 1013 are deliberately outside this experiment.
-Use the identical script and interpreter against both code trees.
+TLS, SQL/evaluation and upstream 1013 are deliberately outside the in-process
+experiment. Use the identical script and interpreter against both code trees.
+
+--process-per-group drives the fix-B feed processes (one hot group each) with
+the same frames. --even keeps the legacy round-robin; the default for that
+mode is the production frame mix. --background-load F is a second process
+burning about F cores. --kicks N injects one 1013 per hot group. --confine-cpus
+N pins this process, the feeds and the burner to N CPUs.
 
 Fix-A options (all default off, so earlier invocations are unchanged):
 --lock-timing wraps lifecycle_lock and Pipeline.lock with an outermost
@@ -20,6 +26,7 @@ import argparse
 import hashlib
 import json
 import logging
+import os
 import threading
 import time
 from collections import deque
@@ -333,6 +340,211 @@ def run(seconds=15, rate=1896, levels=140, cold_pairs=19, stage_profile=False, l
         return result
 
 
+def _proc_cpu_seconds(pid):
+    with open(f'/proc/{pid}/stat', encoding='ascii') as source:
+        text = source.read()
+    fields = text[text.rfind(')') + 2:].split()
+    return (int(fields[11]) + int(fields[12])) / os.sysconf('SC_CLK_TCK')
+
+
+def _burn(fraction, stop):
+    while not stop.is_set():
+        end = time.perf_counter() + 0.02 * fraction
+        while time.perf_counter() < end and not stop.is_set():
+            sum(range(80))
+        stop.wait(0.02 * (1 - fraction))
+
+
+def run_processes(seconds=20, rate=3300, levels=140, cold_pairs=19, market_loop=True,
+                  background_load=0.0, weighted=True, kicks=1, confine_cpus=0):
+    """Multi-process replay. Children parse; the parent only applies merged events."""
+    import multiprocessing
+    import os
+
+    if confine_cpus:
+        allowed = sorted(os.sched_getaffinity(0))
+        os.sched_setaffinity(0, set(allowed[:confine_cpus]))
+    ctx = multiprocessing.get_context('spawn')
+    stop_burn = ctx.Event()
+    burner = None
+    if background_load > 0:
+        burner = ctx.Process(target=_burn, args=(background_load, stop_burn), name='replay-background', daemon=True)
+        burner.start()
+    try:
+        return _run_processes_inner(seconds, rate, levels, cold_pairs, market_loop, weighted, kicks, burner, stop_burn)
+    finally:
+        if burner is not None:
+            stop_burn.set()
+            burner.join(2)
+            if burner.is_alive():
+                burner.kill()
+                burner.join(1)
+
+
+def _run_processes_inner(seconds, rate, levels, cold_pairs, market_loop, weighted, kicks, burner, stop_burn):
+    from app.services.polymarket.ws_group_process import (
+        PROD_FRAME_WEIGHTS, HOT_ORDER, GroupFeeds, planned_events)
+    with ExitStack() as stack:
+        stack.enter_context(patch.dict('os.environ', {
+            'POLYMARKET_OBSERVER_WS_SHARDS': '4',
+            'POLYMARKET_OBSERVER_WS_HOT_BACKUP_COUNT': '1',
+            'POLYMARKET_OBSERVER_WS_HOT_BACKUP_STAGGER_SECONDS': '0',
+            'POLYMARKET_OBSERVER_WS_COLD_ROTATION_ENABLED': '0',
+            'POLYMARKET_OBSERVER_WS_REPLAY': '1',
+            'POLYMARKET_OBSERVER_PROCESS_PER_GROUP': '1',
+        }))
+        stack.enter_context(patch.object(observer, '_STOP', threading.Event()))
+        stack.enter_context(patch.object(observer, 'STATUS', dict(mode='running', enabled=True, running=True,
+                                                                   reconnect_count=0, slow_consumer_count=0)))
+        previous_switch = observer.sys.getswitchinterval()
+        stack.callback(observer.sys.setswitchinterval, previous_switch)
+        observer.tune_switch_interval()
+        pipeline = observer.Pipeline()
+        pipeline.recording.enabled = False
+        pipeline.paper_account = SimpleNamespace(history=BookHistory(), ready=True, dropped=0, error=None)
+        stack.enter_context(patch.object(observer, '_PIPELINE', pipeline))
+        stack.enter_context(patch.object(observer, '_WS', None))
+        feeds = GroupFeeds(replay=True)
+        observer._WS = feeds
+        stack.callback(feeds.close, 5)
+        markets = [dict(id=str(i), yesAssetId=f'{i}y', noAssetId=f'{i}n',
+                        market_type='up_down', asset=asset, interval=interval)
+                   for i, (asset, interval) in enumerate((('BTC', '15m'), ('BTC', '5m'), ('ETH', '15m'), ('ETH', '5m')))]
+        pipeline.set_markets(markets)
+        cold = [dict(event_type='book', asset_id=f'cold{i}', timestamp=int(time.time() * 1000),
+                     bids=[], asks=[dict(price='.6', size='1')]) for i in range(cold_pairs * 2)]
+        feeds.sync(markets)
+        feeds.start_supervisor()
+        feeds.wait_ready(20)
+        feeds.publish_status()
+        snapshot_errors = []
+        background_stop = threading.Event()
+        threads = []
+        if market_loop:
+            def loop():
+                while not background_stop.wait(1):
+                    feeds.tick()
+                    try:
+                        json.dumps(observer.snapshot(), default=str)
+                    except Exception as exc:
+                        snapshot_errors.append(repr(exc)[:200])
+            threads.append(threading.Thread(target=loop, name='replay-market-loop', daemon=True))
+        for thread in threads:
+            thread.start()
+        weights = [PROD_FRAME_WEIGHTS[key] for key in HOT_ORDER] if weighted else None
+        epoch = int(time.time() * 1000)
+        start = feeds.drive(dict(seconds=seconds, rate=rate, levels=levels, epoch=epoch,
+                                 mode='weighted' if weighted else 'even', weights=weights, lead=1.0))
+        hot_keys = [key for key in feeds.order if feeds.children[key].spec.get('hot')]
+        kick_at = []
+        if kicks and hot_keys and seconds >= 4:
+            span = max(1.0, seconds - 3)
+            kick_at = [1.5 + span * (i + 0.5) / len(hot_keys) for i in range(len(hot_keys))]
+            def punch():
+                for key, at in zip(hot_keys, kick_at):
+                    delay = start + at - time.monotonic()
+                    if delay > 0:
+                        time.sleep(delay)
+                    feeds.kick(key, 1013, 'slow consumer')
+            threads.append(threading.Thread(target=punch, name='replay-kicks', daemon=True))
+            threads[-1].start()
+        delay = start - time.monotonic()
+        if delay > 0:
+            time.sleep(delay)
+        for child in feeds.children.values():
+            child.samples.clear()
+        feeds.gaps.clear()
+        published_before = pipeline.messages
+        rss_began = observer.process_rss_bytes()
+        began = time.monotonic()
+        cpu = time.process_time()
+        burner_at = _proc_cpu_seconds(burner.pid) if burner is not None else None
+        # Cold history only; it is not a websocket group.
+        next_cold = began
+        end = start + seconds + 0.45
+        while time.monotonic() < end:
+            if time.monotonic() >= next_cold:
+                with pipeline.lock:
+                    for event in cold:
+                        pipeline.paper_account.history.record(event, epoch)
+                next_cold += 1
+            time.sleep(0.05)
+        # Drain the 300 ms backup skew plus one batch.
+        time.sleep(0.6)
+        parent_cpu = time.process_time() - cpu
+        elapsed = time.monotonic() - began
+        background_stop.set()
+        for thread in threads:
+            thread.join(5)
+        feeds.publish_status()
+        samples = [row for child in feeds.children.values() for row in child.samples]
+        primary = [row['wait'] for row in samples if row.get('role') == 'primary' and row.get('wait') is not None]
+        backup = [row['wait'] for row in samples if row.get('role') == 'backup' and row.get('wait') is not None]
+        ready_rows = [row for row in samples if row.get('role') == 'backup' and 'ready' in row]
+        status = observer.snapshot()
+        codes = []
+        for row in (status.get('ws_last_transport_failures') or {}).values():
+            codes.append(row.get('code'))
+        for row in (status.get('ws_hot_primary_failures') or {}).values():
+            for event in row.get('events') or []:
+                codes.append(event.get('code'))
+        for row in (status.get('ws_primary_1013_by_shard') or {}).values():
+            codes.append(1013 if row.get('total') else None)
+        expected = {}
+        logical = 0
+        for index, child in enumerate(child for child in (feeds.children[key] for key in hot_keys)):
+            assets = [asset for market in child.spec['markets'] for asset in (market['yesAssetId'], market['noAssetId'])]
+            spec = dict(seconds=seconds, rate=rate, levels=levels, epoch=epoch, assets=assets, group=index,
+                        groups=len(hot_keys), mode='weighted' if weighted else 'even', weights=weights)
+            for _offset, role, event in planned_events(spec):
+                if role != 'primary':
+                    continue
+                logical += 1
+                observer.ws_apply_event(event, expected)
+        final = hashlib.sha256(json.dumps(pipeline.books, sort_keys=True).encode()).hexdigest()
+        expect = hashlib.sha256(json.dumps(expected, sort_keys=True).encode()).hexdigest()
+        gaps = [row['seconds'] for row in feeds.gaps if isinstance(row.get('seconds'), (int, float))]
+        if burner is not None and burner_at is not None:
+            burner_cores = (_proc_cpu_seconds(burner.pid) - burner_at) / max(elapsed, 0.001)
+        else:
+            burner_cores = 0
+        resyncs = 0
+        for row in (status.get('ws_backups') or {}).values():
+            resyncs += row.get('resyncs') or 0
+        published = pipeline.messages - published_before
+        ready_ratio = (sum(bool(row.get('ready')) for row in ready_rows) / len(ready_rows)) if ready_rows else None
+        primary_p99 = pct(primary, .99) * 1000 if primary else None
+        gap_max = max(gaps) if gaps else None
+        codes_1008 = sum(code == 1008 for code in codes)
+        gap_ok = (not kick_at) or (len(gaps) >= len(kick_at) and gap_max is not None and gap_max <= 1.5)
+        result = dict(mode='process-per-group', weighted=weighted, seconds=elapsed, rate=rate,
+                      logical=logical, published=published,
+                      ready_ratio=ready_ratio, ready_samples=len(ready_rows),
+                      resyncs=resyncs,
+                      primary_queue_wait_ms=dict(p50=pct(primary, .5) * 1000 if primary else None,
+                                                 p99=primary_p99,
+                                                 max=max(primary) * 1000 if primary else None, samples=len(primary)),
+                      backup_queue_wait_ms=dict(p50=pct(backup, .5) * 1000 if backup else None,
+                                                p99=pct(backup, .99) * 1000 if backup else None,
+                                                max=max(backup) * 1000 if backup else None, samples=len(backup)),
+                      failover_gaps_s=gaps, failover_gap_max_s=gap_max,
+                      kicks=len(kick_at), codes_1008=codes_1008,
+                      close_reasons=status.get('close_reason_counts'),
+                      parent_mode=status.get('mode'),
+                      cpu_cores=status.get('ws_process_cpu_cores'), parent_cpu_s=parent_cpu,
+                      burner_cores=burner_cores, restarts=dict(feeds.restarts),
+                      stale_skipped=sum(child.stale_skipped for child in feeds.children.values()),
+                      rss_bytes=dict(began=rss_began, drained=observer.process_rss_bytes(),
+                                     status=status.get('ws_process_rss_bytes')),
+                      snapshot_errors=snapshot_errors[:3],
+                      final_book_sha256=final, expected_book_sha256=expect,
+                      valid=(final == expect and not snapshot_errors
+                             and codes_1008 == 0 and not feeds.restarts and status.get('mode') == 'ws'
+                             and ready_ratio is not None and ready_ratio >= 0.95
+                             and primary_p99 is not None and primary_p99 < 250 and gap_ok))
+        return result
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--seconds', type=float, default=15)
@@ -345,12 +557,23 @@ if __name__ == '__main__':
     parser.add_argument('--rest-hour-buckets', type=int, default=0)
     parser.add_argument('--prod-gil', action='store_true')
     parser.add_argument('--gil-load', type=float, default=0.0)
+    parser.add_argument('--process-per-group', action='store_true')
+    parser.add_argument('--background-load', type=float, default=0.0)
+    parser.add_argument('--even', action='store_true')
+    parser.add_argument('--kicks', type=int, default=1)
+    parser.add_argument('--confine-cpus', type=int, default=0)
     args = parser.parse_args()
     logging.getLogger('app.services.polymarket').setLevel(logging.ERROR)
     if (args.seconds < 1 or args.rate < 1 or not 2 <= args.levels <= 600 or args.cold_pairs < 0
-            or not 0 <= args.gil_load < 1 or args.rest_hour_buckets < 0):
-        parser.error('seconds/rate must be positive, levels 2..600, cold-pairs nonnegative')
-    result = run(args.seconds, args.rate, args.levels, args.cold_pairs, args.stage_profile, args.lock_timing,
-                 args.market_loop, args.rest_hour_buckets, args.prod_gil, args.gil_load)
+            or not 0 <= args.gil_load < 1 or args.rest_hour_buckets < 0
+            or not 0 <= args.background_load < 1 or args.kicks < 0 or args.confine_cpus < 0):
+        parser.error('seconds/rate must be positive, levels 2..600, loads in [0, 1), counts nonnegative')
+    if args.process_per_group:
+        result = run_processes(args.seconds, args.rate, args.levels, args.cold_pairs, market_loop=True,
+                               background_load=args.background_load, weighted=not args.even, kicks=args.kicks,
+                               confine_cpus=args.confine_cpus)
+    else:
+        result = run(args.seconds, args.rate, args.levels, args.cold_pairs, args.stage_profile, args.lock_timing,
+                     args.market_loop, args.rest_hour_buckets, args.prod_gil, args.gil_load)
     print(json.dumps(result))
     raise SystemExit(0 if result['valid'] else 1)

@@ -62,7 +62,9 @@ def snapshot():
     provider = _REFERENCE
     if hasattr(provider, 'metrics'):  # Spot WebSocket composite only.
         result.update(provider.metrics())
-    result['ws_process_rss_bytes'] = process_rss_bytes()
+    rss = process_rss_bytes()
+    child_rss = _WS.child_rss_bytes() if _WS is not None and hasattr(_WS, 'child_rss_bytes') else 0
+    result['ws_process_rss_bytes'] = None if rss is None and not child_rss else (rss or 0) + (child_rss or 0)
     return result
 
 
@@ -435,7 +437,8 @@ def _market_loop():
                 if use_ws:
                     if connections is None:
                         tune_switch_interval()
-                        connections = MarketConnections()
+                        from .ws_group_process import GroupFeeds, process_per_group_enabled
+                        connections = GroupFeeds() if process_per_group_enabled() else MarketConnections()
                         _WS = connections
                         connections.seed_rates(_prior_group_rates())
                         connections.sync(markets, prewarm=warm_markets)
@@ -577,8 +580,11 @@ def stop(timeout=15):
             _PIPELINE.writer.is_alive() or _PIPELINE.evaluator.is_alive()
             or _PIPELINE.references.thread.is_alive()
             or (_PIPELINE.references.socket_thread and _PIPELINE.references.socket_thread.is_alive())))
-        pending = pending or bool(receivers and any(
-            state['thread'] and state['thread'].is_alive() for state in receivers.states.values()))
+        if receivers and hasattr(receivers, 'alive_workers'):
+            pending = pending or receivers.alive_workers()
+        elif receivers:
+            pending = pending or any(
+                state['thread'] and state['thread'].is_alive() for state in receivers.states.values())
         STATUS.update(running=pending, connected=False, mode="stopping" if pending else "stopped")
         if pending:
             STATUS['flush_complete'] = False

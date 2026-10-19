@@ -18,9 +18,15 @@ def configure_allocator():
         os.execve(sys.executable, [sys.executable, '-m', 'app.commands.polymarket_observer'], environment)
 
 
+def enable_group_processes():
+    """One feed process per hot group. Set POLYMARKET_OBSERVER_PROCESS_PER_GROUP=0 to roll back."""
+    os.environ.setdefault('POLYMARKET_OBSERVER_PROCESS_PER_GROUP', '1')
+
+
 def main() -> None:
     configure_allocator()
     os.environ["QD_PROCESS_ROLE"] = "polymarket-observer"
+    enable_group_processes()
 
     from app import create_app
     from app.runtime.process import ShutdownSignal
