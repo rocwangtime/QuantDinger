@@ -142,8 +142,6 @@ def test_ingress_pressure_explains_admission_blocker(reason):
         inbox.resync.set()
     else:
         s['socket'].transport.last[reason+'_seconds' if reason == 'scheduler_lag' else 'tcp_pending_bytes'] = .2 if reason == 'scheduler_lag' else 65536
-    if reason == 'scheduler_lag':
-        inbox.processing_received_at = datetime.now(timezone.utc) - timedelta(seconds=.3)
     assert SubscriptionPacer.pressure_reasons(s) == [reason]
     assert SubscriptionPacer.pressured(s)
 

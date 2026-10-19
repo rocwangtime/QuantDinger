@@ -49,9 +49,7 @@ class SubscriptionPacer:
                 ('queue_lag', inbox.queue.qsize() and inbox.lag_seconds > .25)) if flag)
         if (transport.get('tcp_pending_bytes') or 0) >= 65536:
             reasons.append('tcp_pending')
-        # Heartbeat sampling jitter can affect all feeds on one CPU. It only
-        # blocks this connection when its own ingress is also behind.
-        if (transport.get('scheduler_lag_seconds') or 0) > .1 and inbox and inbox.pending_wait_seconds() > .25:
+        if (transport.get('scheduler_lag_seconds') or 0) > .1:
             reasons.append('scheduler_lag')
         return reasons
 

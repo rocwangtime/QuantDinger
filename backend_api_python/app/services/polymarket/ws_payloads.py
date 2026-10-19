@@ -26,7 +26,6 @@ class PublicEvent(dict):
     identity = None
     book = None
     changes = None
-    ladder = None
     fanin = None
 
 
@@ -69,7 +68,6 @@ def prepare(event):
         at = exchange_time(payload.get('timestamp'))
         if kind == 'price_change':
             price_rows(payload, at)
-            ladder_rows(payload)
         else:
             fingerprint(event if isinstance(event, dict) else payload)
             if kind == 'book':
@@ -79,19 +77,6 @@ def prepare(event):
                     raise ValueError('invalid public book level') from exc
                 event_key(kind, at, payload)
     return event
-
-
-def ladder_rows(payload):
-    """Normalize immutable delta fields once for live, shadow and history."""
-    if isinstance(payload, PublicEvent) and payload.ladder is not None:
-        return payload.ladder
-    rows = [(str(row.get('asset_id') or row.get('assetId') or ''),
-             'bids' if str(row.get('side', '')).upper() == 'BUY' else 'asks',
-             str(row.get('price')), str(row.get('size', 0)))
-            for row in payload.get('price_changes', payload.get('priceChanges', []))]
-    if isinstance(payload, PublicEvent):
-        payload.ladder = rows
-    return rows
 
 
 def price_rows(payload, at):

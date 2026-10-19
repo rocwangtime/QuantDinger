@@ -294,11 +294,6 @@ def test_uncovered_groups_rebuild_with_global_stagger_not_primary_age(feed_manag
     p.recording.enabled = False
     p.set_markets(markets)
     m.sync(markets)
-    # Bootstrap admission now requires each primary's initial books to drain.
-    wait_for(lambda: all(s['connected'] for s in m.states.values()))
-    for state in m.states.values():
-        state['socket'].emit([book(a) for a in state['assets']])
-    wait_for(lambda: len(p.books) == 8)
     m.start_supervisor()
     wait_for(lambda: len(m.backups) == 4 and all(c.get('opened_at') for c in m.backups.values()), 5)
     candidates = list(m.backups.values())

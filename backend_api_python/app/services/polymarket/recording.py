@@ -13,7 +13,6 @@ from collections import deque
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from uuid import uuid4
-from functools import lru_cache
 
 from .observer_db import connection as get_db_connection
 from .client import PublicClient, GAMMA
@@ -34,19 +33,6 @@ def flag(name, default=False):
 
 def exchange_time(value):
     """Accept documented epoch milliseconds or ISO timestamps; never invent one."""
-    if isinstance(value, (int, float)) or isinstance(value, str) and len(value) <= 128:
-        return _exchange_time(value)
-    return _parse_exchange_time(value)
-
-
-@lru_cache(maxsize=4096)
-def _exchange_time(value):
-    # Many rows and both physical copies share a timestamp. Keep only bounded,
-    # small scalar keys; malformed/unhashable input still follows the parser.
-    return _parse_exchange_time(value)
-
-
-def _parse_exchange_time(value):
     if value is None or value == '':
         return None
     try:
