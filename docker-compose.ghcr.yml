@@ -323,6 +323,7 @@ services:
     environment:
       - QD_PROCESS_ROLE=polymarket-observer
       - POLYMARKET_OBSERVER_MALLOC_ARENA_MAX=${POLYMARKET_OBSERVER_MALLOC_ARENA_MAX:-}
+      - POLYMARKET_OBSERVER_PROCESS_PER_GROUP=${POLYMARKET_OBSERVER_PROCESS_PER_GROUP:-1}
       - LOG_FORMAT=${LOG_FORMAT:-json}
       - DATABASE_URL=postgresql://${POSTGRES_USER:-quantdinger}:${POSTGRES_PASSWORD:-quantdinger123}@postgres:5432/${POSTGRES_DB:-quantdinger}
       - REDIS_HOST=redis

@@ -1,0 +1,803 @@
+{
+  "after_s78_3300": {
+    "speed": 0.78,
+    "primary_first": "0",
+    "parent_load": 0.2,
+    "wall": 26.847362518310547,
+    "obs_box_cores": 0.7814251767074579,
+    "bg_box_cores": 0.3428938687635117,
+    "obs_prod_cores": 1.001827149624946,
+    "bg_prod_cores": 0.4396075240557842,
+    "total_prod_cores": 1.44143467368073,
+    "valid": true,
+    "logical": 33000,
+    "published": 32937,
+    "ready_ratio": 0.9977553310886644,
+    "ready_by_group": {
+      "up_down:BTC:15m": 0.9977578475336323,
+      "up_down:BTC:5m": 0.9977528089887641,
+      "up_down:ETH:15m": 0.9977578475336323,
+      "up_down:ETH:5m": 0.9977578475336323
+    },
+    "primary_queue_wait_ms": {
+      "p50": 0,
+      "p99": 22.741,
+      "max": 40.980000000000004,
+      "samples": 1782
+    },
+    "primary_queue_age_p99": 22.741,
+    "primary_queue_age_series_max_ms": 40.98,
+    "primary_queue_age_by_group": {
+      "up_down:BTC:15m": {
+        "p50": 0,
+        "p99": 20.67,
+        "max": 27.66,
+        "samples": 445,
+        "series_max_ms": 27.66,
+        "worst_second": {
+          "second": 7,
+          "queue_age_ms": 27.66,
+          "depth_max": 18,
+          "samples": 19
+        }
+      },
+      "up_down:BTC:5m": {
+        "p50": 0,
+        "p99": 30.671,
+        "max": 40.980000000000004,
+        "samples": 445,
+        "series_max_ms": 40.98,
+        "worst_second": {
+          "second": 1,
+          "queue_age_ms": 40.98,
+          "depth_max": 15,
+          "samples": 20
+        }
+      },
+      "up_down:ETH:15m": {
+        "p50": 0,
+        "p99": 14.13,
+        "max": 19.564999999999998,
+        "samples": 446,
+        "series_max_ms": 19.565,
+        "worst_second": {
+          "second": 17,
+          "queue_age_ms": 19.565,
+          "depth_max": 10,
+          "samples": 19
+        }
+      },
+      "up_down:ETH:5m": {
+        "p50": 0,
+        "p99": 17.330000000000002,
+        "max": 40.252,
+        "samples": 446,
+        "series_max_ms": 40.252,
+        "worst_second": {
+          "second": 18,
+          "queue_age_ms": 40.252,
+          "depth_max": 2,
+          "samples": 20
+        }
+      }
+    },
+    "backup_queue_wait_ms": {
+      "p50": 0,
+      "p99": 6.375,
+      "max": 24.181,
+      "samples": 1782
+    },
+    "failover_gaps_s": [
+      0.0313893120001012,
+      0.07821447700007411,
+      0.08031323800059909,
+      0.0768674139999348
+    ],
+    "codes_1008": 0,
+    "hash_match": true,
+    "restarts": {},
+    "resyncs": 0,
+    "parent_mode": "ws",
+    "cpu_breakdown": {
+      "seconds": 22.569902907999676,
+      "cores": {
+        "primary_parse": 0.12354044186037427,
+        "primary_apply": 0.15223480964918973,
+        "backup_parse": 0.03956831102199548,
+        "backup_apply": 0.0,
+        "pickle": 0.07054239318130555,
+        "parent_apply": 0.10548019261333046,
+        "child_cpu": 0.5188636899208485,
+        "child_other": 0.13297773420798348,
+        "accounted": 0.49136614832619546
+      },
+      "by_group": {
+        "up_down:BTC:15m": {
+          "primary_parse": 0.029205999941026264,
+          "primary_apply": 0.03608525239651497,
+          "backup_parse": 0.008682613957127428,
+          "backup_apply": 0.0,
+          "pickle": 0.015182190255614724,
+          "child_cpu": 0.12498554453241162,
+          "parent_apply": 0.025327341341701576
+        },
+        "up_down:BTC:5m": {
+          "primary_parse": 0.05670102043489222,
+          "primary_apply": 0.0720541334018598,
+          "backup_parse": 0.020089484028717332,
+          "backup_apply": 0.0,
+          "pickle": 0.03516859608282405,
+          "child_cpu": 0.219383743394173,
+          "parent_apply": 0.04315324983763054
+        },
+        "up_down:ETH:15m": {
+          "primary_parse": 0.014244367568194227,
+          "primary_apply": 0.01588605726225403,
+          "backup_parse": 0.004210395072914624,
+          "backup_apply": 0.0,
+          "pickle": 0.007547697200754103,
+          "child_cpu": 0.06942595740828884,
+          "parent_apply": 0.015260018680803856
+        },
+        "up_down:ETH:5m": {
+          "primary_parse": 0.023389053916261573,
+          "primary_apply": 0.028209366588560898,
+          "backup_parse": 0.006585817963236087,
+          "backup_apply": 0.0,
+          "pickle": 0.01264390964211267,
+          "child_cpu": 0.105068444585975,
+          "parent_apply": 0.021739582753194486
+        }
+      }
+    }
+  },
+  "after_s78_4950": {
+    "speed": 0.78,
+    "primary_first": "0",
+    "parent_load": 0.2,
+    "wall": 27.44140386581421,
+    "obs_box_cores": 1.0007638506502177,
+    "bg_box_cores": 0.3431194353627735,
+    "obs_prod_cores": 1.2830305777566893,
+    "bg_prod_cores": 0.43989671200355573,
+    "total_prod_cores": 1.722927289760245,
+    "valid": false,
+    "logical": 49500,
+    "published": 49308,
+    "ready_ratio": 0.9976498237367802,
+    "ready_by_group": {
+      "up_down:BTC:15m": 0.9976580796252927,
+      "up_down:BTC:5m": 0.9975429975429976,
+      "up_down:ETH:15m": 0.997716894977169,
+      "up_down:ETH:5m": 0.9976798143851509
+    },
+    "primary_queue_wait_ms": {
+      "p50": 0,
+      "p99": 378.03,
+      "max": 478.914,
+      "samples": 1702
+    },
+    "primary_queue_age_p99": 378.03,
+    "primary_queue_age_series_max_ms": 478.914,
+    "primary_queue_age_by_group": {
+      "up_down:BTC:15m": {
+        "p50": 0,
+        "p99": 61.373,
+        "max": 117.648,
+        "samples": 426,
+        "series_max_ms": 117.648,
+        "worst_second": {
+          "second": 3,
+          "queue_age_ms": 117.648,
+          "depth_max": 67,
+          "samples": 18
+        }
+      },
+      "up_down:BTC:5m": {
+        "p50": 33.001999999999995,
+        "p99": 462.58500000000004,
+        "max": 478.914,
+        "samples": 407,
+        "series_max_ms": 478.914,
+        "worst_second": {
+          "second": 16,
+          "queue_age_ms": 478.914,
+          "depth_max": 533,
+          "samples": 17
+        }
+      },
+      "up_down:ETH:15m": {
+        "p50": 0,
+        "p99": 28.554,
+        "max": 31.671,
+        "samples": 438,
+        "series_max_ms": 31.671,
+        "worst_second": {
+          "second": 9,
+          "queue_age_ms": 31.671,
+          "depth_max": 8,
+          "samples": 19
+        }
+      },
+      "up_down:ETH:5m": {
+        "p50": 0,
+        "p99": 40.466,
+        "max": 58.22,
+        "samples": 431,
+        "series_max_ms": 58.22,
+        "worst_second": {
+          "second": 3,
+          "queue_age_ms": 58.22,
+          "depth_max": 34,
+          "samples": 18
+        }
+      }
+    },
+    "backup_queue_wait_ms": {
+      "p50": 0,
+      "p99": 25.103,
+      "max": 89.84,
+      "samples": 1702
+    },
+    "failover_gaps_s": [
+      0.06532827299997734,
+      0.056208295000033104,
+      0.07830071700027474,
+      0.07706280599995807
+    ],
+    "codes_1008": 0,
+    "hash_match": true,
+    "restarts": {},
+    "resyncs": 0,
+    "parent_mode": "ws",
+    "cpu_breakdown": {
+      "seconds": 22.582232980999834,
+      "cores": {
+        "primary_parse": 0.2182425223469556,
+        "primary_apply": 0.2849618106594864,
+        "backup_parse": 0.06278215631699838,
+        "backup_apply": 0.0,
+        "pickle": 0.12863183027311906,
+        "parent_apply": 0.19778947603446065,
+        "child_cpu": 0.7596471723338176,
+        "child_other": 0.06502885273725822,
+        "accounted": 0.8924077956310201
+      },
+      "by_group": {
+        "up_down:BTC:15m": {
+          "primary_parse": 0.05110377977107044,
+          "primary_apply": 0.06274506459091833,
+          "backup_parse": 0.013096801199812694,
+          "backup_apply": 0.0,
+          "pickle": 0.02511967888548776,
+          "child_cpu": 0.18326867052882392,
+          "parent_apply": 0.04921314636754681
+        },
+        "up_down:BTC:5m": {
+          "primary_parse": 0.10287590354570572,
+          "primary_apply": 0.1430454788380747,
+          "backup_parse": 0.03230959022581501,
+          "backup_apply": 0.0,
+          "pickle": 0.07221996311756256,
+          "child_cpu": 0.31929328114126826,
+          "parent_apply": 0.08871659984580345
+        },
+        "up_down:ETH:15m": {
+          "primary_parse": 0.023451805605122354,
+          "primary_apply": 0.028515348793974406,
+          "backup_parse": 0.006393163427260208,
+          "backup_apply": 0.0,
+          "pickle": 0.011216533777377911,
+          "child_cpu": 0.0998098552918307,
+          "parent_apply": 0.02163109655324861
+        },
+        "up_down:ETH:5m": {
+          "primary_parse": 0.040811033425057076,
+          "primary_apply": 0.050655918436518996,
+          "backup_parse": 0.010982601464110469,
+          "backup_apply": 0.0,
+          "pickle": 0.020075654492690845,
+          "child_cpu": 0.1572753653718947,
+          "parent_apply": 0.038228633267861786
+        }
+      }
+    }
+  },
+  "after_s65_3300": {
+    "speed": 0.65,
+    "primary_first": "0",
+    "parent_load": 0.2,
+    "wall": 27.01207184791565,
+    "obs_box_cores": 0.7519190351023468,
+    "bg_box_cores": 0.28584438259576894,
+    "obs_prod_cores": 1.156798515542072,
+    "bg_prod_cores": 0.4397605886088753,
+    "total_prod_cores": 1.596559104150947,
+    "valid": true,
+    "logical": 33000,
+    "published": 32913,
+    "ready_ratio": 0.9977272727272727,
+    "ready_by_group": {
+      "up_down:BTC:15m": 0.9977272727272727,
+      "up_down:BTC:5m": 0.997716894977169,
+      "up_down:ETH:15m": 0.9977324263038548,
+      "up_down:ETH:5m": 0.997737556561086
+    },
+    "primary_queue_wait_ms": {
+      "p50": 0,
+      "p99": 31.735,
+      "max": 60.734,
+      "samples": 1760
+    },
+    "primary_queue_age_p99": 31.735,
+    "primary_queue_age_series_max_ms": 60.734,
+    "primary_queue_age_by_group": {
+      "up_down:BTC:15m": {
+        "p50": 0,
+        "p99": 30.824,
+        "max": 41.418000000000006,
+        "samples": 440,
+        "series_max_ms": 41.418,
+        "worst_second": {
+          "second": 0,
+          "queue_age_ms": 41.418,
+          "depth_max": 20,
+          "samples": 19
+        }
+      },
+      "up_down:BTC:5m": {
+        "p50": 0,
+        "p99": 38.272,
+        "max": 60.734,
+        "samples": 438,
+        "series_max_ms": 60.734,
+        "worst_second": {
+          "second": 3,
+          "queue_age_ms": 60.734,
+          "depth_max": 37,
+          "samples": 19
+        }
+      },
+      "up_down:ETH:15m": {
+        "p50": 0,
+        "p99": 17.037,
+        "max": 27.002000000000002,
+        "samples": 441,
+        "series_max_ms": 27.002,
+        "worst_second": {
+          "second": 15,
+          "queue_age_ms": 27.002,
+          "depth_max": 6,
+          "samples": 19
+        }
+      },
+      "up_down:ETH:5m": {
+        "p50": 0,
+        "p99": 24.282999999999998,
+        "max": 33.315999999999995,
+        "samples": 441,
+        "series_max_ms": 33.316,
+        "worst_second": {
+          "second": 0,
+          "queue_age_ms": 33.316,
+          "depth_max": 17,
+          "samples": 20
+        }
+      }
+    },
+    "backup_queue_wait_ms": {
+      "p50": 0,
+      "p99": 13.354,
+      "max": 29.227,
+      "samples": 1760
+    },
+    "failover_gaps_s": [
+      0.08595454599981167,
+      0.0012178540000604698,
+      0.07536826900013693,
+      0.06988446000013937
+    ],
+    "codes_1008": 0,
+    "hash_match": true,
+    "restarts": {},
+    "resyncs": 0,
+    "parent_mode": "ws",
+    "cpu_breakdown": {
+      "seconds": 22.577645696999753,
+      "cores": {
+        "primary_parse": 0.12923057289306872,
+        "primary_apply": 0.15840640281972845,
+        "backup_parse": 0.038514802857215334,
+        "backup_apply": 0.0,
+        "pickle": 0.07217004522382639,
+        "parent_apply": 0.10130470774921686,
+        "child_cpu": 0.5238911926309395,
+        "child_other": 0.12556936883710063,
+        "accounted": 0.49962653154305575
+      },
+      "by_group": {
+        "up_down:BTC:15m": {
+          "primary_parse": 0.02977445518552593,
+          "primary_apply": 0.037154458142262,
+          "backup_parse": 0.008571958502552005,
+          "backup_apply": 0.0,
+          "pickle": 0.016215663843491497,
+          "child_cpu": 0.12619554789889442,
+          "parent_apply": 0.024828572319853356
+        },
+        "up_down:BTC:5m": {
+          "primary_parse": 0.060252823888576626,
+          "primary_apply": 0.07560389377652814,
+          "backup_parse": 0.018996588473216235,
+          "backup_apply": 0.0,
+          "pickle": 0.03527538374410003,
+          "child_cpu": 0.22215413477174537,
+          "parent_apply": 0.04438660493875779
+        },
+        "up_down:ETH:15m": {
+          "primary_parse": 0.014160026926212174,
+          "primary_apply": 0.016915610649818617,
+          "backup_parse": 0.00435279069035335,
+          "backup_apply": 0.0,
+          "pickle": 0.007625161644860103,
+          "child_cpu": 0.06948078909788453,
+          "parent_apply": 0.012714393026290481
+        },
+        "up_down:ETH:5m": {
+          "primary_parse": 0.025043266892753997,
+          "primary_apply": 0.028732440251119696,
+          "backup_parse": 0.006593465191093743,
+          "backup_apply": 0.0,
+          "pickle": 0.013053835991374755,
+          "child_cpu": 0.10606072086241518,
+          "parent_apply": 0.019375137464315254
+        }
+      }
+    }
+  },
+  "after_s65_4950": {
+    "speed": 0.65,
+    "primary_first": "0",
+    "parent_load": 0.2,
+    "wall": 27.665634155273438,
+    "obs_box_cores": 0.8654993724564901,
+    "bg_box_cores": 0.2851760764173968,
+    "obs_prod_cores": 1.3315374960869077,
+    "bg_prod_cores": 0.4387324252575335,
+    "total_prod_cores": 1.7702699213444413,
+    "valid": false,
+    "logical": 49500,
+    "published": 42122,
+    "ready_ratio": 0.9981226533166458,
+    "ready_by_group": {
+      "up_down:BTC:15m": 1.0,
+      "up_down:BTC:5m": 0.997275204359673,
+      "up_down:ETH:15m": 0.997624703087886,
+      "up_down:ETH:5m": 0.9975786924939467
+    },
+    "primary_queue_wait_ms": {
+      "p50": 14.036,
+      "p99": 1422.299,
+      "max": 1558.414,
+      "samples": 1598
+    },
+    "primary_queue_age_p99": 1422.299,
+    "primary_queue_age_series_max_ms": 1558.414,
+    "primary_queue_age_by_group": {
+      "up_down:BTC:15m": {
+        "p50": 26.404,
+        "p99": 672.277,
+        "max": 692.984,
+        "samples": 397,
+        "series_max_ms": 692.984,
+        "worst_second": {
+          "second": 16,
+          "queue_age_ms": 692.984,
+          "depth_max": 400,
+          "samples": 18
+        }
+      },
+      "up_down:BTC:5m": {
+        "p50": 462.25899999999996,
+        "p99": 1513.314,
+        "max": 1558.414,
+        "samples": 367,
+        "series_max_ms": 1558.414,
+        "worst_second": {
+          "second": 19,
+          "queue_age_ms": 1558.414,
+          "depth_max": 1606,
+          "samples": 14
+        }
+      },
+      "up_down:ETH:15m": {
+        "p50": 0,
+        "p99": 42.736000000000004,
+        "max": 60.807,
+        "samples": 421,
+        "series_max_ms": 60.807,
+        "worst_second": {
+          "second": 14,
+          "queue_age_ms": 60.807,
+          "depth_max": 14,
+          "samples": 17
+        }
+      },
+      "up_down:ETH:5m": {
+        "p50": 0,
+        "p99": 90.196,
+        "max": 113.558,
+        "samples": 413,
+        "series_max_ms": 113.558,
+        "worst_second": {
+          "second": 11,
+          "queue_age_ms": 113.558,
+          "depth_max": 51,
+          "samples": 17
+        }
+      }
+    },
+    "backup_queue_wait_ms": {
+      "p50": 0,
+      "p99": 52.107,
+      "max": 189.401,
+      "samples": 1598
+    },
+    "failover_gaps_s": [
+      0.0292394449998028,
+      0.001798149000023841,
+      0.0776791400003276,
+      0.00047324199931608746
+    ],
+    "codes_1008": 0,
+    "hash_match": true,
+    "restarts": {},
+    "resyncs": 0,
+    "parent_mode": "ws",
+    "cpu_breakdown": {
+      "seconds": 22.57020393199946,
+      "cores": {
+        "primary_parse": 0.22459307280840157,
+        "primary_apply": 0.2550620530653782,
+        "backup_parse": 0.0752282457932376,
+        "backup_apply": 0.0,
+        "pickle": 0.12460078497619853,
+        "parent_apply": 0.18809877215956225,
+        "child_cpu": 0.6776596546084043,
+        "child_other": 0.0,
+        "accounted": 0.8675829288027782
+      },
+      "by_group": {
+        "up_down:BTC:15m": {
+          "primary_parse": 0.06014626571784495,
+          "primary_apply": 0.07018750157387862,
+          "backup_parse": 0.014448045750160194,
+          "backup_apply": 0.0,
+          "pickle": 0.028914962087460496,
+          "child_cpu": 0.18148462966223317,
+          "parent_apply": 0.059014935975459135
+        },
+        "up_down:BTC:5m": {
+          "primary_parse": 0.09446221444979025,
+          "primary_apply": 0.10100674711972313,
+          "backup_parse": 0.04375668257032384,
+          "backup_apply": 0.0,
+          "pickle": 0.06344880743277936,
+          "child_cpu": 0.24711958965033126,
+          "parent_apply": 0.056072642799903046
+        },
+        "up_down:ETH:15m": {
+          "primary_parse": 0.02554128822835735,
+          "primary_apply": 0.02972652413870207,
+          "backup_parse": 0.006406219741551117,
+          "backup_apply": 0.0,
+          "pickle": 0.011300580303503343,
+          "child_cpu": 0.09869167211386691,
+          "parent_apply": 0.02700379278079682
+        },
+        "up_down:ETH:5m": {
+          "primary_parse": 0.04444330441240901,
+          "primary_apply": 0.05414128023307438,
+          "backup_parse": 0.010617297731202447,
+          "backup_apply": 0.0,
+          "pickle": 0.020936435152455336,
+          "child_cpu": 0.1503637631819729,
+          "parent_apply": 0.046007400603403234
+        }
+      }
+    }
+  },
+  "after_s78_3300_r2": {
+    "speed": 0.78,
+    "primary_first": "0",
+    "parent_load": 0.2,
+    "wall": 26.580541849136353,
+    "obs_box_cores": 0.7758125517922814,
+    "bg_box_cores": 0.34331433316121446,
+    "obs_prod_cores": 0.994631476656771,
+    "bg_prod_cores": 0.44014658097591597,
+    "total_prod_cores": 1.434778057632687,
+    "valid": true,
+    "logical": 33000,
+    "published": 32917,
+    "ready_ratio": 0.9983212087297146,
+    "ready_by_group": {
+      "up_down:BTC:15m": 0.9977628635346756,
+      "up_down:BTC:5m": 0.9977528089887641,
+      "up_down:ETH:15m": 0.9977678571428571,
+      "up_down:ETH:5m": 1.0
+    },
+    "primary_queue_wait_ms": {
+      "p50": 0,
+      "p99": 19.529999999999998,
+      "max": 47.829,
+      "samples": 1787
+    },
+    "primary_queue_age_p99": 19.529999999999998,
+    "primary_queue_age_series_max_ms": 47.829,
+    "primary_queue_age_by_group": {
+      "up_down:BTC:15m": {
+        "p50": 0,
+        "p99": 18.031,
+        "max": 21.91,
+        "samples": 447,
+        "series_max_ms": 21.91,
+        "worst_second": {
+          "second": 15,
+          "queue_age_ms": 21.91,
+          "depth_max": 20,
+          "samples": 20
+        }
+      },
+      "up_down:BTC:5m": {
+        "p50": 0,
+        "p99": 25.288,
+        "max": 47.829,
+        "samples": 445,
+        "series_max_ms": 47.829,
+        "worst_second": {
+          "second": 3,
+          "queue_age_ms": 47.829,
+          "depth_max": 37,
+          "samples": 19
+        }
+      },
+      "up_down:ETH:15m": {
+        "p50": 0,
+        "p99": 9.612,
+        "max": 13.778,
+        "samples": 448,
+        "series_max_ms": 13.778,
+        "worst_second": {
+          "second": 16,
+          "queue_age_ms": 13.778,
+          "depth_max": 7,
+          "samples": 20
+        }
+      },
+      "up_down:ETH:5m": {
+        "p50": 0,
+        "p99": 18.403,
+        "max": 25.044,
+        "samples": 447,
+        "series_max_ms": 25.044,
+        "worst_second": {
+          "second": 10,
+          "queue_age_ms": 25.044,
+          "depth_max": 16,
+          "samples": 20
+        }
+      }
+    },
+    "backup_queue_wait_ms": {
+      "p50": 0,
+      "p99": 3.8649999999999998,
+      "max": 18.087,
+      "samples": 1787
+    },
+    "failover_gaps_s": [
+      0.07822109399967303,
+      0.07674741200025892,
+      0.07824807399993006,
+      0.07773737200022879
+    ],
+    "codes_1008": 0,
+    "hash_match": true,
+    "restarts": {},
+    "resyncs": 0,
+    "parent_mode": "ws",
+    "cpu_breakdown": {
+      "seconds": 22.60528957799943,
+      "cores": {
+        "primary_parse": 0.12298711425072126,
+        "primary_apply": 0.14937461943802446,
+        "backup_parse": 0.036735057745430365,
+        "backup_apply": 0.0,
+        "pickle": 0.06807066136846071,
+        "parent_apply": 0.10599134431491186,
+        "child_cpu": 0.5136400640184842,
+        "child_other": 0.13647261121584736,
+        "accounted": 0.48315879711754867
+      },
+      "by_group": {
+        "up_down:BTC:15m": {
+          "primary_parse": 0.028691245239841703,
+          "primary_apply": 0.03507396126310468,
+          "backup_parse": 0.008200262348349037,
+          "backup_apply": 0.0,
+          "pickle": 0.015429975705308867,
+          "child_cpu": 0.12298393490635558,
+          "parent_apply": 0.026818355496318794
+        },
+        "up_down:BTC:5m": {
+          "primary_parse": 0.05647180163719079,
+          "primary_apply": 0.07019229271649112,
+          "backup_parse": 0.017918427127525376,
+          "backup_apply": 0.0,
+          "pickle": 0.03223050337338262,
+          "child_cpu": 0.21475771275784902,
+          "parent_apply": 0.04288002777648073
+        },
+        "up_down:ETH:15m": {
+          "primary_parse": 0.013977333531153175,
+          "primary_apply": 0.01628016096543061,
+          "backup_parse": 0.004146419167805034,
+          "backup_apply": 0.0,
+          "pickle": 0.00772707986762514,
+          "child_cpu": 0.06857710093255055,
+          "parent_apply": 0.015024069513824437
+        },
+        "up_down:ETH:5m": {
+          "primary_parse": 0.0238467338425356,
+          "primary_apply": 0.02782820449299808,
+          "backup_parse": 0.006469949101750916,
+          "backup_apply": 0.0,
+          "pickle": 0.01268310242214409,
+          "child_cpu": 0.10732131542172899,
+          "parent_apply": 0.02126889152828791
+        }
+      }
+    }
+  },
+  "before_s78_3300": {
+    "speed": 0.78,
+    "primary_first": "1",
+    "parent_load": 0.2,
+    "obs_prod_cores": 1.1754859465071363,
+    "bg_prod_cores": 0.4395352976099456,
+    "valid": true,
+    "ready_ratio": 0.9982935153583617,
+    "ready_by_group": {
+      "up_down:BTC:15m": 0.9977220956719818,
+      "up_down:BTC:5m": 1.0,
+      "up_down:ETH:15m": 0.9977477477477478,
+      "up_down:ETH:5m": 0.9977324263038548
+    },
+    "primary_queue_wait_ms": {
+      "p50": 0,
+      "p99": 35.424,
+      "max": 76.439,
+      "samples": 1758
+    },
+    "failover_gaps_s": [
+      0.08247476599990478,
+      0.02804948399989371,
+      0.07443795800008957,
+      0.08124315700024454
+    ],
+    "codes_1008": 0,
+    "hash_match": true,
+    "cpu_breakdown_cores": {
+      "primary_parse": 0.13945232086440001,
+      "primary_apply": 0.1938348533248856,
+      "backup_parse": 0.1149508195000921,
+      "backup_apply": 0.1650237378567336,
+      "pickle": 0.15351772794866414,
+      "parent_apply": 0.12126805014399943,
+      "child_cpu": 0.7003801174943458,
+      "child_other": 0.0,
+      "accounted": 0.8880475096387749
+    },
+    "note": "pre-C profile, primary_first on via the old replay default"
+  }
+}

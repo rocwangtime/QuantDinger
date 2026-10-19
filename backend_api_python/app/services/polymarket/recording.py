@@ -13,7 +13,6 @@ from collections import deque
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from uuid import uuid4
-from functools import lru_cache
 
 from .observer_db import connection as get_db_connection
 from .client import PublicClient, GAMMA
@@ -34,19 +33,6 @@ def flag(name, default=False):
 
 def exchange_time(value):
     """Accept documented epoch milliseconds or ISO timestamps; never invent one."""
-    if isinstance(value, (int, float)) or isinstance(value, str) and len(value) <= 128:
-        return _exchange_time(value)
-    return _parse_exchange_time(value)
-
-
-@lru_cache(maxsize=4096)
-def _exchange_time(value):
-    # Many rows and both physical copies share a timestamp. Keep only bounded,
-    # small scalar keys; malformed/unhashable input still follows the parser.
-    return _parse_exchange_time(value)
-
-
-def _parse_exchange_time(value):
     if value is None or value == '':
         return None
     try:
@@ -230,7 +216,7 @@ class Recorder:
             self.dropped += 1
         self.pending.append((key, kind, [(sql, params)]))
 
-    def receive(self, event, changed, markets, asset_markets, received, owned=None):
+    def receive(self, event, changed, markets, asset_markets, received, owned=None, published=None):
         changed = set(changed)
         for kind, payload in events(event):
             if kind == 'book':
@@ -244,9 +230,13 @@ class Recorder:
             if at is not None:
                 from .ws_balance import event_assets
                 lag = (received - at).total_seconds() * 1000
+                # Exchange -> merged publication, including local receive-queue
+                # and lock wait. `lag` stops at socket receipt and hides backlog.
+                published = published or datetime.now(timezone.utc)
+                publish_lag = (published - at).total_seconds() * 1000
                 for asset in event_assets(payload):
                     if asset in asset_markets and (owned is None or asset in owned):
-                        self.delivery_samples.append((time.monotonic(), asset, lag))
+                        self.delivery_samples.append((time.monotonic(), asset, lag, publish_lag))
             for token in set(tokens):
                 if token in changed and (owned is None or token in owned):
                     previous = self.metadata.get(token, (None,))[0]
@@ -308,20 +298,28 @@ class Recorder:
                 else:
                     history.append((second, count))
 
-    def metrics(self, books, groups=None, rates=None, hot_threshold=100):
+    def metrics_view(self, books):
+        """O(n) copies taken under the publication lock; metrics() sorts them later."""
+        return dict(books=set(books), metadata=dict(self.metadata), samples=list(self.delivery_samples))
+
+    def metrics(self, books, groups=None, rates=None, hot_threshold=100, view=None):
         group_rates = rates or {}
+        if view is not None:
+            books, metadata, delivery_samples = view['books'], view['metadata'], view['samples']
+        else:
+            metadata, delivery_samples = self.metadata, self.delivery_samples
         now = datetime.now(timezone.utc)
-        ages = sorted((now - at).total_seconds() * 1000 for token, (at, _, _) in self.metadata.items()
+        ages = sorted((now - at).total_seconds() * 1000 for token, (at, _, _) in metadata.items()
                       if at is not None and token in books and at <= now)
         second = int(time.monotonic())
         with self.health_lock:
             rates = {table: sum(count for at, count in history if at > second - 60)
                      for table, history in self.writes.items()}
         receipt_ages = sorted((now - received).total_seconds() * 1000
-                              for token, (_, received, _) in self.metadata.items()
+                              for token, (_, received, _) in metadata.items()
                               if token in books and received is not None and received <= now)
         arrival_lags = sorted((received - at).total_seconds() * 1000
-                              for token, (at, received, _) in self.metadata.items()
+                              for token, (at, received, _) in metadata.items()
                               if token in books and at is not None and received is not None and at <= received)
 
         def percentile(q, values=ages):
@@ -338,7 +336,7 @@ class Recorder:
                            'hot' if group_rates[key] >= hot_threshold else 'cold') == name]
                 values, receipts, lags = [], [], []
                 for token in tokens:
-                    at, received, _ = self.metadata.get(token, (None, None, None))
+                    at, received, _ = metadata.get(token, (None, None, None))
                     if token not in books:
                         continue
                     if at is not None and at <= now:
@@ -358,21 +356,27 @@ class Recorder:
                                 if at is not None and received is not None else None))
                 token_set = set(tokens)
                 sample_floor = time.monotonic() - 60
-                samples = sorted(lag for at, token, lag in self.delivery_samples
-                                 if at > sample_floor and token in token_set)
+                window = [row for row in delivery_samples if row[0] > sample_floor and row[1] in token_set]
+                samples = sorted(row[2] for row in window)
+                published = sorted(row[3] for row in window if len(row) > 3)
                 delivery[name] = dict(samples=len(samples), p50_ms=percentile(.5, samples),
                     p95_ms=percentile(.95, samples), max_ms=max(samples) if samples else None,
                     negative_clock_samples=sum(v < 0 for v in samples),
-                    within_1s=(max(samples) <= 1000 and min(samples) >= 0) if samples else None)
+                    within_1s=(max(samples) <= 1000 and min(samples) >= 0) if samples else None,
+                    publish_p50_ms=percentile(.5, published), publish_p95_ms=percentile(.95, published),
+                    publish_max_ms=max(published) if published else None)
                 freshness[name] = dict(tokens=len(tokens), measured_tokens=len(values),
                     missing_tokens=len(tokens) - len(values),
                     delivery_latency_p95_ms=delivery[name]['p95_ms'],
+                    publish_latency_p95_ms=delivery[name]['publish_p95_ms'],
                     book_age_p95_ms=percentile(.95, sorted(values)),
                     update_silence_p95_ms=percentile(.95, sorted(receipts)),
                     updated_within_30s_tokens=sum(v <= 30000 for v in receipts),
                     book_receipt_age_p95_ms=percentile(.95, sorted(receipts)),
                     book_arrival_lag_p95_ms=percentile(.95, sorted(lags)))
         return dict(ws_delivery_latency_by_activity=delivery, ws_delivery_latency_window_seconds=60,
+                    ws_delivery_latency_scope=('p*_ms: exchange_to_socket_receipt; '
+                                               'publish_p*_ms: exchange_to_merged_publication_incl_queue_wait'),
                     ws_delivery_latency_max_samples=8192, book_freshness_by_activity=freshness, book_freshness_hot_threshold_msg_per_s=hot_threshold,
                     book_hot_oldest_tokens=sorted(hot_details,
                         key=lambda row: -(row['book_age_ms'] if row['book_age_ms'] is not None else float('inf')))[:8],

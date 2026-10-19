@@ -1,6 +1,7 @@
 """Short, bounded sharing of immutable public frames across redundant readers."""
 import hashlib
 import json
+import re
 import threading
 import time
 from collections import OrderedDict
@@ -26,7 +27,6 @@ class PublicEvent(dict):
     identity = None
     book = None
     changes = None
-    ladder = None
     fanin = None
 
 
@@ -69,7 +69,6 @@ def prepare(event):
         at = exchange_time(payload.get('timestamp'))
         if kind == 'price_change':
             price_rows(payload, at)
-            ladder_rows(payload)
         else:
             fingerprint(event if isinstance(event, dict) else payload)
             if kind == 'book':
@@ -79,19 +78,6 @@ def prepare(event):
                     raise ValueError('invalid public book level') from exc
                 event_key(kind, at, payload)
     return event
-
-
-def ladder_rows(payload):
-    """Normalize immutable delta fields once for live, shadow and history."""
-    if isinstance(payload, PublicEvent) and payload.ladder is not None:
-        return payload.ladder
-    rows = [(str(row.get('asset_id') or row.get('assetId') or ''),
-             'bids' if str(row.get('side', '')).upper() == 'BUY' else 'asks',
-             str(row.get('price')), str(row.get('size', 0)))
-            for row in payload.get('price_changes', payload.get('priceChanges', []))]
-    if isinstance(payload, PublicEvent):
-        payload.ladder = rows
-    return rows
 
 
 def price_rows(payload, at):
@@ -201,3 +187,98 @@ class ParsedFrames:
     def metrics(self):
         with self.lock:
             return dict(entries=len(self.items), charged_bytes=self.bytes, hits=self.hits, misses=self.misses)
+
+
+_ENVELOPE_FIELD = re.compile(r'"(event_type|asset_id|timestamp|hash)"\s*:\s*"?([^"\\,}\s]+)"?')
+
+
+def cheap_envelope(raw):
+    """Timestamp, asset and hash only. Does not build bid or ask ladders."""
+    if isinstance(raw, (bytes, bytearray)):
+        raw = raw.decode('utf-8', 'replace')
+    if not isinstance(raw, str) or not raw:
+        return []
+    tips = []
+    kind = asset = stamp = digest = None
+
+    def flush():
+        nonlocal asset, stamp, digest
+        if kind and asset:
+            tips.append((kind, asset, stamp, digest))
+        asset = stamp = digest = None
+
+    for match in _ENVELOPE_FIELD.finditer(raw):
+        key, value = match.group(1), match.group(2)
+        if key == 'event_type':
+            flush()
+            kind = value
+        elif key == 'asset_id':
+            if asset:
+                flush()
+            asset = value
+        elif key == 'timestamp' and stamp is None:
+            stamp = value
+        elif key == 'hash' and digest is None:
+            digest = value
+    flush()
+    return tips
+
+
+def _as_exchange_time(value):
+    if value is None or hasattr(value, 'timestamp'):
+        return value
+    from .recording import exchange_time
+    return exchange_time(value)
+
+
+def snapshot_keeps_change(change_stamp, change_hash, book_stamp, book_hash):
+    """Whether a price change still has to be applied after a snapshot.
+
+    Older than the snapshot is already in the book. The same timestamp and
+    hash is the snapshot itself. A missing change timestamp cannot be ordered,
+    so the snapshot wins.
+    """
+    book_at = _as_exchange_time(book_stamp)
+    change_at = _as_exchange_time(change_stamp)
+    if book_at is None:
+        return True
+    if change_at is None:
+        return False
+    if change_at < book_at:
+        return False
+    if change_at == book_at and change_hash and book_hash and change_hash == book_hash:
+        return False
+    return True
+
+
+def hold_until_snapshot(event, pending):
+    """Keep books. Hold price changes that still touch an asset in `pending`.
+
+    A book removes its asset from `pending`. `pending` is mutated.
+    """
+    if not pending or not event:
+        return event
+    items = event if isinstance(event, list) else [event]
+    kept = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        kind = item.get('event_type') or item.get('type')
+        payload = item.get('payload') or item
+        if kind == 'book':
+            asset = str(payload.get('asset_id') or payload.get('assetId') or '')
+            pending.discard(asset)
+            kept.append(item)
+            continue
+        if kind == 'price_change':
+            field = 'price_changes' if 'price_changes' in payload else 'priceChanges' if 'priceChanges' in payload else None
+            rows = payload.get(field) or [] if field else []
+            assets = {str(row.get('asset_id') or row.get('assetId') or '') for row in rows if isinstance(row, dict)}
+            if assets & pending:
+                continue
+        kept.append(item)
+    if not kept:
+        return None
+    if isinstance(event, list):
+        return kept
+    return kept[0]

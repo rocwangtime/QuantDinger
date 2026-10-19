@@ -1,0 +1,1844 @@
+{
+  "even3300": {
+    "valid": true,
+    "mode": "process-per-group",
+    "weighted": false,
+    "seconds": 21.09363101000008,
+    "rate": 3300.0,
+    "logical": 33000,
+    "published": 32918,
+    "ready_ratio": 0.9976162097735399,
+    "ready_samples": 1678,
+    "resyncs": 0,
+    "primary_queue_wait_ms": {
+      "p50": 0,
+      "p99": 12.128,
+      "max": 32.332,
+      "samples": 1678
+    },
+    "backup_queue_wait_ms": {
+      "p50": 0,
+      "p99": 11.006,
+      "max": 34.924,
+      "samples": 1678
+    },
+    "failover_gaps_s": [
+      0.06765558899996904,
+      0.09218561800025782,
+      0.08014873100000841,
+      0.08115165000026536
+    ],
+    "failover_gap_max_s": 0.09218561800025782,
+    "kicks": 4,
+    "codes_1008": 0,
+    "close_reasons": {
+      "slow_consumer": 4
+    },
+    "parent_mode": "ws",
+    "cpu_cores": 0.6979380850901035,
+    "parent_cpu_s": 3.287646761,
+    "burner_cores": 0.3806836289206506,
+    "restarts": {},
+    "stale_skipped": 0,
+    "snapshot_errors": [],
+    "final_book_sha256": "43c0ea8b311ee7764141cc86b8dcb84afe489322e215c75e063a678a420092b9",
+    "expected_book_sha256": "43c0ea8b311ee7764141cc86b8dcb84afe489322e215c75e063a678a420092b9",
+    "failover_gap_definition": "failover_gaps_s is seconds from mark_kick, recorded before the 1013 on_close, until that group forwards the next merged event with a higher outbox sequence. It is not ws_continuity.merged_gap_ms and not the hot-primary-failure business_gap flag.",
+    "primary_queue_age_definition": "pending_wait_seconds of ReceiveQueue (oldest frame queued or in parse), sampled every 50ms for the whole window on each group while the socket stays open, not only at a kick or disconnect. series_1s is the max of those samples in each whole second after the window start. primary_queue_wait_ms is the pooled distribution; its p99 is the pass/fail check.",
+    "primary_queue_age_by_group": {
+      "up_down:BTC:15m": {
+        "p50": 0,
+        "p99": 5.5840000000000005,
+        "max": 32.332,
+        "samples": 420,
+        "series_max_ms": 32.332,
+        "series_1s": [
+          {
+            "second": 0,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 1,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 2,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 3,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 4,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 5,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 6,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 7,
+            "queue_age_ms": 9.808,
+            "depth_max": 21,
+            "samples": 19
+          },
+          {
+            "second": 8,
+            "queue_age_ms": 20.045,
+            "depth_max": 2,
+            "samples": 20
+          },
+          {
+            "second": 9,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 10,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 11,
+            "queue_age_ms": 32.332,
+            "depth_max": 4,
+            "samples": 20
+          },
+          {
+            "second": 12,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 13,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 14,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 15,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 16,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 17,
+            "queue_age_ms": 4.915,
+            "depth_max": 21,
+            "samples": 19
+          },
+          {
+            "second": 18,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 19,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 20,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 21,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 2
+          }
+        ]
+      },
+      "up_down:BTC:5m": {
+        "p50": 0,
+        "p99": 13.424,
+        "max": 26.485000000000003,
+        "samples": 419,
+        "series_max_ms": 26.485,
+        "series_1s": [
+          {
+            "second": 0,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 1,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 2,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 3,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 4,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 5,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 6,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 7,
+            "queue_age_ms": 13.424,
+            "depth_max": 20,
+            "samples": 19
+          },
+          {
+            "second": 8,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 9,
+            "queue_age_ms": 26.485,
+            "depth_max": 4,
+            "samples": 20
+          },
+          {
+            "second": 10,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 11,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 12,
+            "queue_age_ms": 2.475,
+            "depth_max": 21,
+            "samples": 19
+          },
+          {
+            "second": 13,
+            "queue_age_ms": 13.843,
+            "depth_max": 20,
+            "samples": 20
+          },
+          {
+            "second": 14,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 15,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 16,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 17,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 19
+          },
+          {
+            "second": 18,
+            "queue_age_ms": 16.575,
+            "depth_max": 21,
+            "samples": 20
+          },
+          {
+            "second": 19,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 20,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 21,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 2
+          }
+        ]
+      },
+      "up_down:ETH:15m": {
+        "p50": 0,
+        "p99": 7.093999999999999,
+        "max": 20.32,
+        "samples": 419,
+        "series_max_ms": 20.32,
+        "series_1s": [
+          {
+            "second": 0,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 1,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 2,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 3,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 4,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 5,
+            "queue_age_ms": 12.128,
+            "depth_max": 21,
+            "samples": 19
+          },
+          {
+            "second": 6,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 7,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 19
+          },
+          {
+            "second": 8,
+            "queue_age_ms": 20.32,
+            "depth_max": 21,
+            "samples": 20
+          },
+          {
+            "second": 9,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 10,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 11,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 12,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 13,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 14,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 15,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 16,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 19
+          },
+          {
+            "second": 17,
+            "queue_age_ms": 18.379,
+            "depth_max": 3,
+            "samples": 20
+          },
+          {
+            "second": 18,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 19,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 20,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 21,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 2
+          }
+        ]
+      },
+      "up_down:ETH:5m": {
+        "p50": 0,
+        "p99": 7.447,
+        "max": 15.632,
+        "samples": 420,
+        "series_max_ms": 15.632,
+        "series_1s": [
+          {
+            "second": 0,
+            "queue_age_ms": 12.955,
+            "depth_max": 1,
+            "samples": 20
+          },
+          {
+            "second": 1,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 2,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 3,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 4,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 5,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 6,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 7,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 8,
+            "queue_age_ms": 15.132,
+            "depth_max": 12,
+            "samples": 19
+          },
+          {
+            "second": 9,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 10,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 11,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 12,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 13,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 14,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 15,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 16,
+            "queue_age_ms": 1.792,
+            "depth_max": 21,
+            "samples": 20
+          },
+          {
+            "second": 17,
+            "queue_age_ms": 15.632,
+            "depth_max": 12,
+            "samples": 19
+          },
+          {
+            "second": 18,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 19,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 20,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 21,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 2
+          }
+        ]
+      }
+    },
+    "primary_queue_age_series_max_ms": 32.332
+  },
+  "weighted3300": {
+    "valid": true,
+    "mode": "process-per-group",
+    "weighted": true,
+    "seconds": 21.07844288999968,
+    "rate": 3300.0,
+    "logical": 33000,
+    "published": 32917,
+    "ready_ratio": 0.9982089552238806,
+    "ready_samples": 1675,
+    "resyncs": 0,
+    "primary_queue_wait_ms": {
+      "p50": 0,
+      "p99": 15.816,
+      "max": 37.91,
+      "samples": 1675
+    },
+    "backup_queue_wait_ms": {
+      "p50": 0,
+      "p99": 12.876,
+      "max": 33.395,
+      "samples": 1675
+    },
+    "failover_gaps_s": [
+      0.0758461539999189,
+      0.08845462899989798,
+      0.07779637600015121,
+      0.05921762600019065
+    ],
+    "failover_gap_max_s": 0.08845462899989798,
+    "kicks": 4,
+    "codes_1008": 0,
+    "close_reasons": {
+      "slow_consumer": 4
+    },
+    "parent_mode": "ws",
+    "cpu_cores": 0.6507594648468286,
+    "parent_cpu_s": 3.3290288020000003,
+    "burner_cores": 0.38190676806678114,
+    "restarts": {},
+    "stale_skipped": 0,
+    "snapshot_errors": [],
+    "final_book_sha256": "a566a6a977a3b999b679e651b58d01c68236cf5c3b4396863fd518824c77b692",
+    "expected_book_sha256": "a566a6a977a3b999b679e651b58d01c68236cf5c3b4396863fd518824c77b692",
+    "failover_gap_definition": "failover_gaps_s is seconds from mark_kick, recorded before the 1013 on_close, until that group forwards the next merged event with a higher outbox sequence. It is not ws_continuity.merged_gap_ms and not the hot-primary-failure business_gap flag.",
+    "primary_queue_age_definition": "pending_wait_seconds of ReceiveQueue (oldest frame queued or in parse), sampled every 50ms for the whole window on each group while the socket stays open, not only at a kick or disconnect. series_1s is the max of those samples in each whole second after the window start. primary_queue_wait_ms is the pooled distribution; its p99 is the pass/fail check.",
+    "primary_queue_age_by_group": {
+      "up_down:BTC:15m": {
+        "p50": 0,
+        "p99": 11.792,
+        "max": 16.389,
+        "samples": 419,
+        "series_max_ms": 16.389,
+        "series_1s": [
+          {
+            "second": 0,
+            "queue_age_ms": 16.22,
+            "depth_max": 1,
+            "samples": 20
+          },
+          {
+            "second": 1,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 2,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 3,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 4,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 5,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 6,
+            "queue_age_ms": 11.792,
+            "depth_max": 20,
+            "samples": 19
+          },
+          {
+            "second": 7,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 8,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 9,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 10,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 11,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 12,
+            "queue_age_ms": 16.389,
+            "depth_max": 6,
+            "samples": 19
+          },
+          {
+            "second": 13,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 14,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 15,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 16,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 17,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 18,
+            "queue_age_ms": 12.935,
+            "depth_max": 20,
+            "samples": 19
+          },
+          {
+            "second": 19,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 20,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 21,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 2
+          }
+        ]
+      },
+      "up_down:BTC:5m": {
+        "p50": 0,
+        "p99": 24.074,
+        "max": 37.91,
+        "samples": 418,
+        "series_max_ms": 37.91,
+        "series_1s": [
+          {
+            "second": 0,
+            "queue_age_ms": 26.551,
+            "depth_max": 7,
+            "samples": 20
+          },
+          {
+            "second": 1,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 2,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 3,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 4,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 5,
+            "queue_age_ms": 5.122,
+            "depth_max": 37,
+            "samples": 19
+          },
+          {
+            "second": 6,
+            "queue_age_ms": 15.378,
+            "depth_max": 37,
+            "samples": 20
+          },
+          {
+            "second": 7,
+            "queue_age_ms": 32.508,
+            "depth_max": 3,
+            "samples": 20
+          },
+          {
+            "second": 8,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 9,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 10,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 11,
+            "queue_age_ms": 18.278,
+            "depth_max": 37,
+            "samples": 19
+          },
+          {
+            "second": 12,
+            "queue_age_ms": 24.074,
+            "depth_max": 13,
+            "samples": 20
+          },
+          {
+            "second": 13,
+            "queue_age_ms": 33.403,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 14,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 15,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 16,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 17,
+            "queue_age_ms": 21.533,
+            "depth_max": 28,
+            "samples": 19
+          },
+          {
+            "second": 18,
+            "queue_age_ms": 37.91,
+            "depth_max": 19,
+            "samples": 20
+          },
+          {
+            "second": 19,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 20,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 21,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 1
+          }
+        ]
+      },
+      "up_down:ETH:15m": {
+        "p50": 0,
+        "p99": 2.7070000000000003,
+        "max": 12.196,
+        "samples": 419,
+        "series_max_ms": 12.196,
+        "series_1s": [
+          {
+            "second": 0,
+            "queue_age_ms": 5.357,
+            "depth_max": 10,
+            "samples": 19
+          },
+          {
+            "second": 1,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 2,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 3,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 4,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 5,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 6,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 7,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 8,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 19
+          },
+          {
+            "second": 9,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 10,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 11,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 12,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 13,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 14,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 15,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 16,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 17,
+            "queue_age_ms": 12.196,
+            "depth_max": 10,
+            "samples": 19
+          },
+          {
+            "second": 18,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 19,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 20,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 21,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 2
+          }
+        ]
+      },
+      "up_down:ETH:5m": {
+        "p50": 0,
+        "p99": 7.673,
+        "max": 17.607999999999997,
+        "samples": 419,
+        "series_max_ms": 17.608,
+        "series_1s": [
+          {
+            "second": 0,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 1,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 2,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 3,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 4,
+            "queue_age_ms": 17.608,
+            "depth_max": 3,
+            "samples": 19
+          },
+          {
+            "second": 5,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 6,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 7,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 8,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 9,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 10,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 11,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 12,
+            "queue_age_ms": 15.816,
+            "depth_max": 16,
+            "samples": 19
+          },
+          {
+            "second": 13,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 14,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 15,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 16,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 17,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 18,
+            "queue_age_ms": 3.484,
+            "depth_max": 8,
+            "samples": 19
+          },
+          {
+            "second": 19,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 20,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 21,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 2
+          }
+        ]
+      }
+    },
+    "primary_queue_age_series_max_ms": 37.91
+  },
+  "weighted4950": {
+    "valid": true,
+    "mode": "process-per-group",
+    "weighted": true,
+    "seconds": 21.07971958600001,
+    "rate": 4950.0,
+    "logical": 49500,
+    "published": 49437,
+    "ready_ratio": 0.9981873111782478,
+    "ready_samples": 1655,
+    "resyncs": 0,
+    "primary_queue_wait_ms": {
+      "p50": 0,
+      "p99": 31.419999999999998,
+      "max": 89.672,
+      "samples": 1655
+    },
+    "backup_queue_wait_ms": {
+      "p50": 0,
+      "p99": 27.114,
+      "max": 65.11999999999999,
+      "samples": 1655
+    },
+    "failover_gaps_s": [
+      0.04536295199977758,
+      0.0005759410000791831,
+      0.05828442999973049,
+      0.08947782999985066
+    ],
+    "failover_gap_max_s": 0.08947782999985066,
+    "kicks": 4,
+    "codes_1008": 0,
+    "close_reasons": {
+      "slow_consumer": 4
+    },
+    "parent_mode": "ws",
+    "cpu_cores": 0.8625143343686043,
+    "parent_cpu_s": 4.85842928,
+    "burner_cores": 0.30455813104192386,
+    "restarts": {},
+    "stale_skipped": 0,
+    "snapshot_errors": [],
+    "final_book_sha256": "6dc4b4dfd14df8f79239139a76195b6d1858789ce2ee786a948dab302515a0da",
+    "expected_book_sha256": "6dc4b4dfd14df8f79239139a76195b6d1858789ce2ee786a948dab302515a0da",
+    "failover_gap_definition": "failover_gaps_s is seconds from mark_kick, recorded before the 1013 on_close, until that group forwards the next merged event with a higher outbox sequence. It is not ws_continuity.merged_gap_ms and not the hot-primary-failure business_gap flag.",
+    "primary_queue_age_definition": "pending_wait_seconds of ReceiveQueue (oldest frame queued or in parse), sampled every 50ms for the whole window on each group while the socket stays open, not only at a kick or disconnect. series_1s is the max of those samples in each whole second after the window start. primary_queue_wait_ms is the pooled distribution; its p99 is the pass/fail check.",
+    "primary_queue_age_by_group": {
+      "up_down:BTC:15m": {
+        "p50": 0,
+        "p99": 20.979000000000003,
+        "max": 89.672,
+        "samples": 415,
+        "series_max_ms": 89.672,
+        "series_1s": [
+          {
+            "second": 0,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 1,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 2,
+            "queue_age_ms": 12.299,
+            "depth_max": 30,
+            "samples": 19
+          },
+          {
+            "second": 3,
+            "queue_age_ms": 27.349,
+            "depth_max": 19,
+            "samples": 20
+          },
+          {
+            "second": 4,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 5,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 6,
+            "queue_age_ms": 20.319,
+            "depth_max": 29,
+            "samples": 19
+          },
+          {
+            "second": 7,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 8,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 9,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 10,
+            "queue_age_ms": 27.12,
+            "depth_max": 23,
+            "samples": 19
+          },
+          {
+            "second": 11,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 12,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 13,
+            "queue_age_ms": 20.366,
+            "depth_max": 30,
+            "samples": 19
+          },
+          {
+            "second": 14,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 15,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 16,
+            "queue_age_ms": 9.296,
+            "depth_max": 13,
+            "samples": 19
+          },
+          {
+            "second": 17,
+            "queue_age_ms": 18.293,
+            "depth_max": 19,
+            "samples": 20
+          },
+          {
+            "second": 18,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 19,
+            "queue_age_ms": 89.672,
+            "depth_max": 20,
+            "samples": 19
+          },
+          {
+            "second": 20,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 21,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 1
+          }
+        ]
+      },
+      "up_down:BTC:5m": {
+        "p50": 0,
+        "p99": 38.173,
+        "max": 44.782000000000004,
+        "samples": 409,
+        "series_max_ms": 44.782,
+        "series_1s": [
+          {
+            "second": 0,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 1,
+            "queue_age_ms": 30.13,
+            "depth_max": 56,
+            "samples": 19
+          },
+          {
+            "second": 2,
+            "queue_age_ms": 44.782,
+            "depth_max": 43,
+            "samples": 19
+          },
+          {
+            "second": 3,
+            "queue_age_ms": 29.755,
+            "depth_max": 11,
+            "samples": 20
+          },
+          {
+            "second": 4,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 19
+          },
+          {
+            "second": 5,
+            "queue_age_ms": 35.805,
+            "depth_max": 24,
+            "samples": 20
+          },
+          {
+            "second": 6,
+            "queue_age_ms": 41.012,
+            "depth_max": 22,
+            "samples": 19
+          },
+          {
+            "second": 7,
+            "queue_age_ms": 25.058,
+            "depth_max": 33,
+            "samples": 19
+          },
+          {
+            "second": 8,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 19
+          },
+          {
+            "second": 9,
+            "queue_age_ms": 31.185,
+            "depth_max": 39,
+            "samples": 20
+          },
+          {
+            "second": 10,
+            "queue_age_ms": 28.425,
+            "depth_max": 17,
+            "samples": 19
+          },
+          {
+            "second": 11,
+            "queue_age_ms": 32.53,
+            "depth_max": 56,
+            "samples": 19
+          },
+          {
+            "second": 12,
+            "queue_age_ms": 42.82,
+            "depth_max": 29,
+            "samples": 20
+          },
+          {
+            "second": 13,
+            "queue_age_ms": 24.036,
+            "depth_max": 45,
+            "samples": 19
+          },
+          {
+            "second": 14,
+            "queue_age_ms": 38.173,
+            "depth_max": 30,
+            "samples": 20
+          },
+          {
+            "second": 15,
+            "queue_age_ms": 33.93,
+            "depth_max": 47,
+            "samples": 19
+          },
+          {
+            "second": 16,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 17,
+            "queue_age_ms": 34.988,
+            "depth_max": 37,
+            "samples": 19
+          },
+          {
+            "second": 18,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 19,
+            "queue_age_ms": 32.641,
+            "depth_max": 39,
+            "samples": 19
+          },
+          {
+            "second": 20,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 21,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 1
+          }
+        ]
+      },
+      "up_down:ETH:15m": {
+        "p50": 0,
+        "p99": 9.693,
+        "max": 23.447,
+        "samples": 416,
+        "series_max_ms": 23.447,
+        "series_1s": [
+          {
+            "second": 0,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 1,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 2,
+            "queue_age_ms": 23.447,
+            "depth_max": 1,
+            "samples": 19
+          },
+          {
+            "second": 3,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 4,
+            "queue_age_ms": 14.421,
+            "depth_max": 8,
+            "samples": 19
+          },
+          {
+            "second": 5,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 6,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 7,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 8,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 9,
+            "queue_age_ms": 10.313,
+            "depth_max": 9,
+            "samples": 19
+          },
+          {
+            "second": 10,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 11,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 12,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 13,
+            "queue_age_ms": 9.693,
+            "depth_max": 14,
+            "samples": 19
+          },
+          {
+            "second": 14,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 15,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 16,
+            "queue_age_ms": 2.078,
+            "depth_max": 15,
+            "samples": 19
+          },
+          {
+            "second": 17,
+            "queue_age_ms": 7.408,
+            "depth_max": 14,
+            "samples": 20
+          },
+          {
+            "second": 18,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 19,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 19
+          },
+          {
+            "second": 20,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 21,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 2
+          }
+        ]
+      },
+      "up_down:ETH:5m": {
+        "p50": 0,
+        "p99": 16.761000000000003,
+        "max": 31.656999999999996,
+        "samples": 415,
+        "series_max_ms": 31.657,
+        "series_1s": [
+          {
+            "second": 0,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 1,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 2,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 3,
+            "queue_age_ms": 6.17,
+            "depth_max": 16,
+            "samples": 19
+          },
+          {
+            "second": 4,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 5,
+            "queue_age_ms": 1.527,
+            "depth_max": 20,
+            "samples": 19
+          },
+          {
+            "second": 6,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 7,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 8,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 9,
+            "queue_age_ms": 20.371,
+            "depth_max": 8,
+            "samples": 19
+          },
+          {
+            "second": 10,
+            "queue_age_ms": 17.998,
+            "depth_max": 4,
+            "samples": 20
+          },
+          {
+            "second": 11,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 12,
+            "queue_age_ms": 5.505,
+            "depth_max": 15,
+            "samples": 19
+          },
+          {
+            "second": 13,
+            "queue_age_ms": 31.657,
+            "depth_max": 24,
+            "samples": 19
+          },
+          {
+            "second": 14,
+            "queue_age_ms": 18.561,
+            "depth_max": 9,
+            "samples": 20
+          },
+          {
+            "second": 15,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 16,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 17,
+            "queue_age_ms": 8.01,
+            "depth_max": 24,
+            "samples": 19
+          },
+          {
+            "second": 18,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 19,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 20,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 21,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 1
+          }
+        ]
+      }
+    },
+    "primary_queue_age_series_max_ms": 89.672
+  }
+}

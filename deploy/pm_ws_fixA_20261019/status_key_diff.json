@@ -1,0 +1,20 @@
+{
+ "base_paths": 516,
+ "fix_paths": 529,
+ "removed": [],
+ "added": [
+  ".book_freshness_by_activity.cold.publish_latency_p95_ms",
+  ".book_freshness_by_activity.hot.publish_latency_p95_ms",
+  ".book_freshness_by_activity.unmeasured.publish_latency_p95_ms",
+  ".ws_delivery_latency_by_activity.cold.publish_max_ms",
+  ".ws_delivery_latency_by_activity.cold.publish_p50_ms",
+  ".ws_delivery_latency_by_activity.cold.publish_p95_ms",
+  ".ws_delivery_latency_by_activity.hot.publish_max_ms",
+  ".ws_delivery_latency_by_activity.hot.publish_p50_ms",
+  ".ws_delivery_latency_by_activity.hot.publish_p95_ms",
+  ".ws_delivery_latency_by_activity.unmeasured.publish_max_ms",
+  ".ws_delivery_latency_by_activity.unmeasured.publish_p50_ms",
+  ".ws_delivery_latency_by_activity.unmeasured.publish_p95_ms",
+  ".ws_delivery_latency_scope"
+ ]
+}

@@ -192,8 +192,6 @@ class FeedMerge:
                 return {}
             if isinstance(payload, PublicEvent) and self.deduplicate and len(rows) == len(payload.get(field, [])):
                 payload.fanin = (id(self), source, counters)
-            if len(rows) == len(payload.get(field, [])):
-                return event
             filtered = {**payload, field: rows}
             return {**event, 'payload': filtered} if 'payload' in event else filtered
         if kind == 'book':
@@ -241,14 +239,12 @@ class FeedContinuity:
         self.records = OrderedDict()
         self.published = {}
         self.gap_waiting = {}
-        self.incidents = {}
-        self.incident_serial = 0
         self.merged_gaps = deque(maxlen=4096)
         self.serial = self.checks = self.uncertain = self.recovered = 0
 
     @serialized
     def prune(self, assets):
-        for cache in (self.history, self.latest, self.pending, self.published, self.gap_waiting, self.incidents):
+        for cache in (self.history, self.latest, self.pending, self.published, self.gap_waiting):
             for asset in cache.keys() - assets:
                 del cache[asset]
         for key in list(self.history_order):
@@ -284,24 +280,6 @@ class FeedContinuity:
         logging.getLogger(__name__).info('Polymarket WS continuity %s', json.dumps(row))
 
     @serialized
-    def begin_incident(self, event, receipts, assets, wall):
-        """One stable window: detection through first fresh receipt per asset.
-
-        Include merged silence already present at detection. A later switch's
-        phase-local cadence cannot erase that lower bound.
-        """
-        self.incident_serial += 1
-        event['incident_id'] = self.incident_serial
-        event['merged_gap_scope'] = 'incident_receipt_cadence'
-        event['_merged_assets'] = {}
-        for asset in assets:
-            last = receipts.get(asset)
-            row = dict(last=last, gap_ms=max(0, (wall-last).total_seconds()*1000) if last else None,
-                       final=False)
-            event['_merged_assets'][asset] = row
-            self.incidents.setdefault(asset, deque(maxlen=64)).append((event, row, wall))
-
-    @serialized
     def publication(self, metadata, assets):
         """Actual merged book receipt cadence, independent of physical sources."""
         for asset in assets:
@@ -316,35 +294,10 @@ class FeedContinuity:
                 max_receipt_gap_ms=max(gap, previous['max_receipt_gap_ms'] if previous else 0))
             if previous:
                 self.merged_gaps.append(gap)
-            pending = self.incidents.get(asset, ())
-            for incident, sample, wall in list(pending):
-                last = sample['last']
-                if sample['final'] or last is not None and row[1] <= last:
-                    continue
-                if last is not None:
-                    sample['gap_ms'] = max(sample['gap_ms'], (row[1]-last).total_seconds()*1000)
-                sample['last'] = row[1]
-                sample['final'] = row[1] >= wall and sample['gap_ms'] is not None
-                samples = incident['_merged_assets']
-                incident['merged_gap_ms'] = max((s['gap_ms'] for s in samples.values()
-                    if s['gap_ms'] is not None), default=None)
-                incident['merged_gap_final'] = bool(samples) and all(s['final'] for s in samples.values())
-                if sample['final']:
-                    import logging
-                    logging.getLogger(__name__).info('Polymarket WS business gap %s', json.dumps(dict(
-                        incident_id=incident['incident_id'], asset=asset, merged_gap_ms=sample['gap_ms'],
-                        merged_gap_final=True, scope='incident_receipt_cadence')))
-            if pending:
-                remaining = deque((item for item in pending if not item[1]['final']), maxlen=64)
-                if remaining:
-                    self.incidents[asset] = remaining
-                else:
-                    self.incidents.pop(asset, None)
             for event in self.gap_waiting.pop(asset, {}).values():
                 event.update(merged_gap_ms=gap if previous else None, merged_gap_final=bool(previous))
-                event['merged_gap_scope'] = 'switch_phase_receipt_cadence'
                 import logging
-                logging.getLogger(__name__).info('Polymarket WS continuity phase gap %s', json.dumps(event))
+                logging.getLogger(__name__).info('Polymarket WS business gap %s', json.dumps(event))
 
     @serialized
     def receive(self, event, source, received):

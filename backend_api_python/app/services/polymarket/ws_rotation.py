@@ -71,7 +71,7 @@ class ShadowBooks:
 
     @shadow_locked
     def receive(self, event, received):
-        from .ws_payloads import materialized_book, price_rows, ladder_rows
+        from .ws_payloads import materialized_book, price_rows
         # No second fan-in, fingerprint pass, event reconstruction or Recorder
         # metrics on a private shadow. Retain per-level timestamp protection.
         for kind, payload in recording.events(event):
@@ -91,7 +91,7 @@ class ShadowBooks:
                         if key[0] == asset:
                             del self.merge.levels[key]
             elif kind == 'price_change':
-                for (_, asset, key, _), (_, side, price, size) in zip(price_rows(payload, at), ladder_rows(payload)):
+                for row, asset, key, _ in price_rows(payload, at):
                     if asset not in self.assets:
                         continue
                     floor = self.merge.snapshots.get(asset)
@@ -106,6 +106,8 @@ class ShadowBooks:
                         self.merge.latest[asset] = max(at, self.merge.latest.get(asset, at))
                     if asset not in self.books:
                         continue
+                    side = 'bids' if str(row.get('side', '')).upper() == 'BUY' else 'asks'
+                    price, size = str(row.get('price')), str(row.get('size', 0))
                     if float(size) <= 0:
                         self.books[asset][side].pop(price, None)
                     else:

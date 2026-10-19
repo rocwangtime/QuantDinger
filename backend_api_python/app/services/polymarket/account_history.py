@@ -42,8 +42,6 @@ class BookHistory:
         self.byte_limit = max(1024, byte_limit)
         self.charged_bytes = self.byte_evictions = self.idle_evictions = 0
         self.assets = {}
-        self.oldest = None
-        self.oldest_at = None
 
     @staticmethod
     def level_bytes(price, size):
@@ -54,8 +52,6 @@ class BookHistory:
         state = self.assets.pop(asset, None)
         if state:
             self.charged_bytes -= state['charged_bytes']
-            if self.oldest is state:
-                self.oldest = None
 
     def retain(self, assets):
         for asset in self.assets.keys() - set(assets):
@@ -78,26 +74,13 @@ class BookHistory:
         change = state['base_bytes'] - before - record['_bytes']
         state['charged_bytes'] += change
         self.charged_bytes += change
-        if self.oldest is state:
-            head = state['events'][0][0] if state['events'] else state['base_at']
-            if head != self.oldest_at:
-                self.oldest = None
-        elif self.oldest is not None:
-            # Time/max-count pruning can expose an out-of-order receipt on
-            # another asset. Re-evaluate its position, including equal ties.
-            self.oldest = None
 
     def trim_bytes(self):
         while self.charged_bytes > self.byte_limit and self.assets:
             # Fold the oldest event into its timestamped base. Requests older
             # than that base fail closed rather than replaying incomplete data.
-            if self.oldest is None:
-                asset, state = min(self.assets.items(), key=lambda item:
-                    item[1]['events'][0][0] if item[1]['events'] else item[1]['base_at'])
-                self.oldest, self.oldest_at = state, state['events'][0][0] if state['events'] else state['base_at']
-            else:
-                state = self.oldest
-                asset = state['_asset']
+            asset, state = min(self.assets.items(), key=lambda item:
+                item[1]['events'][0][0] if item[1]['events'] else item[1]['base_at'])
             if state['events']:
                 self.pop(state)
             else:
@@ -137,10 +120,8 @@ class BookHistory:
         if kind == 'book':
             event = event.get('payload') or event
             levels, charge = materialized_book(event)
-            # Parsed level maps are immutable inputs. History replay copies on
-            # apply(), so retaining them needs no second snapshot copy here.
             records.append((str(event.get('asset_id') or event.get('assetId') or ''), dict(kind='book',
-                _bytes=512 + charge, **levels)))
+                _bytes=512 + charge, **{side: dict(rows) for side, rows in levels.items()})))
         elif kind == 'price_change':
             for item in event.get('price_changes') or (event.get('payload') or {}).get('priceChanges') or []:
                 records.append((str(item.get('asset_id') or item.get('assetId') or ''), dict(kind='delta',
@@ -149,17 +130,12 @@ class BookHistory:
             record['exchange_ms'] = exchange_ms
             if record['kind'] == 'delta' and asset not in self.assets:
                 continue
-            state = self.assets.get(asset)
-            if state is None:
-                state = self.assets[asset] = {'base': {'asks': {}, 'bids': {}}, 'base_at': None,
-                    'base_bytes': 0, 'charged_bytes': 0, 'events': deque(), '_asset': asset}
+            state = self.assets.setdefault(asset, {'base': {'asks': {}, 'bids': {}}, 'base_at': None,
+                'base_bytes': 0, 'charged_bytes': 0, 'events': deque()})
             if record['kind'] == 'delta' and state['base_at'] is None and not state['events']:
                 continue
             if record['kind'] != 'book':
                 record['_bytes'] = 512 + self.level_bytes(record['price'], record['size'])
-            if not state['events']:
-                # Its old anchor may have moved to a newer or older event.
-                self.oldest = None
             state['events'].append((at, record))
             state['charged_bytes'] += record['_bytes']
             self.charged_bytes += record['_bytes']

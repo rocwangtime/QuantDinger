@@ -1,0 +1,3446 @@
+{
+  "commit": "6cea33d",
+  "book_every_note": "QD_REPLAY_BOOK_EVERY frames between WS books. Subscribe echoes the last full book, as the exchange does.",
+  "runs": [
+    {
+      "label": "book2000_s78_a",
+      "speed": 0.78,
+      "bg_target": 0.44,
+      "primary_first": "0",
+      "parent_load": 0.2,
+      "wall": 25.873796463012695,
+      "obs_box_cores": 0.6507954495224993,
+      "bg_box_cores": 0.34312367003007155,
+      "obs_prod_cores": 0.8343531404134606,
+      "bg_prod_cores": 0.4399021410641943,
+      "total_prod_cores": 1.274255281477655,
+      "r": {
+        "mode": "process-per-group",
+        "weighted": true,
+        "seconds": 22.57471873400027,
+        "rate": 3300.0,
+        "logical": 33000,
+        "published": 32917,
+        "ready_ratio": 1.0,
+        "ready_samples": 1788,
+        "resyncs": 0,
+        "primary_queue_wait_ms": {
+          "p50": 0,
+          "p99": 14.6,
+          "max": 25.116,
+          "samples": 1788
+        },
+        "primary_queue_age_by_group": {
+          "up_down:BTC:15m": {
+            "p50": 0,
+            "p99": 15.619,
+            "max": 22.214000000000002,
+            "samples": 448,
+            "series_1s": [
+              {
+                "second": 0,
+                "queue_age_ms": 14.473,
+                "depth_max": 6,
+                "samples": 20
+              },
+              {
+                "second": 1,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 2,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 3,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 4,
+                "queue_age_ms": 11.948,
+                "depth_max": 19,
+                "samples": 19
+              },
+              {
+                "second": 5,
+                "queue_age_ms": 14.509,
+                "depth_max": 15,
+                "samples": 20
+              },
+              {
+                "second": 6,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 7,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 8,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 9,
+                "queue_age_ms": 20.488,
+                "depth_max": 5,
+                "samples": 19
+              },
+              {
+                "second": 10,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 11,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 12,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 13,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 14,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 15,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 16,
+                "queue_age_ms": 18.653,
+                "depth_max": 19,
+                "samples": 19
+              },
+              {
+                "second": 17,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 18,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 19,
+                "queue_age_ms": 22.214,
+                "depth_max": 10,
+                "samples": 19
+              },
+              {
+                "second": 20,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 21,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 22,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 12
+              }
+            ],
+            "series_max_ms": 22.214
+          },
+          "up_down:BTC:5m": {
+            "p50": 0,
+            "p99": 15.915,
+            "max": 25.116,
+            "samples": 448,
+            "series_1s": [
+              {
+                "second": 0,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 1,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 2,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 3,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 4,
+                "queue_age_ms": 22.038,
+                "depth_max": 22,
+                "samples": 19
+              },
+              {
+                "second": 5,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 6,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 7,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 8,
+                "queue_age_ms": 15.146,
+                "depth_max": 21,
+                "samples": 19
+              },
+              {
+                "second": 9,
+                "queue_age_ms": 25.116,
+                "depth_max": 6,
+                "samples": 20
+              },
+              {
+                "second": 10,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 11,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 12,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 13,
+                "queue_age_ms": 8.331,
+                "depth_max": 37,
+                "samples": 19
+              },
+              {
+                "second": 14,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 15,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 16,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 17,
+                "queue_age_ms": 15.915,
+                "depth_max": 21,
+                "samples": 19
+              },
+              {
+                "second": 18,
+                "queue_age_ms": 17.64,
+                "depth_max": 17,
+                "samples": 20
+              },
+              {
+                "second": 19,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 20,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 21,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 22,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 12
+              }
+            ],
+            "series_max_ms": 25.116
+          },
+          "up_down:ETH:15m": {
+            "p50": 0,
+            "p99": 5.4879999999999995,
+            "max": 15.994000000000002,
+            "samples": 448,
+            "series_1s": [
+              {
+                "second": 0,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 1,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 2,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 3,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 4,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 5,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 6,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 19
+              },
+              {
+                "second": 7,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 8,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 9,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 10,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 11,
+                "queue_age_ms": 15.994,
+                "depth_max": 9,
+                "samples": 19
+              },
+              {
+                "second": 12,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 13,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 14,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 15,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 16,
+                "queue_age_ms": 14.618,
+                "depth_max": 10,
+                "samples": 19
+              },
+              {
+                "second": 17,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 18,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 19,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 20,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 21,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 19
+              },
+              {
+                "second": 22,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 12
+              }
+            ],
+            "series_max_ms": 15.994
+          },
+          "up_down:ETH:5m": {
+            "p50": 0,
+            "p99": 9.895,
+            "max": 20.211,
+            "samples": 447,
+            "series_1s": [
+              {
+                "second": 0,
+                "queue_age_ms": 13.823,
+                "depth_max": 16,
+                "samples": 19
+              },
+              {
+                "second": 1,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 2,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 3,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 4,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 5,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 6,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 7,
+                "queue_age_ms": 20.211,
+                "depth_max": 2,
+                "samples": 19
+              },
+              {
+                "second": 8,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 9,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 10,
+                "queue_age_ms": 15.95,
+                "depth_max": 16,
+                "samples": 19
+              },
+              {
+                "second": 11,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 12,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 13,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 14,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 15,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 16,
+                "queue_age_ms": 6.695,
+                "depth_max": 10,
+                "samples": 19
+              },
+              {
+                "second": 17,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 18,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 19,
+                "queue_age_ms": 9.895,
+                "depth_max": 17,
+                "samples": 19
+              },
+              {
+                "second": 20,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 21,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 22,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 12
+              }
+            ],
+            "series_max_ms": 20.211
+          }
+        },
+        "primary_queue_age": {
+          "p50": 0,
+          "p99": 14.6,
+          "max": 25.116,
+          "samples": 1788,
+          "series_1s": [
+            {
+              "second": 0,
+              "queue_age_ms": 14.473,
+              "depth_max": 16,
+              "samples": 79
+            },
+            {
+              "second": 1,
+              "queue_age_ms": 0.0,
+              "depth_max": 0,
+              "samples": 80
+            },
+            {
+              "second": 2,
+              "queue_age_ms": 0.0,
+              "depth_max": 0,
+              "samples": 80
+            },
+            {
+              "second": 3,
+              "queue_age_ms": 0.0,
+              "depth_max": 0,
+              "samples": 80
+            },
+            {
+              "second": 4,
+              "queue_age_ms": 22.038,
+              "depth_max": 22,
+              "samples": 78
+            },
+            {
+              "second": 5,
+              "queue_age_ms": 14.509,
+              "depth_max": 15,
+              "samples": 80
+            },
+            {
+              "second": 6,
+              "queue_age_ms": 0.0,
+              "depth_max": 0,
+              "samples": 79
+            },
+            {
+              "second": 7,
+              "queue_age_ms": 20.211,
+              "depth_max": 2,
+              "samples": 79
+            },
+            {
+              "second": 8,
+              "queue_age_ms": 15.146,
+              "depth_max": 21,
+              "samples": 79
+            },
+            {
+              "second": 9,
+              "queue_age_ms": 25.116,
+              "depth_max": 6,
+              "samples": 79
+            },
+            {
+              "second": 10,
+              "queue_age_ms": 15.95,
+              "depth_max": 16,
+              "samples": 79
+            },
+            {
+              "second": 11,
+              "queue_age_ms": 15.994,
+              "depth_max": 9,
+              "samples": 79
+            },
+            {
+              "second": 12,
+              "queue_age_ms": 0.0,
+              "depth_max": 0,
+              "samples": 80
+            },
+            {
+              "second": 13,
+              "queue_age_ms": 8.331,
+              "depth_max": 37,
+              "samples": 79
+            },
+            {
+              "second": 14,
+              "queue_age_ms": 0.0,
+              "depth_max": 0,
+              "samples": 80
+            },
+            {
+              "second": 15,
+              "queue_age_ms": 0.0,
+              "depth_max": 0,
+              "samples": 80
+            },
+            {
+              "second": 16,
+              "queue_age_ms": 18.653,
+              "depth_max": 19,
+              "samples": 77
+            },
+            {
+              "second": 17,
+              "queue_age_ms": 15.915,
+              "depth_max": 21,
+              "samples": 79
+            },
+            {
+              "second": 18,
+              "queue_age_ms": 17.64,
+              "depth_max": 17,
+              "samples": 80
+            },
+            {
+              "second": 19,
+              "queue_age_ms": 22.214,
+              "depth_max": 17,
+              "samples": 78
+            },
+            {
+              "second": 20,
+              "queue_age_ms": 0.0,
+              "depth_max": 0,
+              "samples": 80
+            },
+            {
+              "second": 21,
+              "queue_age_ms": 0.0,
+              "depth_max": 0,
+              "samples": 79
+            },
+            {
+              "second": 22,
+              "queue_age_ms": 0.0,
+              "depth_max": 0,
+              "samples": 45
+            }
+          ],
+          "series_max_ms": 25.116
+        },
+        "ready_by_group": {
+          "up_down:BTC:15m": 1.0,
+          "up_down:BTC:5m": 1.0,
+          "up_down:ETH:15m": 1.0,
+          "up_down:ETH:5m": 1.0
+        },
+        "primary_queue_age_definition": "pending_wait_seconds of ReceiveQueue (oldest frame queued or in parse), sampled every 50ms for the whole window on each group while the socket stays open, not only at a kick or disconnect. series_1s is the max of those samples in each whole second after the window start. primary_queue_wait_ms is the pooled distribution; its p99 is the pass/fail check.",
+        "backup_queue_wait_ms": {
+          "p50": 0,
+          "p99": 1.88,
+          "max": 14.872,
+          "samples": 1788
+        },
+        "failover_gaps_s": [
+          0.0824579010004527,
+          0.08476258800146752,
+          0.07694958299907739,
+          0.07925187300133985
+        ],
+        "failover_gap_max_s": 0.08476258800146752,
+        "failover_gap_definition": "failover_gaps_s is seconds from mark_kick, recorded before the 1013 on_close, until that group forwards the next merged event with a higher outbox sequence. It is not ws_continuity.merged_gap_ms and not the hot-primary-failure business_gap flag.",
+        "kicks": 4,
+        "codes_1008": 0,
+        "close_reasons": {
+          "slow_consumer": 4
+        },
+        "parent_mode": "ws",
+        "cpu_cores": 0.26116781302806996,
+        "parent_cpu_s": 5.8579380709999995,
+        "burner_cores": 0,
+        "restarts": {},
+        "stale_skipped": 0,
+        "cpu_breakdown": {
+          "seconds": 22.57471873400027,
+          "cores": {
+            "primary_parse": 0.0787553290452423,
+            "primary_apply": 0.13927518269650038,
+            "backup_parse": 0.02917974685584288,
+            "backup_apply": 0.0,
+            "pickle": 0.04240909923533477,
+            "parent_apply": 0.07482937288852379,
+            "child_cpu": 0.4029920767649769,
+            "child_other": 0.11337271893205658,
+            "accounted": 0.3644487307214441
+          },
+          "by_group": {
+            "up_down:BTC:15m": {
+              "primary_parse": 0.01874459797200781,
+              "primary_apply": 0.03266207777328704,
+              "backup_parse": 0.006268999967066746,
+              "backup_apply": 0.0,
+              "pickle": 0.009553628842124481,
+              "child_cpu": 0.09762812989916092,
+              "parent_apply": 0.01831512719479838
+            },
+            "up_down:BTC:5m": {
+              "primary_parse": 0.035364623648559086,
+              "primary_apply": 0.06516342534910209,
+              "backup_parse": 0.013961264975820035,
+              "backup_apply": 0.0,
+              "pickle": 0.020370853006792228,
+              "child_cpu": 0.16858133458239677,
+              "parent_apply": 0.0330471383847818
+            },
+            "up_down:ETH:15m": {
+              "primary_parse": 0.009688526425385344,
+              "primary_apply": 0.015981378915549058,
+              "backup_parse": 0.003643755475726695,
+              "backup_apply": 0.0,
+              "pickle": 0.0046632033488616005,
+              "child_cpu": 0.05592805606469997,
+              "parent_apply": 0.009041543392192614
+            },
+            "up_down:ETH:5m": {
+              "primary_parse": 0.014957580999290052,
+              "primary_apply": 0.025468300658562183,
+              "backup_parse": 0.005305726437229404,
+              "backup_apply": 0.0,
+              "pickle": 0.007821414037556455,
+              "child_cpu": 0.08085455621871927,
+              "parent_apply": 0.014425563916750997
+            }
+          }
+        },
+        "rss_bytes": {
+          "began": 53669888,
+          "drained": 67604480,
+          "status": 318705664
+        },
+        "snapshot_errors": [],
+        "final_book_sha256": "add306cbc265468e206a418daf7f71be6d0f66787b13cbadc37156acd1642be7",
+        "expected_book_sha256": "add306cbc265468e206a418daf7f71be6d0f66787b13cbadc37156acd1642be7",
+        "valid": true
+      }
+    },
+    {
+      "label": "book2000_s78_b",
+      "speed": 0.78,
+      "bg_target": 0.44,
+      "primary_first": "0",
+      "parent_load": 0.2,
+      "wall": 25.88653802871704,
+      "obs_box_cores": 0.6535389159119036,
+      "bg_box_cores": 0.3430005198126548,
+      "obs_prod_cores": 0.837870405015261,
+      "bg_prod_cores": 0.43974425617007024,
+      "total_prod_cores": 1.2776146611853312,
+      "r": {
+        "mode": "process-per-group",
+        "weighted": true,
+        "seconds": 22.602995207000276,
+        "rate": 3300.0,
+        "logical": 33000,
+        "published": 32917,
+        "ready_ratio": 1.0,
+        "ready_samples": 1791,
+        "resyncs": 0,
+        "primary_queue_wait_ms": {
+          "p50": 0,
+          "p99": 12.489,
+          "max": 30.450000000000003,
+          "samples": 1791
+        },
+        "primary_queue_age_by_group": {
+          "up_down:BTC:15m": {
+            "p50": 0,
+            "p99": 15.113,
+            "max": 21.315,
+            "samples": 448,
+            "series_1s": [
+              {
+                "second": 0,
+                "queue_age_ms": 16.269,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 1,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 2,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 3,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 4,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 19
+              },
+              {
+                "second": 5,
+                "queue_age_ms": 12.31,
+                "depth_max": 4,
+                "samples": 20
+              },
+              {
+                "second": 6,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 7,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 8,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 9,
+                "queue_age_ms": 16.219,
+                "depth_max": 20,
+                "samples": 19
+              },
+              {
+                "second": 10,
+                "queue_age_ms": 15.113,
+                "depth_max": 2,
+                "samples": 20
+              },
+              {
+                "second": 11,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 12,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 13,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 14,
+                "queue_age_ms": 21.315,
+                "depth_max": 16,
+                "samples": 19
+              },
+              {
+                "second": 15,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 16,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 17,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 18,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 19,
+                "queue_age_ms": 15.367,
+                "depth_max": 20,
+                "samples": 19
+              },
+              {
+                "second": 20,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 21,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 22,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 12
+              }
+            ],
+            "series_max_ms": 21.315
+          },
+          "up_down:BTC:5m": {
+            "p50": 0,
+            "p99": 21.445,
+            "max": 30.450000000000003,
+            "samples": 448,
+            "series_1s": [
+              {
+                "second": 0,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 1,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 2,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 3,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 4,
+                "queue_age_ms": 11.835,
+                "depth_max": 37,
+                "samples": 19
+              },
+              {
+                "second": 5,
+                "queue_age_ms": 30.45,
+                "depth_max": 5,
+                "samples": 20
+              },
+              {
+                "second": 6,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 7,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 8,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 9,
+                "queue_age_ms": 23.158,
+                "depth_max": 37,
+                "samples": 19
+              },
+              {
+                "second": 10,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 11,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 12,
+                "queue_age_ms": 1.782,
+                "depth_max": 37,
+                "samples": 19
+              },
+              {
+                "second": 13,
+                "queue_age_ms": 21.49,
+                "depth_max": 37,
+                "samples": 20
+              },
+              {
+                "second": 14,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 15,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 16,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 17,
+                "queue_age_ms": 14.034,
+                "depth_max": 25,
+                "samples": 19
+              },
+              {
+                "second": 18,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 19,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 20,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 21,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 19
+              },
+              {
+                "second": 22,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 13
+              }
+            ],
+            "series_max_ms": 30.45
+          },
+          "up_down:ETH:15m": {
+            "p50": 0,
+            "p99": 4.545000000000001,
+            "max": 11.402000000000001,
+            "samples": 448,
+            "series_1s": [
+              {
+                "second": 0,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 1,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 2,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 3,
+                "queue_age_ms": 3.149,
+                "depth_max": 3,
+                "samples": 19
+              },
+              {
+                "second": 4,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 5,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 6,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 7,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 8,
+                "queue_age_ms": 10.764,
+                "depth_max": 10,
+                "samples": 19
+              },
+              {
+                "second": 9,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 10,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 11,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 12,
+                "queue_age_ms": 1.797,
+                "depth_max": 10,
+                "samples": 19
+              },
+              {
+                "second": 13,
+                "queue_age_ms": 11.402,
+                "depth_max": 10,
+                "samples": 20
+              },
+              {
+                "second": 14,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 15,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 16,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 17,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 18,
+                "queue_age_ms": 2.954,
+                "depth_max": 10,
+                "samples": 19
+              },
+              {
+                "second": 19,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 20,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 21,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 22,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 12
+              }
+            ],
+            "series_max_ms": 11.402
+          },
+          "up_down:ETH:5m": {
+            "p50": 0,
+            "p99": 12.489,
+            "max": 23.752,
+            "samples": 447,
+            "series_1s": [
+              {
+                "second": 0,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 1,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 2,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 3,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 4,
+                "queue_age_ms": 6.013,
+                "depth_max": 16,
+                "samples": 19
+              },
+              {
+                "second": 5,
+                "queue_age_ms": 23.752,
+                "depth_max": 9,
+                "samples": 20
+              },
+              {
+                "second": 6,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 7,
+                "queue_age_ms": 7.144,
+                "depth_max": 12,
+                "samples": 19
+              },
+              {
+                "second": 8,
+                "queue_age_ms": 16.351,
+                "depth_max": 5,
+                "samples": 20
+              },
+              {
+                "second": 9,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 10,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 11,
+                "queue_age_ms": 14.894,
+                "depth_max": 16,
+                "samples": 19
+              },
+              {
+                "second": 12,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 13,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 14,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 15,
+                "queue_age_ms": 12.489,
+                "depth_max": 16,
+                "samples": 19
+              },
+              {
+                "second": 16,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 17,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 18,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 19,
+                "queue_age_ms": 10.248,
+                "depth_max": 6,
+                "samples": 19
+              },
+              {
+                "second": 20,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 21,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 22,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 12
+              }
+            ],
+            "series_max_ms": 23.752
+          }
+        },
+        "primary_queue_age": {
+          "p50": 0,
+          "p99": 12.489,
+          "max": 30.450000000000003,
+          "samples": 1791,
+          "series_1s": [
+            {
+              "second": 0,
+              "queue_age_ms": 16.269,
+              "depth_max": 0,
+              "samples": 80
+            },
+            {
+              "second": 1,
+              "queue_age_ms": 0.0,
+              "depth_max": 0,
+              "samples": 80
+            },
+            {
+              "second": 2,
+              "queue_age_ms": 0.0,
+              "depth_max": 0,
+              "samples": 80
+            },
+            {
+              "second": 3,
+              "queue_age_ms": 3.149,
+              "depth_max": 3,
+              "samples": 79
+            },
+            {
+              "second": 4,
+              "queue_age_ms": 11.835,
+              "depth_max": 37,
+              "samples": 77
+            },
+            {
+              "second": 5,
+              "queue_age_ms": 30.45,
+              "depth_max": 9,
+              "samples": 80
+            },
+            {
+              "second": 6,
+              "queue_age_ms": 0.0,
+              "depth_max": 0,
+              "samples": 80
+            },
+            {
+              "second": 7,
+              "queue_age_ms": 7.144,
+              "depth_max": 12,
+              "samples": 79
+            },
+            {
+              "second": 8,
+              "queue_age_ms": 16.351,
+              "depth_max": 10,
+              "samples": 79
+            },
+            {
+              "second": 9,
+              "queue_age_ms": 23.158,
+              "depth_max": 37,
+              "samples": 78
+            },
+            {
+              "second": 10,
+              "queue_age_ms": 15.113,
+              "depth_max": 2,
+              "samples": 80
+            },
+            {
+              "second": 11,
+              "queue_age_ms": 14.894,
+              "depth_max": 16,
+              "samples": 79
+            },
+            {
+              "second": 12,
+              "queue_age_ms": 1.797,
+              "depth_max": 37,
+              "samples": 78
+            },
+            {
+              "second": 13,
+              "queue_age_ms": 21.49,
+              "depth_max": 37,
+              "samples": 80
+            },
+            {
+              "second": 14,
+              "queue_age_ms": 21.315,
+              "depth_max": 16,
+              "samples": 79
+            },
+            {
+              "second": 15,
+              "queue_age_ms": 12.489,
+              "depth_max": 16,
+              "samples": 79
+            },
+            {
+              "second": 16,
+              "queue_age_ms": 0.0,
+              "depth_max": 0,
+              "samples": 80
+            },
+            {
+              "second": 17,
+              "queue_age_ms": 14.034,
+              "depth_max": 25,
+              "samples": 79
+            },
+            {
+              "second": 18,
+              "queue_age_ms": 2.954,
+              "depth_max": 10,
+              "samples": 79
+            },
+            {
+              "second": 19,
+              "queue_age_ms": 15.367,
+              "depth_max": 20,
+              "samples": 78
+            },
+            {
+              "second": 20,
+              "queue_age_ms": 0.0,
+              "depth_max": 0,
+              "samples": 80
+            },
+            {
+              "second": 21,
+              "queue_age_ms": 0.0,
+              "depth_max": 0,
+              "samples": 79
+            },
+            {
+              "second": 22,
+              "queue_age_ms": 0.0,
+              "depth_max": 0,
+              "samples": 49
+            }
+          ],
+          "series_max_ms": 30.45
+        },
+        "ready_by_group": {
+          "up_down:BTC:15m": 1.0,
+          "up_down:BTC:5m": 1.0,
+          "up_down:ETH:15m": 1.0,
+          "up_down:ETH:5m": 1.0
+        },
+        "primary_queue_age_definition": "pending_wait_seconds of ReceiveQueue (oldest frame queued or in parse), sampled every 50ms for the whole window on each group while the socket stays open, not only at a kick or disconnect. series_1s is the max of those samples in each whole second after the window start. primary_queue_wait_ms is the pooled distribution; its p99 is the pass/fail check.",
+        "backup_queue_wait_ms": {
+          "p50": 0,
+          "p99": 2.6359999999999997,
+          "max": 12.587,
+          "samples": 1791
+        },
+        "failover_gaps_s": [
+          0.07757094699991285,
+          0.0770119490007346,
+          0.08243308099918067,
+          0.08103394299905631
+        ],
+        "failover_gap_max_s": 0.08243308099918067,
+        "failover_gap_definition": "failover_gaps_s is seconds from mark_kick, recorded before the 1013 on_close, until that group forwards the next merged event with a higher outbox sequence. It is not ws_continuity.merged_gap_ms and not the hot-primary-failure business_gap flag.",
+        "kicks": 4,
+        "codes_1008": 0,
+        "close_reasons": {
+          "slow_consumer": 4
+        },
+        "parent_mode": "ws",
+        "cpu_cores": 0.2588884221629125,
+        "parent_cpu_s": 5.866607686,
+        "burner_cores": 0,
+        "restarts": {},
+        "stale_skipped": 0,
+        "cpu_breakdown": {
+          "seconds": 22.602995207000276,
+          "cores": {
+            "primary_parse": 0.0790354197591802,
+            "primary_apply": 0.1411288291567686,
+            "backup_parse": 0.02886464975216806,
+            "backup_apply": 0.0,
+            "pickle": 0.042935889341755344,
+            "parent_apply": 0.07611818735718517,
+            "child_cpu": 0.4068305845214741,
+            "child_other": 0.11486579651160189,
+            "accounted": 0.36808297536705736
+          },
+          "by_group": {
+            "up_down:BTC:15m": {
+              "primary_parse": 0.019215237893138816,
+              "primary_apply": 0.032096480813981094,
+              "backup_parse": 0.00644366141151416,
+              "backup_apply": 0.0,
+              "pickle": 0.010449542055685108,
+              "child_cpu": 0.09762177737031154,
+              "parent_apply": 0.017675524121522762
+            },
+            "up_down:BTC:5m": {
+              "primary_parse": 0.035371668474822274,
+              "primary_apply": 0.06761960173874075,
+              "backup_parse": 0.01364724113662851,
+              "backup_apply": 0.0,
+              "pickle": 0.019378052731008972,
+              "child_cpu": 0.17081103498196007,
+              "parent_apply": 0.03284438054342816
+            },
+            "up_down:ETH:15m": {
+              "primary_parse": 0.009162153427164511,
+              "primary_apply": 0.015305640373398648,
+              "backup_parse": 0.0034236121050026875,
+              "backup_apply": 0.0,
+              "pickle": 0.0048411558290340625,
+              "child_cpu": 0.05571239968276407,
+              "parent_apply": 0.010819502272170822
+            },
+            "up_down:ETH:5m": {
+              "primary_parse": 0.015286359964054612,
+              "primary_apply": 0.026107106230648127,
+              "backup_parse": 0.0053501350990227,
+              "backup_apply": 0.0,
+              "pickle": 0.008267138726027202,
+              "child_cpu": 0.08268537248643841,
+              "parent_apply": 0.014778780420063423
+            }
+          }
+        },
+        "rss_bytes": {
+          "began": 53526528,
+          "drained": 67383296,
+          "status": 318676992
+        },
+        "snapshot_errors": [],
+        "final_book_sha256": "add306cbc265468e206a418daf7f71be6d0f66787b13cbadc37156acd1642be7",
+        "expected_book_sha256": "add306cbc265468e206a418daf7f71be6d0f66787b13cbadc37156acd1642be7",
+        "valid": true
+      }
+    },
+    {
+      "label": "book2000_s65",
+      "speed": 0.65,
+      "bg_target": 0.44,
+      "primary_first": "0",
+      "parent_load": 0.2,
+      "wall": 26.158746480941772,
+      "obs_box_cores": 0.6356868442497834,
+      "bg_box_cores": 0.2854739238151426,
+      "obs_prod_cores": 0.9779797603842821,
+      "bg_prod_cores": 0.43919065202329627,
+      "total_prod_cores": 1.4171704124075784,
+      "r": {
+        "mode": "process-per-group",
+        "weighted": true,
+        "seconds": 22.575634548999005,
+        "rate": 3300.0,
+        "logical": 33000,
+        "published": 32917,
+        "ready_ratio": 1.0,
+        "ready_samples": 1783,
+        "resyncs": 0,
+        "primary_queue_wait_ms": {
+          "p50": 0,
+          "p99": 18.715,
+          "max": 28.009,
+          "samples": 1783
+        },
+        "primary_queue_age_by_group": {
+          "up_down:BTC:15m": {
+            "p50": 0,
+            "p99": 17.404,
+            "max": 23.033,
+            "samples": 447,
+            "series_1s": [
+              {
+                "second": 0,
+                "queue_age_ms": 11.656,
+                "depth_max": 20,
+                "samples": 20
+              },
+              {
+                "second": 1,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 2,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 3,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 4,
+                "queue_age_ms": 19.261,
+                "depth_max": 13,
+                "samples": 19
+              },
+              {
+                "second": 5,
+                "queue_age_ms": 23.033,
+                "depth_max": 12,
+                "samples": 20
+              },
+              {
+                "second": 6,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 7,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 8,
+                "queue_age_ms": 22.326,
+                "depth_max": 20,
+                "samples": 19
+              },
+              {
+                "second": 9,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 10,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 11,
+                "queue_age_ms": 16.701,
+                "depth_max": 3,
+                "samples": 19
+              },
+              {
+                "second": 12,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 13,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 14,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 15,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 16,
+                "queue_age_ms": 17.404,
+                "depth_max": 5,
+                "samples": 19
+              },
+              {
+                "second": 17,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 18,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 19,
+                "queue_age_ms": 20.267,
+                "depth_max": 20,
+                "samples": 19
+              },
+              {
+                "second": 20,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 21,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 22,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 12
+              }
+            ],
+            "series_max_ms": 23.033
+          },
+          "up_down:BTC:5m": {
+            "p50": 0,
+            "p99": 21.997,
+            "max": 24.442999999999998,
+            "samples": 446,
+            "series_1s": [
+              {
+                "second": 0,
+                "queue_age_ms": 21.997,
+                "depth_max": 18,
+                "samples": 20
+              },
+              {
+                "second": 1,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 2,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 3,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 4,
+                "queue_age_ms": 23.683,
+                "depth_max": 31,
+                "samples": 19
+              },
+              {
+                "second": 5,
+                "queue_age_ms": 24.443,
+                "depth_max": 17,
+                "samples": 20
+              },
+              {
+                "second": 6,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 7,
+                "queue_age_ms": 3.357,
+                "depth_max": 37,
+                "samples": 19
+              },
+              {
+                "second": 8,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 9,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 10,
+                "queue_age_ms": 5.791,
+                "depth_max": 37,
+                "samples": 19
+              },
+              {
+                "second": 11,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 12,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 13,
+                "queue_age_ms": 22.272,
+                "depth_max": 37,
+                "samples": 19
+              },
+              {
+                "second": 14,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 15,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 16,
+                "queue_age_ms": 21.886,
+                "depth_max": 32,
+                "samples": 19
+              },
+              {
+                "second": 17,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 18,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 19,
+                "queue_age_ms": 23.315,
+                "depth_max": 20,
+                "samples": 19
+              },
+              {
+                "second": 20,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 21,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 22,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 12
+              }
+            ],
+            "series_max_ms": 24.443
+          },
+          "up_down:ETH:15m": {
+            "p50": 0,
+            "p99": 7.329,
+            "max": 28.009,
+            "samples": 445,
+            "series_1s": [
+              {
+                "second": 0,
+                "queue_age_ms": 7.329,
+                "depth_max": 1,
+                "samples": 19
+              },
+              {
+                "second": 1,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 2,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 3,
+                "queue_age_ms": 10.916,
+                "depth_max": 10,
+                "samples": 19
+              },
+              {
+                "second": 4,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 5,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 6,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 7,
+                "queue_age_ms": 7.807,
+                "depth_max": 10,
+                "samples": 19
+              },
+              {
+                "second": 8,
+                "queue_age_ms": 1.92,
+                "depth_max": 7,
+                "samples": 20
+              },
+              {
+                "second": 9,
+                "queue_age_ms": 3.042,
+                "depth_max": 10,
+                "samples": 20
+              },
+              {
+                "second": 10,
+                "queue_age_ms": 3.303,
+                "depth_max": 10,
+                "samples": 19
+              },
+              {
+                "second": 11,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 12,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 13,
+                "queue_age_ms": 16.213,
+                "depth_max": 0,
+                "samples": 19
+              },
+              {
+                "second": 14,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 15,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 16,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 17,
+                "queue_age_ms": 28.009,
+                "depth_max": 10,
+                "samples": 19
+              },
+              {
+                "second": 18,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 19,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 19
+              },
+              {
+                "second": 20,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 21,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 22,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 12
+              }
+            ],
+            "series_max_ms": 28.009
+          },
+          "up_down:ETH:5m": {
+            "p50": 0,
+            "p99": 18.835,
+            "max": 25.878,
+            "samples": 446,
+            "series_1s": [
+              {
+                "second": 0,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 1,
+                "queue_age_ms": 19.362,
+                "depth_max": 11,
+                "samples": 19
+              },
+              {
+                "second": 2,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 3,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 4,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 5,
+                "queue_age_ms": 7.791,
+                "depth_max": 8,
+                "samples": 19
+              },
+              {
+                "second": 6,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 7,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 8,
+                "queue_age_ms": 6.965,
+                "depth_max": 17,
+                "samples": 19
+              },
+              {
+                "second": 9,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 10,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 11,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 12,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 13,
+                "queue_age_ms": 12.585,
+                "depth_max": 16,
+                "samples": 19
+              },
+              {
+                "second": 14,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 15,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 16,
+                "queue_age_ms": 25.878,
+                "depth_max": 7,
+                "samples": 19
+              },
+              {
+                "second": 17,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 18,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 19,
+                "queue_age_ms": 20.904,
+                "depth_max": 16,
+                "samples": 19
+              },
+              {
+                "second": 20,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 21,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 22,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 12
+              }
+            ],
+            "series_max_ms": 25.878
+          }
+        },
+        "primary_queue_age": {
+          "p50": 0,
+          "p99": 18.715,
+          "max": 28.009,
+          "samples": 1783,
+          "series_1s": [
+            {
+              "second": 0,
+              "queue_age_ms": 21.997,
+              "depth_max": 20,
+              "samples": 79
+            },
+            {
+              "second": 1,
+              "queue_age_ms": 19.362,
+              "depth_max": 11,
+              "samples": 79
+            },
+            {
+              "second": 2,
+              "queue_age_ms": 0.0,
+              "depth_max": 0,
+              "samples": 80
+            },
+            {
+              "second": 3,
+              "queue_age_ms": 10.916,
+              "depth_max": 10,
+              "samples": 79
+            },
+            {
+              "second": 4,
+              "queue_age_ms": 23.683,
+              "depth_max": 31,
+              "samples": 78
+            },
+            {
+              "second": 5,
+              "queue_age_ms": 24.443,
+              "depth_max": 17,
+              "samples": 79
+            },
+            {
+              "second": 6,
+              "queue_age_ms": 0.0,
+              "depth_max": 0,
+              "samples": 80
+            },
+            {
+              "second": 7,
+              "queue_age_ms": 7.807,
+              "depth_max": 37,
+              "samples": 78
+            },
+            {
+              "second": 8,
+              "queue_age_ms": 22.326,
+              "depth_max": 20,
+              "samples": 78
+            },
+            {
+              "second": 9,
+              "queue_age_ms": 3.042,
+              "depth_max": 10,
+              "samples": 80
+            },
+            {
+              "second": 10,
+              "queue_age_ms": 5.791,
+              "depth_max": 37,
+              "samples": 78
+            },
+            {
+              "second": 11,
+              "queue_age_ms": 16.701,
+              "depth_max": 3,
+              "samples": 79
+            },
+            {
+              "second": 12,
+              "queue_age_ms": 0.0,
+              "depth_max": 0,
+              "samples": 80
+            },
+            {
+              "second": 13,
+              "queue_age_ms": 22.272,
+              "depth_max": 37,
+              "samples": 77
+            },
+            {
+              "second": 14,
+              "queue_age_ms": 0.0,
+              "depth_max": 0,
+              "samples": 80
+            },
+            {
+              "second": 15,
+              "queue_age_ms": 0.0,
+              "depth_max": 0,
+              "samples": 80
+            },
+            {
+              "second": 16,
+              "queue_age_ms": 25.878,
+              "depth_max": 32,
+              "samples": 77
+            },
+            {
+              "second": 17,
+              "queue_age_ms": 28.009,
+              "depth_max": 10,
+              "samples": 79
+            },
+            {
+              "second": 18,
+              "queue_age_ms": 0.0,
+              "depth_max": 0,
+              "samples": 80
+            },
+            {
+              "second": 19,
+              "queue_age_ms": 23.315,
+              "depth_max": 20,
+              "samples": 76
+            },
+            {
+              "second": 20,
+              "queue_age_ms": 0.0,
+              "depth_max": 0,
+              "samples": 80
+            },
+            {
+              "second": 21,
+              "queue_age_ms": 0.0,
+              "depth_max": 0,
+              "samples": 80
+            },
+            {
+              "second": 22,
+              "queue_age_ms": 0.0,
+              "depth_max": 0,
+              "samples": 47
+            }
+          ],
+          "series_max_ms": 28.009
+        },
+        "ready_by_group": {
+          "up_down:BTC:15m": 1.0,
+          "up_down:BTC:5m": 1.0,
+          "up_down:ETH:15m": 1.0,
+          "up_down:ETH:5m": 1.0
+        },
+        "primary_queue_age_definition": "pending_wait_seconds of ReceiveQueue (oldest frame queued or in parse), sampled every 50ms for the whole window on each group while the socket stays open, not only at a kick or disconnect. series_1s is the max of those samples in each whole second after the window start. primary_queue_wait_ms is the pooled distribution; its p99 is the pass/fail check.",
+        "backup_queue_wait_ms": {
+          "p50": 0,
+          "p99": 5.076,
+          "max": 19.953,
+          "samples": 1783
+        },
+        "failover_gaps_s": [
+          0.08091002900073363,
+          0.08105747499939753,
+          0.08140215000094031,
+          0.07853106299990031
+        ],
+        "failover_gap_max_s": 0.08140215000094031,
+        "failover_gap_definition": "failover_gaps_s is seconds from mark_kick, recorded before the 1013 on_close, until that group forwards the next merged event with a higher outbox sequence. It is not ws_continuity.merged_gap_ms and not the hot-primary-failure business_gap flag.",
+        "kicks": 4,
+        "codes_1008": 0,
+        "close_reasons": {
+          "slow_consumer": 4
+        },
+        "parent_mode": "ws",
+        "cpu_cores": 0.24212720081868788,
+        "parent_cpu_s": 5.53579644,
+        "burner_cores": 0,
+        "restarts": {},
+        "stale_skipped": 0,
+        "cpu_breakdown": {
+          "seconds": 22.575634548999005,
+          "cores": {
+            "primary_parse": 0.07999703051890679,
+            "primary_apply": 0.14239658345030018,
+            "backup_parse": 0.0299514514434769,
+            "backup_apply": 0.0,
+            "pickle": 0.043341862213276273,
+            "parent_apply": 0.07846174835774632,
+            "child_cpu": 0.40657632360579565,
+            "child_other": 0.11088939597983549,
+            "accounted": 0.37414867598370644
+          },
+          "by_group": {
+            "up_down:BTC:15m": {
+              "primary_parse": 0.01956738584872183,
+              "primary_apply": 0.03339103879290191,
+              "backup_parse": 0.006660651981836014,
+              "backup_apply": 0.0,
+              "pickle": 0.01047361102904107,
+              "child_cpu": 0.09909355363387526,
+              "parent_apply": 0.018943471691650594
+            },
+            "up_down:BTC:5m": {
+              "primary_parse": 0.03573145513359368,
+              "primary_apply": 0.06675961394258273,
+              "backup_parse": 0.01448464942548065,
+              "backup_apply": 0.0,
+              "pickle": 0.019973185206437035,
+              "child_cpu": 0.16932727444285703,
+              "parent_apply": 0.03282132745335718
+            },
+            "up_down:ETH:15m": {
+              "primary_parse": 0.009596303330025528,
+              "primary_apply": 0.015901840376660377,
+              "backup_parse": 0.0034867870415405066,
+              "backup_apply": 0.0,
+              "pickle": 0.005034305447907848,
+              "child_cpu": 0.056089311609455746,
+              "parent_apply": 0.009888729396086616
+            },
+            "up_down:ETH:5m": {
+              "primary_parse": 0.015101886206565754,
+              "primary_apply": 0.02634409033815517,
+              "backup_parse": 0.0053193629946197305,
+              "backup_apply": 0.0,
+              "pickle": 0.00786076052989032,
+              "child_cpu": 0.08206618391960761,
+              "parent_apply": 0.01680821981665193
+            }
+          }
+        },
+        "rss_bytes": {
+          "began": 53575680,
+          "drained": 67592192,
+          "status": 318595072
+        },
+        "snapshot_errors": [],
+        "final_book_sha256": "add306cbc265468e206a418daf7f71be6d0f66787b13cbadc37156acd1642be7",
+        "expected_book_sha256": "add306cbc265468e206a418daf7f71be6d0f66787b13cbadc37156acd1642be7",
+        "valid": true
+      }
+    },
+    {
+      "label": "book8000_s78",
+      "speed": 0.78,
+      "bg_target": 0.44,
+      "primary_first": "0",
+      "parent_load": 0.2,
+      "wall": 25.965984582901,
+      "obs_box_cores": 0.6596097654343779,
+      "bg_box_cores": 0.34320331553568095,
+      "obs_prod_cores": 0.8456535454286895,
+      "bg_prod_cores": 0.44000425068677046,
+      "total_prod_cores": 1.28565779611546,
+      "r": {
+        "mode": "process-per-group",
+        "weighted": true,
+        "seconds": 22.594170394000685,
+        "rate": 3300.0,
+        "logical": 33000,
+        "published": 32917,
+        "ready_ratio": 1.0,
+        "ready_samples": 1791,
+        "resyncs": 0,
+        "primary_queue_wait_ms": {
+          "p50": 0,
+          "p99": 16.35,
+          "max": 24.480999999999998,
+          "samples": 1791
+        },
+        "primary_queue_age_by_group": {
+          "up_down:BTC:15m": {
+            "p50": 0,
+            "p99": 12.736,
+            "max": 19.384999999999998,
+            "samples": 448,
+            "series_1s": [
+              {
+                "second": 0,
+                "queue_age_ms": 12.736,
+                "depth_max": 15,
+                "samples": 20
+              },
+              {
+                "second": 1,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 2,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 3,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 4,
+                "queue_age_ms": 9.426,
+                "depth_max": 20,
+                "samples": 19
+              },
+              {
+                "second": 5,
+                "queue_age_ms": 13.183,
+                "depth_max": 14,
+                "samples": 20
+              },
+              {
+                "second": 6,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 7,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 8,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 9,
+                "queue_age_ms": 12.045,
+                "depth_max": 12,
+                "samples": 19
+              },
+              {
+                "second": 10,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 11,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 12,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 13,
+                "queue_age_ms": 10.256,
+                "depth_max": 12,
+                "samples": 19
+              },
+              {
+                "second": 14,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 15,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 16,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 17,
+                "queue_age_ms": 19.385,
+                "depth_max": 20,
+                "samples": 19
+              },
+              {
+                "second": 18,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 19,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 20,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 19
+              },
+              {
+                "second": 21,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 22,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 13
+              }
+            ],
+            "series_max_ms": 19.385
+          },
+          "up_down:BTC:5m": {
+            "p50": 0,
+            "p99": 23.452,
+            "max": 24.480999999999998,
+            "samples": 448,
+            "series_1s": [
+              {
+                "second": 0,
+                "queue_age_ms": 21.887,
+                "depth_max": 14,
+                "samples": 20
+              },
+              {
+                "second": 1,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 2,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 3,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 4,
+                "queue_age_ms": 10.032,
+                "depth_max": 37,
+                "samples": 19
+              },
+              {
+                "second": 5,
+                "queue_age_ms": 18.155,
+                "depth_max": 32,
+                "samples": 20
+              },
+              {
+                "second": 6,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 7,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 8,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 9,
+                "queue_age_ms": 16.913,
+                "depth_max": 37,
+                "samples": 19
+              },
+              {
+                "second": 10,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 11,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 12,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 13,
+                "queue_age_ms": 24.168,
+                "depth_max": 18,
+                "samples": 19
+              },
+              {
+                "second": 14,
+                "queue_age_ms": 24.481,
+                "depth_max": 4,
+                "samples": 20
+              },
+              {
+                "second": 15,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 16,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 17,
+                "queue_age_ms": 23.813,
+                "depth_max": 23,
+                "samples": 19
+              },
+              {
+                "second": 18,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 19,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 20,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 21,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 19
+              },
+              {
+                "second": 22,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 13
+              }
+            ],
+            "series_max_ms": 24.481
+          },
+          "up_down:ETH:15m": {
+            "p50": 0,
+            "p99": 4.233,
+            "max": 18.319,
+            "samples": 448,
+            "series_1s": [
+              {
+                "second": 0,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 1,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 2,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 3,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 19
+              },
+              {
+                "second": 4,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 5,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 6,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 7,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 8,
+                "queue_age_ms": 0.65,
+                "depth_max": 2,
+                "samples": 19
+              },
+              {
+                "second": 9,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 10,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 11,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 12,
+                "queue_age_ms": 18.319,
+                "depth_max": 9,
+                "samples": 19
+              },
+              {
+                "second": 13,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 14,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 15,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 16,
+                "queue_age_ms": 11.537,
+                "depth_max": 10,
+                "samples": 19
+              },
+              {
+                "second": 17,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 18,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 19,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 20,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 21,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 19
+              },
+              {
+                "second": 22,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 13
+              }
+            ],
+            "series_max_ms": 18.319
+          },
+          "up_down:ETH:5m": {
+            "p50": 0,
+            "p99": 16.304,
+            "max": 19.678,
+            "samples": 448,
+            "series_1s": [
+              {
+                "second": 0,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 1,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 2,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 3,
+                "queue_age_ms": 12.71,
+                "depth_max": 16,
+                "samples": 19
+              },
+              {
+                "second": 4,
+                "queue_age_ms": 4.498,
+                "depth_max": 4,
+                "samples": 20
+              },
+              {
+                "second": 5,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 6,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 7,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 8,
+                "queue_age_ms": 13.218,
+                "depth_max": 12,
+                "samples": 19
+              },
+              {
+                "second": 9,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 10,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 11,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 12,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 13,
+                "queue_age_ms": 17.84,
+                "depth_max": 16,
+                "samples": 19
+              },
+              {
+                "second": 14,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 15,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 16,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 17,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 18,
+                "queue_age_ms": 19.678,
+                "depth_max": 9,
+                "samples": 19
+              },
+              {
+                "second": 19,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 20,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 21,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 20
+              },
+              {
+                "second": 22,
+                "queue_age_ms": 0.0,
+                "depth_max": 0,
+                "samples": 12
+              }
+            ],
+            "series_max_ms": 19.678
+          }
+        },
+        "primary_queue_age": {
+          "p50": 0,
+          "p99": 16.35,
+          "max": 24.480999999999998,
+          "samples": 1791,
+          "series_1s": [
+            {
+              "second": 0,
+              "queue_age_ms": 21.887,
+              "depth_max": 15,
+              "samples": 80
+            },
+            {
+              "second": 1,
+              "queue_age_ms": 0.0,
+              "depth_max": 0,
+              "samples": 80
+            },
+            {
+              "second": 2,
+              "queue_age_ms": 0.0,
+              "depth_max": 0,
+              "samples": 80
+            },
+            {
+              "second": 3,
+              "queue_age_ms": 12.71,
+              "depth_max": 16,
+              "samples": 78
+            },
+            {
+              "second": 4,
+              "queue_age_ms": 10.032,
+              "depth_max": 37,
+              "samples": 78
+            },
+            {
+              "second": 5,
+              "queue_age_ms": 18.155,
+              "depth_max": 32,
+              "samples": 80
+            },
+            {
+              "second": 6,
+              "queue_age_ms": 0.0,
+              "depth_max": 0,
+              "samples": 80
+            },
+            {
+              "second": 7,
+              "queue_age_ms": 0.0,
+              "depth_max": 0,
+              "samples": 80
+            },
+            {
+              "second": 8,
+              "queue_age_ms": 13.218,
+              "depth_max": 12,
+              "samples": 78
+            },
+            {
+              "second": 9,
+              "queue_age_ms": 16.913,
+              "depth_max": 37,
+              "samples": 78
+            },
+            {
+              "second": 10,
+              "queue_age_ms": 0.0,
+              "depth_max": 0,
+              "samples": 80
+            },
+            {
+              "second": 11,
+              "queue_age_ms": 0.0,
+              "depth_max": 0,
+              "samples": 80
+            },
+            {
+              "second": 12,
+              "queue_age_ms": 18.319,
+              "depth_max": 9,
+              "samples": 79
+            },
+            {
+              "second": 13,
+              "queue_age_ms": 24.168,
+              "depth_max": 18,
+              "samples": 77
+            },
+            {
+              "second": 14,
+              "queue_age_ms": 24.481,
+              "depth_max": 4,
+              "samples": 80
+            },
+            {
+              "second": 15,
+              "queue_age_ms": 0.0,
+              "depth_max": 0,
+              "samples": 80
+            },
+            {
+              "second": 16,
+              "queue_age_ms": 11.537,
+              "depth_max": 10,
+              "samples": 79
+            },
+            {
+              "second": 17,
+              "queue_age_ms": 23.813,
+              "depth_max": 23,
+              "samples": 78
+            },
+            {
+              "second": 18,
+              "queue_age_ms": 19.678,
+              "depth_max": 9,
+              "samples": 79
+            },
+            {
+              "second": 19,
+              "queue_age_ms": 0.0,
+              "depth_max": 0,
+              "samples": 80
+            },
+            {
+              "second": 20,
+              "queue_age_ms": 0.0,
+              "depth_max": 0,
+              "samples": 79
+            },
+            {
+              "second": 21,
+              "queue_age_ms": 0.0,
+              "depth_max": 0,
+              "samples": 78
+            },
+            {
+              "second": 22,
+              "queue_age_ms": 0.0,
+              "depth_max": 0,
+              "samples": 50
+            }
+          ],
+          "series_max_ms": 24.481
+        },
+        "ready_by_group": {
+          "up_down:BTC:15m": 1.0,
+          "up_down:BTC:5m": 1.0,
+          "up_down:ETH:15m": 1.0,
+          "up_down:ETH:5m": 1.0
+        },
+        "primary_queue_age_definition": "pending_wait_seconds of ReceiveQueue (oldest frame queued or in parse), sampled every 50ms for the whole window on each group while the socket stays open, not only at a kick or disconnect. series_1s is the max of those samples in each whole second after the window start. primary_queue_wait_ms is the pooled distribution; its p99 is the pass/fail check.",
+        "backup_queue_wait_ms": {
+          "p50": 0,
+          "p99": 0.7290000000000001,
+          "max": 24.041,
+          "samples": 1791
+        },
+        "failover_gaps_s": [
+          0.0804844360009156,
+          0.07642711700100335,
+          0.07615494700075942,
+          0.07282700399991882
+        ],
+        "failover_gap_max_s": 0.0804844360009156,
+        "failover_gap_definition": "failover_gaps_s is seconds from mark_kick, recorded before the 1013 on_close, until that group forwards the next merged event with a higher outbox sequence. It is not ws_continuity.merged_gap_ms and not the hot-primary-failure business_gap flag.",
+        "kicks": 4,
+        "codes_1008": 0,
+        "close_reasons": {
+          "slow_consumer": 4
+        },
+        "parent_mode": "ws",
+        "cpu_cores": 0.26543441816694874,
+        "parent_cpu_s": 5.891987456,
+        "burner_cores": 0,
+        "restarts": {},
+        "stale_skipped": 0,
+        "cpu_breakdown": {
+          "seconds": 22.594170394000685,
+          "cores": {
+            "primary_parse": 0.08039966182968684,
+            "primary_apply": 0.14154078712485704,
+            "backup_parse": 0.029733806830916587,
+            "backup_apply": 0.0,
+            "pickle": 0.043797256980179104,
+            "parent_apply": 0.07579132440528619,
+            "child_cpu": 0.41039359300672007,
+            "child_other": 0.11492208024108047,
+            "accounted": 0.3712628371709258
+          },
+          "by_group": {
+            "up_down:BTC:15m": {
+              "primary_parse": 0.019224907151950164,
+              "primary_apply": 0.03307634349780928,
+              "backup_parse": 0.006318946458769567,
+              "backup_apply": 0.0,
+              "pickle": 0.01005626354222446,
+              "child_cpu": 0.09908320301038498,
+              "parent_apply": 0.0188708903918518
+            },
+            "up_down:BTC:5m": {
+              "primary_parse": 0.0360793484684184,
+              "primary_apply": 0.06633387098815319,
+              "backup_parse": 0.014536024526363248,
+              "backup_apply": 0.0,
+              "pickle": 0.0204370482716468,
+              "child_cpu": 0.1715522008734251,
+              "parent_apply": 0.032188604508050306
+            },
+            "up_down:ETH:15m": {
+              "primary_parse": 0.009938028707600521,
+              "primary_apply": 0.016212201935825867,
+              "backup_parse": 0.003504569878831279,
+              "backup_apply": 0.0,
+              "pickle": 0.004864584407541873,
+              "child_cpu": 0.05691607125090362,
+              "parent_apply": 0.009085719786131789
+            },
+            "up_down:ETH:5m": {
+              "primary_parse": 0.015157377501717752,
+              "primary_apply": 0.0259183707030687,
+              "backup_parse": 0.005374265966952493,
+              "backup_apply": 0.0,
+              "pickle": 0.008439360758765972,
+              "child_cpu": 0.08284211787200632,
+              "parent_apply": 0.015646109719252295
+            }
+          }
+        },
+        "rss_bytes": {
+          "began": 53567488,
+          "drained": 67325952,
+          "status": 319160320
+        },
+        "snapshot_errors": [],
+        "final_book_sha256": "add306cbc265468e206a418daf7f71be6d0f66787b13cbadc37156acd1642be7",
+        "expected_book_sha256": "add306cbc265468e206a418daf7f71be6d0f66787b13cbadc37156acd1642be7",
+        "valid": true
+      }
+    }
+  ]
+}

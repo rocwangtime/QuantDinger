@@ -8,30 +8,6 @@ from collections import deque
 from datetime import datetime, timezone
 
 
-def interrupt_reader(app):
-    """Wake recv without closing/reusing its descriptor under a TLS operation.
-
-    SSLSocket.shutdown clears _sslobj. WebSocket.shutdown closes the descriptor.
-    Both can race the reader/heartbeat; the receiving thread owns TLS teardown.
-    The base socket syscall leaves the SSL object and descriptor alive.
-    """
-    app.keep_running = False
-    stop_ping = getattr(app, 'stop_ping', None)
-    if callable(getattr(stop_ping, 'set', None)):
-        stop_ping.set()
-    wire = getattr(app, 'sock', None)
-    raw = getattr(wire, 'sock', None)
-    if isinstance(raw, socket.socket):
-        try:
-            socket.socket.shutdown(raw, socket.SHUT_RDWR)
-        except OSError:
-            pass
-    elif wire and hasattr(wire, 'shutdown'):
-        wire.shutdown()
-    else:
-        app.close()
-
-
 def safe_handshake_headers(app):
     """Only public diagnostics; never enumerate/log cookies or auth headers."""
     try:

@@ -47,6 +47,7 @@ def test_process_boundaries_and_lease_loss(monkeypatch, command, owns_observer, 
             calls.append(('stopped', None))
 
     monkeypatch.delenv('POLYMARKET_OBSERVER_IN_SCHEDULER', raising=False)
+    monkeypatch.setenv('POLYMARKET_OBSERVER_PROCESS_PER_GROUP', '0')
     monkeypatch.setattr(app, 'create_app', lambda **_: SimpleNamespace(app_context=nullcontext))
     monkeypatch.setattr(process, 'ShutdownSignal', lambda: SimpleNamespace(event=Event(), install=lambda: None))
     monkeypatch.setattr(strategy_command_repository, 'StrategyCommandRepository', Repository)

@@ -68,17 +68,20 @@ def test_runtime_settings_reload_preserves_process_topology(monkeypatch):
 
     monkeypatch.setenv("QD_PROCESS_ROLE", "api")
     monkeypatch.setenv("STRATEGY_COMMANDS_ENABLED", "true")
+    monkeypatch.setenv("POLYMARKET_OBSERVER_PROCESS_PER_GROUP", "0")
 
     def fake_load(_path, override=True):
         assert override is True
         monkeypatch.setenv("QD_PROCESS_ROLE", "legacy")
         monkeypatch.setenv("STRATEGY_COMMANDS_ENABLED", "false")
+        monkeypatch.setenv("POLYMARKET_OBSERVER_PROCESS_PER_GROUP", "1")
 
     monkeypatch.setattr(runtime, "load_dotenv", fake_load)
     runtime.reload_runtime_env()
 
     assert os.environ["QD_PROCESS_ROLE"] == "api"
     assert os.environ["STRATEGY_COMMANDS_ENABLED"] == "true"
+    assert os.environ["POLYMARKET_OBSERVER_PROCESS_PER_GROUP"] == "0"
 
 
 def test_runtime_settings_reload_preserves_process_security_roots(monkeypatch):
