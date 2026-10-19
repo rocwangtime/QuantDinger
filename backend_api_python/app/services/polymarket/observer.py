@@ -1272,8 +1272,10 @@ def book_fallback_repeat_seconds():
 
 # A long REST miss must not flush an unbounded burst into the primary queue.
 HELD_CHANGES_MAX = 256
-# A liveness backup is healthy while envelopes are still arriving. This is
-# shorter than the 22s PONG timeout and longer than a quiet 5m print gap.
+# A liveness backup is healthy while envelopes are still arriving, or while
+# the socket has answered PING inside this same window. 15s is shorter than
+# the 22s PONG timeout. Exchange timestamps are not compared to the wall clock:
+# liveness_at is the monotonic time the frame was received.
 LIVENESS_ENVELOPE_SECONDS = 15
 
 
@@ -1411,6 +1413,41 @@ class MarketConnections:
         now = time.monotonic() if now is None else now
         return now - last <= LIVENESS_ENVELOPE_SECONDS
 
+    def _liveness_pong_age(self, state, now):
+        """Age of the last TEXT PONG. None when this socket has never answered."""
+        socket = state.get('socket')
+        transport = getattr(socket, 'transport', None) if socket is not None else None
+        if transport is None:
+            return None
+        pongs = getattr(transport, 'pongs', None)
+        pong_at = getattr(transport, 'pong_at', None)
+        if pongs and pong_at is not None:
+            return now - pong_at
+        last = getattr(transport, 'last', None)
+        if not isinstance(last, dict):
+            return None
+        try:
+            count = int(last.get('pongs') or 0)
+        except (TypeError, ValueError):
+            return None
+        if count <= 0:
+            return None
+        age = last.get('pong_age_seconds')
+        return age if isinstance(age, (int, float)) else None
+
+    def _liveness_link_fresh(self, state, now=None):
+        """Envelope receive time, or a PONG no older than the envelope window.
+
+        A quiet print does not drop a spare that has already seen every
+        required asset and is still answering PING. A socket that stops
+        answering falls out of this window before the 22s PONG timeout.
+        """
+        now = time.monotonic() if now is None else now
+        if self._liveness_envelope_fresh(state, now):
+            return True
+        age = self._liveness_pong_age(state, now)
+        return age is not None and age <= LIVENESS_ENVELOPE_SECONDS
+
     def _queue_lag_breaks_backup(self, state, inbox):
         """A deep backup queue rewinds a shadow ladder. Liveness has none.
 
@@ -1448,7 +1485,7 @@ class MarketConnections:
         hashes = state.get('liveness_hash') or {}
         if any(asset in hashes and not hashes[asset] for asset in required):
             return False
-        return self._liveness_envelope_fresh(state)
+        return self._liveness_link_fresh(state)
 
     def liveness_receive(self, index, state, raw, received_at, inbox):
         """Backup path that does not rebuild a book. Failover resyncs from a snapshot."""
@@ -1735,7 +1772,7 @@ class MarketConnections:
                 ('current_subscription', bool(state.get('subscribe_initial')
                     or required.intersection(state.get('subscribe_pending') or []))),
                 ('missing_envelope', not required <= seen),
-                ('stale_envelope', not self._liveness_envelope_fresh(state))) if blocked]
+                ('stale_envelope', not self._liveness_link_fresh(state))) if blocked]
         shadow = state['shadow']
         return [name for name, blocked in (
             ('disconnected', not state.get('connected')),
@@ -2539,6 +2576,85 @@ class MarketConnections:
         return dict(role='backup' if state.get('standby') else 'primary',
                     physical_role=state.get('physical_role'), source=state.get('source'),
                     promoted_at=state.get('promoted_at'))
+
+    def _hot_groups_for(self, assets):
+        found = set()
+        for asset in assets or []:
+            group = self.balancer.groups.get(asset, '').split(':outcome:')[0]
+            if group in HOT_SERIES:
+                found.add(group)
+        return found
+
+    def _spare_probe(self, index, state, now):
+        """One spare, as this process sees it. Does not change ready or coverage."""
+        inbox = state.get('inbox')
+        if state.get('primary_index') in self.states:
+            required = {str(asset) for asset in (self.states[state['primary_index']].get('assets') or [])}
+        elif index in self.states:
+            required = {str(asset) for asset in (self.states[index].get('assets') or [])}
+        else:
+            required = {str(asset) for asset in (state.get('required_assets') or state.get('assets') or [])}
+        if self.liveness_backup and state.get('redundant'):
+            seen = {str(asset) for asset in (state.get('liveness_assets') or ())}
+        else:
+            shadow = state.get('shadow')
+            seen = {str(asset) for asset in (getattr(shadow, 'books', {}) or {})}
+        try:
+            ready = bool(self.backup_ready(state))
+            blockers = list(self.readiness_blockers(state))
+        except Exception:
+            ready = False
+            blockers = ['probe_error']
+        last = state.get('liveness_at')
+        pong_age = self._liveness_pong_age(state, now)
+        missing = sorted(required - seen)
+        return dict(
+            shard=index, source=state.get('source'), ready=ready,
+            connected=bool(state.get('connected')),
+            received_frames=int(getattr(inbox, 'received_frames', 0) or 0) if inbox is not None else 0,
+            blockers=blockers, required_assets=len(required), seen_assets=len(required & seen),
+            missing_assets=missing[:8],
+            envelope_age_s=None if last is None else round(max(0.0, now - last), 3),
+            pong_age_s=None if pong_age is None else round(pong_age, 3),
+            envelope_fresh=bool(self._liveness_envelope_fresh(state, now)),
+            link_fresh=bool(self._liveness_link_fresh(state, now)),
+            subscribe_initial=bool(state.get('subscribe_initial')),
+            data_suspect=bool(state.get('data_suspect')),
+            queue_wait_seconds=round(inbox.pending_wait_seconds(), 3) if inbox is not None else None)
+
+    def child_ready_probe(self, now=None):
+        """Per hot group, this process's spares. The parent copies it; it does not sum it.
+
+        `ws_hot_backup_by_group.ready_backup_count` is a sum across children, and
+        every child publishes 0 for the groups it does not own. This probe is the
+        spare's own ready flag, blockers, envelope age and PONG age.
+        """
+        now = time.monotonic() if now is None else now
+        groups = {}
+
+        def row(group):
+            return groups.setdefault(group, dict(
+                group=group, feed=group, liveness_backup=bool(self.liveness_backup),
+                ready_count=0, spare_count=0, spares=[]))
+
+        for asset in self.balancer.assignment:
+            for group in self._hot_groups_for([asset]):
+                row(group)
+        for index, state in self.backup_items():
+            if 'inbox' not in state:
+                continue
+            owned = self._hot_groups_for(state.get('assets'))
+            if not owned and index in self.states:
+                owned = self._hot_groups_for(self.states[index].get('assets'))
+            if not owned:
+                continue
+            spare = self._spare_probe(index, state, now)
+            for group in owned:
+                item = row(group)
+                item['spares'].append(spare)
+                item['spare_count'] += 1
+                item['ready_count'] += int(bool(spare['ready']))
+        return groups
 
     def backup_metrics(self, index, state, now):
         inbox = state['inbox']
@@ -3669,6 +3785,7 @@ class MarketConnections:
                 for i, s in self.states.items() if 'inbox' in s}
             STATUS.update(ws_continuity=self.continuity.metrics(), ws_failover_ms=self.failover_ms,
                           ws_hot_backup_by_group=hot_coverage,
+                          ws_child_ready=self.child_ready_probe(now),
                           ws_double_kicks=self.double_kicks.metrics(datetime.now(timezone.utc).timestamp()),
                           ws_connections_by_source=[dict(shard=i, **self.connection_role(s))
                               for i, s in [*self.states.items(), *self.backup_items()]],

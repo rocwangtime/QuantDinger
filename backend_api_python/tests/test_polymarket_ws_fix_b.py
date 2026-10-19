@@ -12,8 +12,8 @@ from app.services.polymarket.ws_group_process import (
     HOT_ORDER, PROD_FRAME_WEIGHTS, GroupFeeds, _arm_replay_echo, _as_price_change,
     _echo_books_enabled, even_plan, merge_feed_status,
     partition, planned_events, primary_first_enabled, process_per_group_enabled,
-    queue_age_series, restart_backoff_seconds, suppress_backup_books, weighted_counts,
-    wire_event, without_stale_books)
+    queue_age_series, ready_drops_while_receiving, restart_backoff_seconds, suppress_backup_books,
+    weighted_counts, wire_event, without_stale_books)
 from app.services.polymarket.ws_payloads import cheap_envelope, hold_until_snapshot, snapshot_keeps_change
 
 _FEED_ID = re.compile(r'^feed-\d+$')
@@ -139,6 +139,108 @@ def test_cheap_envelope_skips_the_ladder():
     tips = cheap_envelope(json.dumps(change, separators=(',', ':')))
     assert {row[1] for row in tips} == {'ay', 'an'}
     assert {row[2] for row in tips} == {'1700000000001'}
+    assert all(row[2] for row in tips)
+
+
+def _exchange_price_change(*assets, stamp='1757908892351'):
+    """Current market channel: both outcome tokens, timestamp and event_type last."""
+    return json.dumps(dict(
+        market='0x5f65177b394277fd294cd75650044e32ba009a95022d88a0c1d565897d72f8f1',
+        price_changes=[dict(asset_id=asset, price='0.5', size='200', side='BUY', hash=f'h{asset}',
+                            best_bid='0.5', best_ask='1') for asset in assets],
+        timestamp=stamp, event_type='price_change'), separators=(',', ':'))
+
+
+def _exchange_book(asset, stamp='1757908892351', digest=None):
+    """Book with event_type last. A `}` inside a size must not end the object."""
+    return json.dumps(dict(
+        market='0xabc', asset_id=asset, timestamp=stamp, hash=digest or f'h{asset}',
+        bids=[dict(price='.48', size='30')], asks=[dict(price='.52', size='1}2')],
+        event_type='book'), separators=(',', ':'))
+
+
+def test_cheap_envelope_reads_exchange_field_order():
+    """The order Polymarket publishes. Lab order (timestamp before the rows) is not enough."""
+    tips = cheap_envelope(_exchange_price_change('71321045679252212594626385532706912750332728571942532289631379312455583992563',
+                                                 '52114319501245915516055106046884209969926127482827954674443846427813813222426'))
+    assert [row[1] for row in tips] == [
+        '71321045679252212594626385532706912750332728571942532289631379312455583992563',
+        '52114319501245915516055106046884209969926127482827954674443846427813813222426']
+    assert {row[0] for row in tips} == {'price_change'}
+    assert {row[2] for row in tips} == {'1757908892351'}
+    assert [row[3] for row in tips] == [
+        'h71321045679252212594626385532706912750332728571942532289631379312455583992563',
+        'h52114319501245915516055106046884209969926127482827954674443846427813813222426']
+    books = cheap_envelope('[' + _exchange_book('ay') + ',' + _exchange_book('an') + ']')
+    assert books == [
+        ('book', 'ay', '1757908892351', 'hay'),
+        ('book', 'an', '1757908892351', 'han'),
+    ]
+    # Older schema: one top-level asset_id, changes without a nested asset, event_type not first.
+    old = json.dumps(dict(
+        asset_id='ay', changes=[dict(price='.4', size='1', side='BUY')],
+        event_type='price_change', timestamp='1600000000000', hash='oldhash'), separators=(',', ':'))
+    assert cheap_envelope(old) == [('price_change', 'ay', '1600000000000', 'oldhash')]
+    trade = json.dumps(dict(
+        asset_id='ay', fee_rate_bps='0', market='0xabc', price='0.5', side='BUY', size='10',
+        timestamp='1757908892351', event_type='last_trade_price'), separators=(',', ':'))
+    assert cheap_envelope(trade) == [('last_trade_price', 'ay', '1757908892351', None)]
+
+
+def test_ready_drop_while_receiving_fails_the_gate():
+    held = [
+        dict(role='backup', ready=False, connected=True, received=1),
+        dict(role='backup', ready=True, connected=True, received=2),
+        dict(role='backup', ready=True, connected=True, received=9),
+    ]
+    assert ready_drops_while_receiving(held) == 0
+    quiet = [
+        dict(role='backup', ready=True, connected=True, received=5),
+        dict(role='backup', ready=False, connected=True, received=5),
+    ]
+    assert ready_drops_while_receiving(quiet) == 0
+    dropped = [
+        dict(role='backup', ready=False, connected=True, received=1),
+        dict(role='backup', ready=True, connected=True, received=2),
+        dict(role='backup', ready=False, connected=True, received=3),
+        dict(role='backup', ready=False, connected=False, received=4),
+    ]
+    assert ready_drops_while_receiving(dropped) == 1
+
+
+def test_child_ready_probe_is_copied_not_summed():
+    """A second child must not add its number into the spare that owns the group."""
+    btc = dict(group='up_down:BTC:5m', feed='up_down:BTC:5m', liveness_backup=True,
+               ready_count=1, spare_count=1,
+               spares=[dict(ready=True, blockers=[], received_frames=40, envelope_age_s=0.2)])
+    eth = dict(group='up_down:ETH:5m', feed='up_down:ETH:5m', liveness_backup=True,
+               ready_count=0, spare_count=1,
+               spares=[dict(ready=False, blockers=['stale_envelope'], received_frames=12)])
+    other = dict(group='up_down:BTC:5m', feed='up_down:ETH:5m', liveness_backup=True,
+                 ready_count=4, spare_count=1,
+                 spares=[dict(ready=False, blockers=['missing_envelope'], received_frames=0)])
+    parts = [
+        dict(key='up_down:BTC:5m', status={
+            'ws_child_ready': {'up_down:BTC:5m': btc},
+            'ws_hot_backup_by_group': {'up_down:BTC:5m': {'ready_backup_count': 1},
+                                       'up_down:ETH:5m': {'ready_backup_count': 0}}}),
+        dict(key='up_down:ETH:5m', status={
+            'ws_child_ready': {'up_down:ETH:5m': eth, 'up_down:BTC:5m': other},
+            'ws_hot_backup_by_group': {'up_down:BTC:5m': {'ready_backup_count': 0},
+                                       'up_down:ETH:5m': {'ready_backup_count': 0}}}),
+    ]
+    merged = merge_feed_status(parts)
+    probe = merged['ws_child_ready']['up_down:BTC:5m']
+    assert probe['ready_count'] == 1 and probe['feed'] == 'up_down:BTC:5m'
+    assert probe['spares'][0]['received_frames'] == 40
+    assert probe['also'][0]['ready_count'] == 4 and probe['also'][0]['feed'] == 'up_down:ETH:5m'
+    assert merged['ws_child_ready']['up_down:ETH:5m']['spares'][0]['blockers'] == ['stale_envelope']
+    assert merged['ws_hot_backup_by_group']['up_down:BTC:5m']['ready_backup_count'] == 1
+    assert merged['ws_hot_backup_by_group']['up_down:ETH:5m']['ready_backup_count'] == 0
+    flipped = merge_feed_status(list(reversed(parts)))
+    owned = flipped['ws_child_ready']['up_down:BTC:5m']
+    assert owned['ready_count'] == 1 and owned['feed'] == 'up_down:BTC:5m'
+    assert owned['also'][0]['feed'] == 'up_down:ETH:5m'
 
 
 class _Inbox:
@@ -185,9 +287,8 @@ def test_liveness_backup_promotes_and_holds_until_a_book():
 
 
 def _price_change(*assets, stamp=1_700_000_000_000):
-    return json.dumps(dict(event_type='price_change', timestamp=stamp, price_changes=[
-        dict(asset_id=asset, price='.4', size='1', hash=f'h{asset}') for asset in assets]),
-        separators=(',', ':'))
+    """Production key order. An old exchange timestamp must still count: freshness is receive time."""
+    return _exchange_price_change(*assets, stamp=stamp)
 
 
 def _liveness_manager():
@@ -267,6 +368,68 @@ def test_ready_backup_count_includes_a_liveness_spare():
     assert observer.STATUS['ws_hot_backup_by_group']['up_down:BTC:5m']['ready_backup_count'] == 1
     assert observer.STATUS['ws_backups'][0]['ready'] is True
     assert shadow.books == {}
+    probe = manager.child_ready_probe()['up_down:BTC:5m']
+    assert probe['ready_count'] == 1 and probe['spare_count'] == 1
+    spare = probe['spares'][0]
+    assert spare['ready'] is True and spare['blockers'] == []
+    assert spare['seen_assets'] == 2 and spare['required_assets'] == 2
+    assert spare['envelope_fresh'] is True and spare['missing_assets'] == []
+
+
+def test_exchange_frames_keep_a_receiving_spare_ready(monkeypatch):
+    """A >15s gap between receives must not clear ready while the next frame arrives.
+
+    The exchange timestamp is years in the past. Comparing it to the wall clock
+    would mark every frame stale. Receive time is monotonic.
+    """
+    clock = {'now': 1_000.0}
+    monkeypatch.setattr(observer.time, 'monotonic', lambda: clock['now'])
+    manager, _primary, backup, shadow = _liveness_manager()
+    raw = _exchange_price_change('ay', 'an', stamp=1_600_000_000_000)
+    manager.liveness_receive(0, backup, raw, datetime.now(timezone.utc), backup['inbox'])
+    assert backup['ready'] is True and manager.backup_ready(backup)
+    assert backup['liveness_assets'] == {'ay', 'an'} and shadow.books == {}
+    assert 'stale_envelope' not in manager.readiness_blockers(backup)
+    assert manager.update_hot_coverage(clock['now'])['up_down:BTC:5m']['ready_backup_count'] == 1
+    clock['now'] += 20
+    assert manager.backup_ready(backup) is False
+    assert 'stale_envelope' in manager.readiness_blockers(backup)
+    manager.liveness_receive(0, backup, raw, datetime.now(timezone.utc), backup['inbox'])
+    assert backup['ready'] is True and manager.backup_ready(backup)
+    assert manager.update_hot_coverage(clock['now'])['up_down:BTC:5m']['ready_backup_count'] == 1
+    books = '[' + _exchange_book('ay') + ',' + _exchange_book('an') + ']'
+    manager.liveness_receive(0, backup, books, datetime.now(timezone.utc), backup['inbox'])
+    assert backup['liveness_hash'] == {'ay': 'hay', 'an': 'han'}
+    assert manager.backup_ready(backup) is True
+
+
+def test_fresh_pong_holds_ready_across_a_quiet_gap(monkeypatch):
+    """BTC5m shape: both assets seen, then 20s with no envelope. A live PONG holds ready."""
+    clock = {'now': 1_000.0}
+    monkeypatch.setattr(observer.time, 'monotonic', lambda: clock['now'])
+    manager, _primary, backup, _shadow = _liveness_manager()
+    manager.liveness_receive(0, backup, _exchange_price_change('ay', 'an'), datetime.now(timezone.utc), backup['inbox'])
+    assert backup['ready'] is True
+    clock['now'] += 20
+    assert manager.backup_ready(backup) is False
+    backup['socket'] = type('Sock', (), {})()
+    backup['socket'].transport = type('Transport', (), {'pongs': 3, 'pong_at': clock['now'] - 1, 'last': {}})()
+    assert manager.backup_ready(backup) is True
+    assert 'stale_envelope' not in manager.readiness_blockers(backup)
+    assert manager.update_hot_coverage(clock['now'])['up_down:BTC:5m']['ready_backup_count'] == 1
+    probe = manager.child_ready_probe(clock['now'])['up_down:BTC:5m']['spares'][0]
+    assert probe['ready'] is True and probe['envelope_fresh'] is False and probe['link_fresh'] is True
+    assert probe['pong_age_s'] == 1 and 'stale_envelope' not in probe['blockers']
+    backup['liveness_assets'] = {'ay'}
+    assert manager.backup_ready(backup) is False
+    assert 'missing_envelope' in manager.readiness_blockers(backup)
+    backup['liveness_assets'] = {'ay', 'an'}
+    backup['socket'].transport.pong_at = clock['now'] - 16
+    assert manager.backup_ready(backup) is False
+    assert 'stale_envelope' in manager.readiness_blockers(backup)
+    backup['socket'].transport = type('Transport', (), {
+        'pongs': 0, 'pong_at': None, 'last': dict(pongs=2, pong_age_seconds=1)})()
+    assert manager.backup_ready(backup) is True
 
 
 def test_image_makes_the_app_tree_readable():

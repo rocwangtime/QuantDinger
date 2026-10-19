@@ -192,15 +192,23 @@ def book_every():
 
 
 def wire_event(identity, sequence, assets, levels, at):
-    """Prod-shaped public book / price_change. `identity` keeps hashes unique."""
+    """Prod-shaped public book / price_change. `identity` keeps hashes unique.
+
+    Live market-channel objects put `event_type` last. A price_change also
+    puts the parent `timestamp` after `price_changes`. The liveness scanner
+    has to stamp every asset in that order; lab order (event_type, then
+    timestamp, then the rows) hides the production miss.
+    """
     if sequence % book_every() == 0:
-        return [dict(event_type='book', asset_id=asset, timestamp=at, hash=f'{identity}{asset}',
+        return [dict(asset_id=asset, timestamp=at, hash=f'{identity}{asset}',
                      bids=[dict(price=str(level / 1000), size='3') for level in range(400 - levels // 2, 400)],
-                     asks=[dict(price=str(level / 1000), size='4') for level in range(600, 600 + levels // 2)])
+                     asks=[dict(price=str(level / 1000), size='4') for level in range(600, 600 + levels // 2)],
+                     event_type='book')
                 for asset in assets]
-    return dict(event_type='price_change', timestamp=at, price_changes=[
+    return dict(price_changes=[
         dict(asset_id=asset, side='SELL', price=str(level / 1000), size=str(identity), hash=f'{identity}{asset}{level}',
-             best_bid='.399', best_ask='.600') for asset in assets for level in range(600, 604)])
+             best_bid='.399', best_ask='.600') for asset in assets for level in range(600, 604)],
+        timestamp=at, event_type='price_change')
 
 
 def even_plan(seconds, rate, groups):
@@ -292,6 +300,31 @@ def merge_feed_status(parts):
                     if isinstance(row, dict) and 'shard' in row and isinstance(row.get('shard'), int):
                         row = dict(row, shard=row['shard'] + base)
                     rows.append(row)
+            elif key == 'ws_child_ready' and isinstance(value, dict):
+                # Copy each child's spare probe. Do not add ready_count: other
+                # children publish nothing for this group, and a sum would hide
+                # a healthy spare behind someone else's zero.
+                bucket = merged.setdefault(key, {})
+                feed = part.get('key')
+                for group, row in value.items():
+                    if not isinstance(row, dict):
+                        continue
+                    copied = copy.deepcopy(row)
+                    copied['feed'] = feed or copied.get('feed')
+                    prior = bucket.get(group)
+                    if not isinstance(prior, dict):
+                        bucket[group] = copied
+                        continue
+                    copied_owns = copied.get('feed') == group
+                    prior_owns = prior.get('feed') == group
+                    prefer = copied_owns and not prior_owns or (
+                        copied_owns == prior_owns
+                        and (copied.get('spare_count') or 0) > (prior.get('spare_count') or 0))
+                    if prefer:
+                        copied['also'] = [prior, *list(prior.get('also') or [])]
+                        bucket[group] = copied
+                    else:
+                        prior.setdefault('also', []).append(copied)
             elif key in MERGE_DICTS and isinstance(value, dict):
                 bucket = merged.setdefault(key, {})
                 for sub, item in value.items():
@@ -463,8 +496,8 @@ def _as_price_change(raw):
             changes.append(dict(asset_id=asset, price='.4', size='1', hash=item.get('hash') or f'pc{asset}'))
     if not changes:
         return raw
-    return json.dumps(dict(event_type='price_change', timestamp=stamp or int(time.time() * 1000),
-                           price_changes=changes), separators=(',', ':'))
+    return json.dumps(dict(price_changes=changes, timestamp=stamp or int(time.time() * 1000),
+                           event_type='price_change'), separators=(',', ':'))
 
 
 def _remember_replay_frame(raw):
@@ -764,12 +797,14 @@ def _bootstrap(manager):
             # A liveness-only replay still gives the primary a book (REST marks
             # and the post-kick echo). The spare gets a price change only.
             if suppress_backup_books() and state.get('redundant'):
-                event = dict(event_type='price_change', timestamp=at, price_changes=[
-                    dict(asset_id=asset, price='.4', size='1', hash=f'boot{asset}') for asset in assets])
+                event = dict(price_changes=[
+                    dict(asset_id=asset, price='.4', size='1', hash=f'boot{asset}') for asset in assets],
+                    timestamp=at, event_type='price_change')
                 sock.emit(json.dumps(event, separators=(',', ':')))
             else:
-                event = [dict(event_type='book', asset_id=asset, timestamp=at, hash=f'boot{asset}',
-                              bids=[dict(price='.4', size='1')], asks=[dict(price='.6', size='1')]) for asset in assets]
+                event = [dict(asset_id=asset, timestamp=at, hash=f'boot{asset}',
+                              bids=[dict(price='.4', size='1')], asks=[dict(price='.6', size='1')],
+                              event_type='book') for asset in assets]
                 raw = json.dumps(event, separators=(',', ':'))
                 _remember_replay_frame(raw)
                 sock.emit(raw)
@@ -831,6 +866,30 @@ def _drive(manager, spec):
             _LOG.exception('replay emit failed role=%s', role)
 
 
+def ready_drops_while_receiving(rows):
+    """How often a spare that was ready goes unready while frames still arrive.
+
+    The first samples are unready until subscribe completes. A later sample
+    counts only when the socket is still connected and `received` has increased
+    since the previous sample. A quiet socket that stops answering may go stale;
+    that is not this counter.
+    """
+    seen_ready = False
+    previous = None
+    drops = 0
+    for row in rows or []:
+        received = row.get('received')
+        receiving = (isinstance(received, (int, float)) and isinstance(previous, (int, float))
+                     and received > previous)
+        if row.get('ready'):
+            seen_ready = True
+        elif seen_ready and row.get('connected') and receiving:
+            drops += 1
+        if isinstance(received, (int, float)):
+            previous = received
+    return drops
+
+
 def queue_age_series(samples, t0):
     """Max primary queue age and depth in each whole second at or after t0."""
     buckets = {}
@@ -873,7 +932,9 @@ def _sample_loop(manager, outbox):
                 rows.append(dict(role='backup', t=now, depth=inbox.queue.qsize(),
                                  wait=inbox.pending_wait_seconds(),
                                  life=getattr(inbox, 'lifecycle_wait_seconds', 0) or 0,
-                                 ready=bool(manager.backup_ready(state)), resyncs=inbox.resyncs))
+                                 ready=bool(manager.backup_ready(state)),
+                                 connected=bool(state.get('connected')),
+                                 received=inbox.received_frames, resyncs=inbox.resyncs))
         except Exception:
             continue
         if rows:
