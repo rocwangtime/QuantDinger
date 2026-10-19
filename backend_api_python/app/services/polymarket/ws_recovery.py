@@ -13,8 +13,11 @@ from . import recording
 _LOG = logging.getLogger(__name__)
 # A /books answer whose book timestamp is this far from local time is stale.
 STALE_SECONDS = 2
-# Retry delay after a stale answer. The server keeps serving the same cached
+# Retry delay after stale answers. The server keeps serving the same cached
 # book for a while (1.6-4.4s seen on 2026-10-20), so 0.5s retries only fail.
+# The first stale answer of a streak waits 1s (a live book is rarely stale
+# twice), the next ones 5s. A completed repair ends the streak.
+STALE_FIRST_RETRY_SECONDS = 1
 STALE_RETRY_SECONDS = 5
 FAILURE_LOG_SECONDS = 30
 
@@ -202,6 +205,7 @@ class SnapshotRecovery:
                 with self.lock:
                     self.completed += 1
                     self.count(kind, "completed", time.monotonic())
+                    state.pop('_rest_stale_streak', None)
             except (requests.RequestException, ValueError, TypeError, KeyError, AttributeError) as exc:
                 self._failed(kind, state, retry_key, group, exc, began)
             finally:
@@ -245,7 +249,9 @@ class SnapshotRecovery:
             self.last_failure = detail
             if reason == 'stale':
                 # Same cached book for seconds: do not burn the 10s budget.
-                state[retry_key] = max(state.get(retry_key, 0), now + STALE_RETRY_SECONDS)
+                streak = state['_rest_stale_streak'] = state.get('_rest_stale_streak', 0) + 1
+                wait = STALE_FIRST_RETRY_SECONDS if streak == 1 else STALE_RETRY_SECONDS
+                state[retry_key] = max(state.get(retry_key, 0), now + wait)
                 self.count(kind, 'stale_backoff', now)
             self.unlogged[reason] += 1
             emit = now - self.logged_at >= FAILURE_LOG_SECONDS

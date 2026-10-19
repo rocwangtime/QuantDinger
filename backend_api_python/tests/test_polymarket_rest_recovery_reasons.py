@@ -86,10 +86,15 @@ def test_each_failure_has_a_reason_and_stale_backs_off(books, monkeypatch):
     metrics = _run(recovery, state, 'stale', books)
     assert metrics['failure_reasons']['recovery'] == {'stale': 1}
     assert metrics['last_failure']['reason'] == 'stale' and metrics['last_failure']['age_s'] >= 2.5
-    # 5s back-off instead of 0.5s: the same cached book keeps failing.
-    assert state['rest_retry_at'] - time.monotonic() > 4
+    # First stale answer of a streak: 1s, not 0.5s.
+    assert 0.6 < state['rest_retry_at'] - time.monotonic() <= 1
     assert recovery.request(state, ['a', 'b'], lambda *a: None) is False
     assert metrics['categories']['recovery']['total']['stale_backoff'] == 1
+    # Still stale: the cached book stays for seconds, wait 5s.
+    _run(recovery, state, 'stale', books)
+    assert state['rest_retry_at'] - time.monotonic() > 4 and state['_rest_stale_streak'] == 2
+    _run(recovery, state, 'fresh', books)
+    assert '_rest_stale_streak' not in state
     for mode, reason in (('http429', 'http_429'), ('incomplete', 'incomplete'), ('slow', 'read_timeout')):
         metrics = _run(recovery, state, mode, books)
         assert metrics['failure_reasons']['recovery'][reason] == 1, mode
@@ -99,7 +104,7 @@ def test_each_failure_has_a_reason_and_stale_backs_off(books, monkeypatch):
         raise KeyError('x')
     metrics = _run(recovery, state, 'fresh', books, publish=broken)
     assert metrics['failure_reasons']['recovery']['publish_KeyError'] == 1
-    assert metrics['failures'] == 5
+    assert metrics['failures'] == 6
 
 
 def test_connect_timeout_reason(monkeypatch):
