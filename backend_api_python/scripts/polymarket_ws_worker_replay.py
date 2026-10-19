@@ -344,6 +344,45 @@ def run(seconds=15, rate=1896, levels=140, cold_pairs=19, stage_profile=False, l
         return result
 
 
+def _snapshot_stages(feeds, timeout=1.0):
+    token = time.time()
+    for child in feeds.children.values():
+        child.stage_token = token
+        child.stage_ready = threading.Event()
+        child.stage_latest = None
+        child.send(dict(op='stages', token=token))
+    deadline = time.monotonic() + timeout
+    for child in feeds.children.values():
+        remaining = deadline - time.monotonic()
+        if remaining > 0 and child.stage_ready is not None:
+            child.stage_ready.wait(remaining)
+    return {key: dict(child.stage_latest or {}) for key, child in feeds.children.items()}
+
+
+def _cpu_breakdown(before, after, apply_before, apply_after, elapsed):
+    elapsed = max(float(elapsed), 0.001)
+    names = ('primary_parse', 'primary_apply', 'backup_parse', 'backup_apply')
+    totals = {name: 0.0 for name in names}
+    totals.update(pickle=0.0, parent_apply=0.0, child_cpu=0.0)
+    by_group = {}
+    for key, end in after.items():
+        start = before.get(key) or {}
+        end_stages = end.get('stages') or {}
+        start_stages = start.get('stages') or {}
+        row = {name: max(0.0, float(end_stages.get(name) or 0) - float(start_stages.get(name) or 0)) for name in names}
+        row['pickle'] = max(0.0, float(end.get('pickle_s') or 0) - float(start.get('pickle_s') or 0))
+        row['child_cpu'] = max(0.0, float(end.get('cpu_s') or 0) - float(start.get('cpu_s') or 0))
+        row['parent_apply'] = max(0.0, float(apply_after.get(key) or 0) - float(apply_before.get(key) or 0))
+        by_group[key] = {name: value / elapsed for name, value in row.items()}
+        for name, value in row.items():
+            totals[name] += value
+    cores = {name: value / elapsed for name, value in totals.items()}
+    accounted = sum(cores[name] for name in (*names, 'pickle', 'parent_apply'))
+    cores['child_other'] = max(0.0, cores['child_cpu'] - sum(cores[name] for name in (*names, 'pickle')))
+    cores['accounted'] = accounted
+    return dict(seconds=elapsed, cores=cores, by_group=by_group)
+
+
 def _proc_cpu_seconds(pid):
     with open(f'/proc/{pid}/stat', encoding='ascii') as source:
         text = source.read()
@@ -478,6 +517,8 @@ def _run_processes_inner(seconds, rate, levels, cold_pairs, market_loop, weighte
         rss_began = observer.process_rss_bytes()
         wall0 = time.time()
         began = time.monotonic()
+        stages_before = _snapshot_stages(feeds)
+        apply_before = {key: child.apply_s for key, child in feeds.children.items()}
         cpu = time.process_time()
         burner_at = _proc_cpu_seconds(burner.pid) if burner is not None else None
         # Cold history only; it is not a websocket group.
@@ -501,6 +542,8 @@ def _run_processes_inner(seconds, rate, levels, cold_pairs, market_loop, weighte
                     last, still = pipeline.messages, time.monotonic()
         parent_cpu = time.process_time() - cpu
         elapsed = time.monotonic() - began
+        stages_after = _snapshot_stages(feeds)
+        apply_after = {key: child.apply_s for key, child in feeds.children.items()}
         background_stop.set()
         for thread in threads:
             thread.join(5)
@@ -582,6 +625,7 @@ def _run_processes_inner(seconds, rate, levels, cold_pairs, market_loop, weighte
                       cpu_cores=status.get('ws_process_cpu_cores'), parent_cpu_s=parent_cpu,
                       burner_cores=burner_cores, restarts=dict(feeds.restarts),
                       stale_skipped=sum(child.stale_skipped for child in feeds.children.values()),
+                      cpu_breakdown=_cpu_breakdown(stages_before, stages_after, apply_before, apply_after, elapsed),
                       rss_bytes=dict(began=rss_began, drained=observer.process_rss_bytes(),
                                      status=status.get('ws_process_rss_bytes')),
                       snapshot_errors=snapshot_errors[:3],

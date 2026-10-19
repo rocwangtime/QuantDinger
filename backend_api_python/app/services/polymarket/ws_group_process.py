@@ -15,14 +15,16 @@ a book burst does not block the flusher; the book worker never waits on the
 parent. If the parent falls behind, the child drops the oldest batched events
 past 8k and counts them — queue_wait on the socket stays the backlog signal.
 
-Step C (backups that do not build a book) is intentionally not here. Readiness
-and promotion still use the shadow book. Changing that redefines failover and
-would widen this patch past the process boundary.
+Inside a feed process the hot backup does not rebuild a book. It checks
+liveness, asset, timestamp and hash. On failover the socket is promoted and
+the book is resynced from the next WS snapshot or REST; price changes wait
+for that snapshot. The in-process engine (PROCESS_PER_GROUP=0) still builds
+the shadow book.
 
-Inside a feed process the backup worker yields while its primary queue still
-holds a frame older than 50ms, so the backup cannot keep the GIL when that
-primary is behind. The replay gate's failover_gaps_s is kick-to-next-forwarded
-event (see FAILOVER_GAP_DEFINITION). It is not merged_gap_ms and not the
+POLYMARKET_OBSERVER_PRIMARY_FIRST defaults off. Set it to 1 and a feed-process
+backup sleeps 1ms while its live primary queue holds a frame older than 50ms.
+The replay gate's failover_gaps_s is kick-to-next-forwarded event (see
+FAILOVER_GAP_DEFINITION). It is not merged_gap_ms and not the
 hot-primary-failure business_gap flag.
 
 Rollback: POLYMARKET_OBSERVER_PROCESS_PER_GROUP=0 keeps the in-process engine.
@@ -88,6 +90,18 @@ def process_per_group_enabled():
     return os.getenv('POLYMARKET_OBSERVER_PROCESS_PER_GROUP', '0').lower() in {'1', 'true', 'yes'}
 
 
+def primary_first_enabled():
+    """Yield a backup while its live primary queue is old. Default off."""
+    return os.getenv('POLYMARKET_OBSERVER_PRIMARY_FIRST', '0').lower() in {'1', 'true', 'yes'}
+
+
+def restart_backoff_seconds(attempt):
+    """1-based restart count. 0.5s, then doubles, capped at 30s."""
+    if attempt < 1:
+        return 0.5
+    return min(30.0, 0.5 * (2 ** min(attempt - 1, 6)))
+
+
 # The gate reports this interval. Do not confuse it with the two production
 # signals that disagreed at 16:26 SGT on 2026-10-19 (business-gap log 7.7ms,
 # ws_continuity.merged_gap_ms 0.695s). Those formulas are unchanged.
@@ -120,14 +134,6 @@ def _widen(conn):
         fcntl.fcntl(conn.fileno(), 1031, 1 << 20)  # F_SETPIPE_SZ
     except (OSError, AttributeError, ValueError):
         pass
-
-
-def _plain(value):
-    if isinstance(value, dict):
-        return {k: _plain(v) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_plain(v) for v in value]
-    return value
 
 
 def _finite(value):
@@ -476,8 +482,11 @@ class _Outbox:
         self.high = 0
         self.dropped = 0
         self.batches = 0
+        self.pickle_s = 0.0
+        self.on_drop = None
 
     def submit(self, event, owned, received_at):
+        dropped_assets = None
         with self.cv:
             self.seq += 1
             seq = self.seq
@@ -490,12 +499,21 @@ class _Outbox:
             self.high = max(self.high, len(self.pubs))
             if len(self.pubs) > 8000:
                 drop = len(self.pubs) - 4000
+                lost = self.pubs[:drop]
                 del self.pubs[:drop]
                 self.dropped += drop
+                assets = sorted({asset for _event, owned_ids, _stamp, _seq in lost if owned_ids for asset in owned_ids})
+                self.urgent.append(dict(op='dropped', n=drop, total=self.dropped, assets=assets))
+                dropped_assets = assets
             if gap is not None:
                 self.urgent.append(dict(op='gap', seconds=gap, seq=seq))
-            if len(self.pubs) >= 32:
+            if len(self.pubs) >= 32 or dropped_assets:
                 self.cv.notify()
+        if dropped_assets and self.on_drop:
+            try:
+                self.on_drop(dropped_assets)
+            except Exception:
+                _LOG.exception('drop resync failed')
 
     def mark_kick(self):
         with self.cv:
@@ -523,10 +541,14 @@ class _Outbox:
                 closed = self.closed
             try:
                 for message in urgent:
+                    started = time.process_time()
                     _send(self.conn, message)
+                    self.pickle_s += time.process_time() - started
                 if pubs:
-                    items = [dict(e=_plain(event), o=owned, t=stamp, seq=seq) for event, owned, stamp, seq in pubs]
+                    started = time.process_time()
+                    items = [dict(e=event, o=owned, t=stamp, seq=seq) for event, owned, stamp, seq in pubs]
                     _send(self.conn, dict(op='pub', items=items))
+                    self.pickle_s += time.process_time() - started
                     self.batches += 1
                 if closed and not pubs:
                     return
@@ -572,6 +594,20 @@ def without_stale_books(event, metadata):
     if previous is not None and at is not None and at < previous:
         return None
     return event
+
+
+def _resync_dropped(manager, assets):
+    """Ask the live primary for a fresh book after an IPC drop."""
+    wanted = set(assets or [])
+    if not wanted:
+        return
+    for index, state in list(manager.states.items()):
+        owned = [asset for asset in state.get('assets', []) if asset in wanted]
+        if owned and not state.get('redundant'):
+            try:
+                manager.request_snapshot(index, state, owned)
+            except Exception:
+                _LOG.exception('snapshot after drop failed')
 
 
 def _socket_for(manager, role):
@@ -736,6 +772,11 @@ def _control_loop(manager, outbox, control, replay):
                 manager.publish_status()
             except Exception:
                 _LOG.exception('feed status failed')
+        elif op == 'stages':
+            with manager.stage_lock:
+                stages = dict(manager.stage_cpu)
+            outbox.add(dict(op='stages', token=message.get('token'),
+                            stages=stages, pickle_s=outbox.pickle_s, cpu_s=time.process_time()))
 
 
 def _install_forwarder(outbox):
@@ -817,8 +858,10 @@ def child_main(spec, data_conn, control_conn):
         flusher.start()
         _install_forwarder(outbox)
         manager = observer.MarketConnections()
-        manager.primary_first = os.getenv('QD_REPLAY_PRIMARY_FIRST', '1') != '0'  # VERIFY-ONLY toggle
+        manager.primary_first = primary_first_enabled()
+        manager.liveness_backup = True
         manager.backup_serial = int(spec.get('shard_base') or 0) * 10000
+        outbox.on_drop = lambda assets, manager=manager: _resync_dropped(manager, assets)
         _publish_hook(manager, outbox, spec['key'], int(spec.get('shard_base') or 0))
         if spec.get('rates'):
             manager.seed_rates(spec['rates'])
@@ -841,8 +884,10 @@ def child_main(spec, data_conn, control_conn):
             manager.close(timeout=3)
         except Exception:
             _LOG.exception('feed close failed')
+        with manager.stage_lock:
+            stages = dict(manager.stage_cpu)
         outbox.add(dict(op='bye', pid=os.getpid(), cpu_s=time.process_time(), rss=observer.process_rss_bytes(),
-                        dropped=outbox.dropped, batches=outbox.batches))
+                        dropped=outbox.dropped, batches=outbox.batches, stages=stages, pickle_s=outbox.pickle_s))
         outbox.close()
         flusher.join(2)
     except Exception:
@@ -878,6 +923,9 @@ class _Feed:
         self.dropped = 0
         self.batches = 0
         self.stale_skipped = 0
+        self.stages = {}
+        self.pickle_s = 0.0
+        self.apply_s = 0.0
         self.dead = False
 
     def send(self, message):
@@ -915,8 +963,18 @@ class _Feed:
         elif op == 'sample':
             if len(self.samples) < 200000:
                 self.samples.extend(message.get('rows') or [])
+        elif op == 'stages' and message.get('token') == getattr(self, 'stage_token', None):
+            self.stage_latest = dict(stages=message.get('stages') or {},
+                                     pickle_s=message.get('pickle_s') or 0.0,
+                                     cpu_s=message.get('cpu_s') or 0.0)
+            ready = getattr(self, 'stage_ready', None)
+            if ready is not None:
+                ready.set()
         elif op == 'gap':
             self.feeds.gaps.append(dict(key=self.spec['key'], seconds=message.get('seconds'), seq=message.get('seq')))
+        elif op == 'dropped':
+            self.dropped = message.get('total') or self.dropped
+            self.feeds.note_drop(self.spec['key'], message.get('assets') or [], self.dropped)
         elif op == 'pub':
             self._apply(message.get('items') or [])
         elif op == 'bye':
@@ -924,23 +982,29 @@ class _Feed:
             self.rss = message.get('rss') or self.rss
             self.dropped = message.get('dropped') or 0
             self.batches = message.get('batches') or self.batches
+            self.stages = message.get('stages') or {}
+            self.pickle_s = message.get('pickle_s') or 0.0
             self.dead = True
 
     def _apply(self, items):
         from . import observer
+        from .ws_payloads import hold_until_snapshot
         pipeline = observer._PIPELINE
         if pipeline is None:
             return
         for item in items:
             with pipeline.lock:
                 event = without_stale_books(item.get('e'), pipeline.recording.metadata)
+                event = hold_until_snapshot(event, self.feeds.resync_assets) if event else None
             if not event:
                 self.stale_skipped += 1
                 continue
             received = datetime.fromtimestamp((item.get('t') or 0) / 1000, timezone.utc)
             owned = None if item.get('o') is None else frozenset(item['o'])
             try:
+                started = time.process_time()
                 pipeline.receive(event, owned, received)
+                self.apply_s += time.process_time() - started
             except Exception:
                 _LOG.exception('parent apply failed key=%s', self.spec['key'])
             self.feeds.published += 1
@@ -981,6 +1045,10 @@ class GroupFeeds:
         self.rates = {}
         self.gaps = []
         self.published = 0
+        self.restart_after = {}
+        self.restart_alert = {}
+        self.drop_totals = {}
+        self.resync_assets = set()
         self.watchdog = None
         self._cpu_at = time.monotonic()
         self._cpu = time.process_time()
@@ -1058,20 +1126,38 @@ class GroupFeeds:
                 if self.stopped:
                     return
                 for key, child in list(self.children.items()):
-                    proc = child.proc
-                    if proc is not None and proc.is_alive():
-                        continue
                     if self.stopped:
                         return
-                    self.restarts[key] = self.restarts.get(key, 0) + 1
-                    _LOG.warning('restarting feed %s after exit code=%s restarts=%s',
-                                 key, None if proc is None else proc.exitcode, self.restarts[key])
-                    try:
-                        child.stop(0.2)
-                    except Exception:
-                        _LOG.exception('stopping dead feed %s', key)
-                    spec = dict(child.spec)
-                    self._spawn_locked(spec)
+                    self._consider_restart(key, child, time.monotonic())
+
+    def _consider_restart(self, key, child, now):
+        proc = child.proc
+        if proc is not None and proc.is_alive():
+            return False
+        if now < self.restart_after.get(key, 0):
+            return False
+        attempt = self.restarts.get(key, 0) + 1
+        self.restarts[key] = attempt
+        delay = restart_backoff_seconds(attempt)
+        self.restart_after[key] = now + delay
+        if attempt >= 3:
+            self.restart_alert[key] = dict(restarts=attempt, backoff_s=delay)
+            _LOG.error('feed %s restart alert restarts=%s backoff_s=%.1f code=%s',
+                       key, attempt, delay, None if proc is None else proc.exitcode)
+        else:
+            _LOG.warning('restarting feed %s after exit code=%s restarts=%s backoff_s=%.1f',
+                         key, None if proc is None else proc.exitcode, attempt, delay)
+        try:
+            child.stop(0.2)
+        except Exception:
+            _LOG.exception('stopping dead feed %s', key)
+        self._spawn_locked(dict(child.spec))
+        return True
+
+    def note_drop(self, key, assets, total):
+        """Live IPC loss. Price changes for these assets wait for the next book."""
+        self.drop_totals[key] = int(total or 0)
+        self.resync_assets.update(str(asset) for asset in (assets or []) if asset)
 
     def kick(self, key, code=1013, reason='slow consumer'):
         child = self.children.get(key)
@@ -1157,10 +1243,16 @@ class GroupFeeds:
         merged['ws_parent_cpu_cores'] = parent_cpu
         merged['ws_group_process_cpu_cores'] = group_cpu
         merged['ws_feed_restarts'] = dict(self.restarts)
+        merged['ws_feed_restart_alert'] = {key: dict(row) for key, row in self.restart_alert.items()}
+        merged['ws_ipc_dropped'] = sum(self.drop_totals.values())
+        merged['ws_ipc_resync_assets'] = sorted(self.resync_assets)
+        now = time.monotonic()
         merged['ws_group_processes'] = {
             key: dict(pid=None if child.proc is None else child.proc.pid,
                       alive=bool(child.proc and child.proc.is_alive()),
                       restarts=self.restarts.get(key, 0),
+                      backoff_s=max(0.0, self.restart_after.get(key, 0) - now),
+                      restart_alert=key in self.restart_alert,
                       hot=bool(child.spec.get('hot')),
                       dropped=child.dropped, batches=child.batches)
             for key, child in self.children.items()}

@@ -10,8 +10,10 @@ from datetime import datetime, timezone
 from app.services.polymarket import observer
 from app.services.polymarket.ws_group_process import (
     HOT_ORDER, PROD_FRAME_WEIGHTS, GroupFeeds, even_plan, merge_feed_status,
-    partition, planned_events, process_per_group_enabled, queue_age_series,
-    weighted_counts, without_stale_books)
+    partition, planned_events, primary_first_enabled, process_per_group_enabled,
+    queue_age_series, restart_backoff_seconds, weighted_counts, wire_event,
+    without_stale_books)
+from app.services.polymarket.ws_payloads import cheap_envelope, hold_until_snapshot
 
 _FEED_ID = re.compile(r'^feed-\d+$')
 
@@ -86,6 +88,104 @@ class _LagInbox:
 
     def pending_wait_seconds(self):
         return self.wait
+
+
+def test_primary_first_switch_defaults_off(monkeypatch):
+    monkeypatch.delenv('POLYMARKET_OBSERVER_PRIMARY_FIRST', raising=False)
+    assert primary_first_enabled() is False
+    assert observer.MarketConnections().primary_first is False
+    monkeypatch.setenv('POLYMARKET_OBSERVER_PRIMARY_FIRST', '1')
+    assert primary_first_enabled() is True
+
+
+def test_restart_backoff_caps_and_alerts_on_the_third_death():
+    assert [restart_backoff_seconds(n) for n in range(1, 9)] == [0.5, 1, 2, 4, 8, 16, 30, 30]
+    feeds = GroupFeeds(replay=True)
+    spawned = []
+    feeds._spawn_locked = lambda spec: spawned.append(spec['key'])
+    child = type('Child', (), {})()
+    child.spec = dict(key='g')
+    child.stop = lambda timeout: None
+    child.proc = type('Proc', (), {'is_alive': lambda self: False, 'exitcode': -9})()
+    assert feeds._consider_restart('g', child, 100.0) is True
+    assert feeds.restarts['g'] == 1 and feeds.restart_after['g'] == 100.5
+    assert 'g' not in feeds.restart_alert and spawned == ['g']
+    assert feeds._consider_restart('g', child, 100.2) is False
+    assert feeds._consider_restart('g', child, 100.5) is True
+    assert feeds.restarts['g'] == 2 and 'g' not in feeds.restart_alert
+    assert feeds._consider_restart('g', child, 102.0) is True
+    assert feeds.restart_alert['g']['restarts'] == 3
+    assert feeds.restart_alert['g']['backoff_s'] == 2
+    alive = type('Proc', (), {'is_alive': lambda self: True, 'exitcode': None})()
+    child.proc = alive
+    assert feeds._consider_restart('g', child, 200.0) is False
+
+
+def test_cheap_envelope_skips_the_ladder():
+    book = wire_event(7, 0, ('ay', 'an'), 140, 1_700_000_000_000)
+    tips = cheap_envelope(json.dumps(book, separators=(',', ':')))
+    assert tips == [
+        ('book', 'ay', '1700000000000', '7ay'),
+        ('book', 'an', '1700000000000', '7an'),
+    ]
+    assert '0.33' not in json.dumps(tips)
+    change = wire_event(8, 1, ('ay', 'an'), 140, 1_700_000_000_001)
+    assert {row[1] for row in cheap_envelope(json.dumps(change, separators=(',', ':')))} == {'ay', 'an'}
+
+
+class _Inbox:
+    def __init__(self):
+        self.invalid = threading.Event()
+        self.resync = threading.Event()
+        self.delivery_gap = False
+
+    def pending_wait_seconds(self):
+        return 0.0
+
+
+def test_liveness_backup_promotes_and_holds_until_a_book():
+    manager = observer.MarketConnections()
+    manager.liveness_backup = True
+    manager.update_hot_coverage = lambda now: None
+    retired, snaps = [], []
+    manager.retire = lambda state: retired.append(state)
+    manager.request_snapshot = lambda index, state, assets, pressure=False: snaps.append(list(assets))
+    manager.redundancy_tick = lambda now: None
+    inbox = _Inbox()
+    backup = dict(redundant=True, connected=True, standby=True, assets=['ay', 'an'],
+                  worker=threading.current_thread(), inbox=inbox, source='backup',
+                  subscribe_pending=[], recover_assets=[])
+    primary = dict(connected=True, assets=['ay', 'an'], inbox=_Inbox(), source='primary')
+    manager.states[0] = primary
+    manager.backups[0] = backup
+    raw = json.dumps([dict(event_type='book', asset_id=asset, timestamp=5, hash=f'h{asset}',
+                           bids=[dict(price='.4', size='1')], asks=[]) for asset in ('ay', 'an')])
+    manager.liveness_receive(0, backup, raw, datetime.now(timezone.utc), inbox)
+    assert backup['ready'] is True and manager.backup_ready(backup)
+    assert not backup.get('shadow') and manager.backup_promotions == 0 and not retired
+    primary['connected'] = False
+    manager.liveness_receive(0, backup, raw, datetime.now(timezone.utc), inbox)
+    assert manager.states[0] is backup and backup['redundant'] is False
+    assert backup['need_book'] == {'ay', 'an'} and snaps == [['ay', 'an']] and retired == [primary]
+    change = dict(event_type='price_change', price_changes=[dict(asset_id='ay', price='.4', size='1')])
+    assert manager._release_resync(backup, change) is None
+    assert 'ay' in backup['need_book']
+    book = dict(event_type='book', asset_id='ay', timestamp=6, hash='next', bids=[], asks=[])
+    assert manager._release_resync(backup, book) is book
+    assert backup['need_book'] == {'an'}
+
+
+def test_dropped_deltas_are_fenced_until_a_book():
+    feeds = GroupFeeds(replay=True)
+    feeds.note_drop('up_down:BTC:5m', ['ay', ''], 4)
+    assert feeds.drop_totals['up_down:BTC:5m'] == 4
+    assert feeds.resync_assets == {'ay'}
+    change = dict(event_type='price_change', price_changes=[dict(asset_id='ay', price='.4', size='1')])
+    assert hold_until_snapshot(change, feeds.resync_assets) is None
+    book = dict(event_type='book', asset_id='ay', timestamp=9, hash='fresh', bids=[], asks=[])
+    assert hold_until_snapshot(book, feeds.resync_assets) is book
+    assert feeds.resync_assets == set()
+    assert hold_until_snapshot(change, feeds.resync_assets) is change
 
 
 def test_primary_first_yields_only_for_a_live_backlogged_primary():

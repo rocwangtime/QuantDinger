@@ -1269,6 +1269,10 @@ class MarketConnections:
         # while its own primary queue is old. In-process callers leave it off.
         self.primary_first = False
         self.primary_first_lag_seconds = 0.05
+        # Feed processes set this. Backups then check liveness and hash only.
+        self.liveness_backup = False
+        self.stage_lock = threading.Lock()
+        self.stage_cpu = dict(primary_parse=0.0, primary_apply=0.0, backup_parse=0.0, backup_apply=0.0)
 
     def backup_items(self):
         return list(self.backups.items()) + list(self.reserves.items())
@@ -1297,6 +1301,88 @@ class MarketConnections:
         except Exception:
             return False
 
+    def _charge(self, name, started):
+        if started is None:
+            return
+        spent = time.process_time() - started
+        with self.stage_lock:
+            self.stage_cpu[name] = self.stage_cpu.get(name, 0.0) + spent
+
+    def liveness_receive(self, index, state, raw, received_at, inbox):
+        """Backup path that does not rebuild a book. Failover resyncs from a snapshot."""
+        from .ws_payloads import cheap_envelope
+        if inbox.invalid.is_set() or state.get('retired'):
+            return
+        assets = set(state.get('assets') or [])
+        for kind, asset, stamp, digest in cheap_envelope(raw):
+            if asset not in assets:
+                continue
+            if kind == 'book' and stamp and digest:
+                state.setdefault('liveness_assets', set()).add(asset)
+                state.setdefault('liveness_hash', {})[asset] = digest
+        primary = self.states.get(index)
+        required = set(primary.get('assets') or []) if primary is not None else set(state.get('required_assets') or ())
+        healthy = (state.get('connected') and bool(required) and required <= set(state.get('liveness_assets') or ())
+                   and not inbox.invalid.is_set() and not inbox.resync.is_set() and not inbox.delivery_gap
+                   and inbox.pending_wait_seconds() <= self.backup_queue_limit(state)
+                   and not required.intersection(state.get('subscribe_pending', []))
+                   and not required.intersection(state.get('recover_assets', [])))
+        if healthy != bool(state.get('ready')):
+            state['ready'] = healthy
+            self.update_hot_coverage(time.monotonic())
+        self._promote_liveness_backup(index, state)
+
+    def _release_resync(self, state, event):
+        from .ws_payloads import hold_until_snapshot
+        pending = state.get('need_book')
+        if not pending:
+            return event
+        released = hold_until_snapshot(event, pending)
+        if not pending:
+            state.pop('need_book', None)
+        return released
+
+    def _promote_liveness_backup(self, index, state):
+        """Hand the socket to the primary role and wait for a fresh book."""
+        if threading.current_thread() is not state.get('worker'):
+            return False
+        old = self.states.get(index)
+        if old is None or old is state or not state.get('ready') or not state.get('connected'):
+            return False
+        if old.get('connected') and not old.get('inbox').invalid.is_set() and not old.get('data_suspect') and not old.get('pong_dead'):
+            return False
+        with self.lifecycle_lock:
+            old = self.states.get(index)
+            if old is None or old is state or not state.get('connected'):
+                return False
+            inbox = old.get('inbox')
+            if old.get('connected') and inbox is not None and not inbox.invalid.is_set() and not old.get('data_suspect') and not old.get('pong_dead'):
+                return False
+            required = list(old.get('assets') or [])
+            preserved = bool(_PIPELINE and set(required) <= set(getattr(_PIPELINE, 'books', {})))
+            self.continuity.switch(old.get('source'), state.get('source'), required, 'failover', book_preserved=preserved)
+            extra = set(state.get('assets') or []) - set(required)
+            state['assets'] = list(required)
+            state['need_book'] = set(required)
+            state.update(standby=False, redundant=False,
+                         promoted_at=datetime.now(timezone.utc).isoformat(),
+                         rotate_failures=0, rotate_retry_at=0, backup_started=True,
+                         backup_failures=0, backup_retry_at=0)
+            state['unsubscribe_pending'] = extra
+            self.states[index] = state
+            holder = self.backups if self.backups.get(index) is state else self.reserves
+            holder.pop(index, None)
+            if index in self.reserves and index not in self.backups:
+                self.backups[index] = self.reserves.pop(index)
+            self.backup_promotions += 1
+            self.rotations += 1
+            self.failover_ms = max(0, (time.monotonic() - old.get('failed_at', time.monotonic())) * 1000)
+            self.update_hot_coverage(time.monotonic())
+            self.retire(old)
+            self.request_snapshot(index, state, required)
+            self.redundancy_tick(time.monotonic())
+        return True
+
     @staticmethod
     def backup_queue_limit(candidate):
         # A feed actively publishing unique merged updates gets 500ms of
@@ -1319,6 +1405,14 @@ class MarketConnections:
         required = set(candidate.get('required_assets', candidate.get('assets', []))) if candidate else set()
         if candidate and candidate.get('primary_index') in self.states:
             required = set(self.states[candidate['primary_index']]['assets'])
+        if self.liveness_backup and candidate and candidate.get('redundant'):
+            return bool(candidate.get('ready') and candidate.get('connected') and inbox and required
+                        and required <= set(candidate.get('liveness_assets') or ())
+                        and not inbox.invalid.is_set() and not inbox.resync.is_set()
+                        and not inbox.delivery_gap
+                        and inbox.pending_wait_seconds() <= self.backup_queue_limit(candidate)
+                        and not required.intersection(candidate.get('subscribe_pending', []))
+                        and not required.intersection(candidate.get('recover_assets', [])))
         shadow = candidate.get('shadow') if candidate else None
         return bool(candidate and candidate.get('ready') and candidate.get('connected') and inbox
                     and required
@@ -1334,6 +1428,18 @@ class MarketConnections:
         """Explain publication readiness separately from adding subscriptions."""
         inbox = state['inbox']
         required = set(self.states[state['primary_index']]['assets'])
+        if self.liveness_backup and state.get('redundant'):
+            seen = set(state.get('liveness_assets') or ())
+            return [name for name, blocked in (
+                ('disconnected', not state.get('connected')),
+                ('invalid', inbox.invalid.is_set()), ('resync', inbox.resync.is_set()),
+                ('delivery_gap', inbox.delivery_gap),
+                ('queue_wait', inbox.pending_wait_seconds() > self.backup_queue_limit(state)),
+                ('current_subscription', bool(required.intersection(state.get('subscribe_pending', [])))),
+                ('snapshot_repair', bool(required.intersection(state.get('recover_assets', [])))),
+                ('missing_snapshot', not required <= seen),
+                ('missing_timestamp', not required <= seen),
+                ('catchup', not state.get('ready'))) if blocked]
         shadow = state['shadow']
         return [name for name, blocked in (
             ('disconnected', not state.get('connected')),
@@ -2681,15 +2787,35 @@ class MarketConnections:
                     if state.get('standby'):
                         # Only this worker promotes. A supervisor promotion
                         # could otherwise strand an already-popped shadow delta.
-                        self.shadow_receive(index, state, [], datetime.now(timezone.utc), inbox)
+                        if self.liveness_backup and state.get('redundant'):
+                            self._promote_liveness_backup(index, state)
+                        else:
+                            self.shadow_receive(index, state, [], datetime.now(timezone.utc), inbox)
                     continue
                 try:
                     parsing_at = time.monotonic()
-                    event = self.parsed_frames.parse(raw)
-                    inbox.parse_max_seconds = max(inbox.parse_max_seconds, time.monotonic() - parsing_at)
-                    if state.get('standby'):
-                        self.shadow_receive(index, state, event, received_at, inbox, epoch)
+                    standby = bool(state.get('standby'))
+                    if self.liveness_backup and state.get('redundant'):
+                        parse_cpu = time.process_time()
+                        self.liveness_receive(index, state, raw, received_at, inbox)
+                        self._charge('backup_parse', parse_cpu)
+                        inbox.processing_received_at = None
+                        inbox.processing_charged_bytes = 0
                         continue
+                    parse_cpu = time.process_time()
+                    event = self.parsed_frames.parse(raw)
+                    self._charge('backup_parse' if standby else 'primary_parse', parse_cpu)
+                    inbox.parse_max_seconds = max(inbox.parse_max_seconds, time.monotonic() - parsing_at)
+                    apply_cpu = time.process_time()
+                    if standby:
+                        self.shadow_receive(index, state, event, received_at, inbox, epoch)
+                        self._charge('backup_apply', apply_cpu)
+                        continue
+                    if state.get('need_book'):
+                        event = self._release_resync(state, event)
+                        if not event:
+                            self._charge('primary_apply', apply_cpu)
+                            continue
                     event = self.migration_receive(index, state, event, received_at, inbox)
                     self.balancer.receive(event, index, len(raw.encode('utf-8')) if isinstance(raw, str) else len(raw) if isinstance(raw, (bytes, bytearray)) else 0)
                     self.stats.message(index)
@@ -2720,6 +2846,7 @@ class MarketConnections:
                                 if pending and pending[0] == index:
                                     pending[1]['shadow'].observe_active(_PIPELINE.recording.metadata)
                                 inbox.lock_wait_seconds = lock_wait
+                    self._charge('primary_apply', apply_cpu)
                 except (ValueError, TypeError, AttributeError):
                     continue
                 finally:
