@@ -348,11 +348,15 @@ def _proc_cpu_seconds(pid):
 
 
 def _burn(fraction, stop):
+    """Hold about `fraction` of one core. Sleep is wall-clock, so this is a second process, not a GIL thread."""
     while not stop.is_set():
-        end = time.perf_counter() + 0.02 * fraction
-        while time.perf_counter() < end and not stop.is_set():
-            sum(range(80))
-        stop.wait(0.02 * (1 - fraction))
+        started = time.perf_counter()
+        busy_until = started + 0.05 * fraction
+        while time.perf_counter() < busy_until:
+            pass
+        rest = 0.05 - (time.perf_counter() - started)
+        if rest > 0:
+            time.sleep(rest)
 
 
 def run_processes(seconds=20, rate=3300, levels=140, cold_pairs=19, market_loop=True,

@@ -185,7 +185,7 @@ def planned_events(spec):
         count = counts[spec['group']]
         for seq in range(count):
             at = epoch + seq
-            event = wire_event(f"{spec['group']}-{seq}", seq, assets, levels, at)
+            event = wire_event(seq, seq, assets, levels, at)
             primary_t = math.floor((seq / max(count, 1)) * seconds / 0.05) * 0.05
             yield primary_t, 'primary', event
             yield primary_t + 0.3, 'backup', event
@@ -589,7 +589,7 @@ def _schedule(spec):
         counts = weighted_counts(int(spec['seconds'] * spec['rate'] / 2), spec['weights'])
         count = counts[spec['group']]
         for seq in range(count):
-            args = (f"{spec['group']}-{seq}", seq, spec['assets'], spec['levels'], spec['epoch'] + seq)
+            args = (seq, seq, spec['assets'], spec['levels'], spec['epoch'] + seq)
             primary_t = math.floor((seq / max(count, 1)) * spec['seconds'] / 0.05) * 0.05
             rows.append((primary_t, 'primary', args))
             rows.append((primary_t + 0.3, 'backup', args))
