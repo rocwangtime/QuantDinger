@@ -79,7 +79,7 @@ MAX_KEYS = frozenset({
     'ws_rebalance_pressure_samples',
 })
 MERGE_DICTS = frozenset({
-    'ws_local_100ms', 'ws_hot_backup_by_group', 'ws_hot_primary_failures',
+    'ws_local_100ms', 'ws_hot_backup_by_group', 'ws_hot_primary_failures', 'ws_business_gaps',
     'ws_group_rates', 'ws_group_byte_rates', 'ws_group_ingress_byte_rates',
     'close_reason_counts',
 })

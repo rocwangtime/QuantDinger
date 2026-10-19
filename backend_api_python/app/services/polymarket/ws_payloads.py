@@ -254,13 +254,8 @@ def _tips_for_object(blob):
     return [(kind, row_asset, stamp, row_digest) for row_asset, row_digest in rows]
 
 
-def cheap_envelope(raw):
-    """Timestamp, asset and hash only. Does not build bid or ask ladders.
-
-    Each top-level object is one event. The parent timestamp applies to every
-    asset in that object, including assets that appear before the timestamp
-    and when `event_type` is the last key.
-    """
+def _cheap_envelope_regex(raw):
+    """Reference implementation. Also the fallback for frames the fast path cannot prove."""
     if isinstance(raw, (bytes, bytearray)):
         raw = raw.decode('utf-8', 'replace')
     if not isinstance(raw, str) or not raw:
@@ -269,6 +264,132 @@ def cheap_envelope(raw):
     for blob in _json_objects(raw):
         tips.extend(_tips_for_object(blob))
     return tips
+
+
+_ENVELOPE_KEYS = ('event_type', 'asset_id', 'timestamp', 'hash')
+_ENVELOPE_QUOTED = tuple('"%s"' % key for key in _ENVELOPE_KEYS)
+_ENVELOPE_QUOTED_BYTES = tuple(key.encode() for key in _ENVELOPE_QUOTED)
+# The regex captures `"?([^"\\,}\s]+)"?`. A string made only of these
+# characters is captured whole; anything else falls back to the regex.
+_PLAIN_VALUE = re.compile(r'[^"\\,}\s]+\Z')
+# Ladder rows carry price/size only. Their keys are counted, not walked;
+# the raw-count check below sends any surprise back to the regex.
+_LADDER_KEYS = frozenset(('bids', 'asks', 'buys', 'sells'))
+
+
+class _Fallback(Exception):
+    pass
+
+
+def _envelope_value(value):
+    if value is None:
+        return 'null'
+    if value is True:
+        return 'true'
+    if value is False:
+        return 'false'
+    if type(value) is str and _PLAIN_VALUE.match(value):
+        return value
+    if type(value) is int and value:
+        # JSON has no leading zeros or '+', so a nonzero integer's text is
+        # str(value). Zero may have been written -0.
+        return str(value)
+    # Floats (1e5, 1.0), zero, empty or spaced strings and containers: the
+    # regex result depends on the source text, so only the regex can answer.
+    raise _Fallback
+
+
+def _envelope_walk(node, out, seen):
+    """(key, value) pairs in document order; seen counts matched keys."""
+    if type(node) is dict:
+        for key, value in node.items():
+            if key in _ENVELOPE_SET:
+                seen[0] += 1
+                out.append((key, _envelope_value(value)))
+            elif key in _LADDER_KEYS and type(value) is list:
+                continue
+            elif type(value) is dict or type(value) is list:
+                _envelope_walk(value, out, seen)
+    elif type(node) is list:
+        for item in node:
+            if type(item) is dict or type(item) is list:
+                _envelope_walk(item, out, seen)
+
+
+_ENVELOPE_SET = frozenset(_ENVELOPE_KEYS)
+
+
+def _tips_for_pairs(pairs):
+    """Same state machine as _tips_for_object, fed by parsed pairs."""
+    kind = stamp = None
+    pending_hash = None
+    rows = []
+    asset = digest = None
+    for key, value in pairs:
+        if key == 'event_type':
+            if kind is None:
+                kind = value
+        elif key == 'asset_id':
+            if asset:
+                rows.append((asset, digest if digest is not None else pending_hash))
+            asset, digest = value, None
+        elif key == 'timestamp':
+            if stamp is None:
+                stamp = value
+        elif asset and digest is None:
+            digest = value
+        elif asset is None and pending_hash is None:
+            pending_hash = value
+    if asset:
+        rows.append((asset, digest if digest is not None else pending_hash))
+    if not kind:
+        return []
+    return [(kind, row_asset, stamp, row_digest) for row_asset, row_digest in rows]
+
+
+def _top_objects(node, out):
+    if type(node) is dict:
+        out.append(node)
+    elif type(node) is list:
+        for item in node:
+            _top_objects(item, out)
+
+
+def cheap_envelope(raw):
+    """Timestamp, asset and hash only. Does not build bid or ask ladders.
+
+    Each top-level object is one event. The parent timestamp applies to every
+    asset in that object, including assets that appear before the timestamp
+    and when `event_type` is the last key.
+
+    Fast path: orjson parse plus a walk over the four envelope keys in
+    document order, so field order never matters. The output is identical to
+    _cheap_envelope_regex. Any frame the fast path cannot prove identical
+    (parse error, key text inside strings, keys inside ladder rows, numeric or
+    spaced values) is handled by the regex reference instead.
+    """
+    if not raw or not isinstance(raw, (str, bytes, bytearray)):
+        return []
+    # An escape changes the text the regex sees (it stops at a backslash),
+    # so any escaped frame goes to the reference implementation.
+    if orjson is None or (b'\\' if not isinstance(raw, str) else '\\') in raw:
+        return _cheap_envelope_regex(raw)
+    try:
+        tree = orjson.loads(raw)
+        objects = []
+        _top_objects(tree, objects)
+        tips = []
+        seen = [0]
+        for item in objects:
+            pairs = []
+            _envelope_walk(item, pairs, seen)
+            tips.extend(_tips_for_pairs(pairs))
+        quoted = _ENVELOPE_QUOTED if isinstance(raw, str) else _ENVELOPE_QUOTED_BYTES
+        if seen[0] != sum(raw.count(key) for key in quoted):
+            raise _Fallback
+        return tips
+    except (_Fallback, ValueError, TypeError):
+        return _cheap_envelope_regex(raw)
 
 
 def _as_exchange_time(value):
