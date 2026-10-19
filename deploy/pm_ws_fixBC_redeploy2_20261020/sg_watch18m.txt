@@ -1,0 +1,30 @@
+2026-10-20 01:45:35.904302+08
+promotions=0
+close_1008=0
+close_1013=0
+paper_running=true
+mps=1354.2706497750853
+cpu_cores=1.3758246745747473
+rss=542441472
+---CHILD_READY---
+up_down:BTC:15m ready_count= 1 spare_ready= 1 / 1 env_age= [0.0] blockers= [[]]
+up_down:BTC:5m ready_count= 1 spare_ready= 1 / 1 env_age= [0.0] blockers= [[]]
+up_down:ETH:15m ready_count= 1 spare_ready= 1 / 1 env_age= [0.0] blockers= [[]]
+up_down:ETH:5m ready_count= 1 spare_ready= 1 / 1 env_age= [0.007] blockers= [[]]
+BTC5m_CHILD_READY True
+---HOT_FAIL---
+none
+---SSL---
+0
+---PROMOTE_LOG---
+---GROUPS---
+{'cold': {'alive': True, 'restarts': 0, 'dropped': 0}, 'up_down:BTC:5m': {'alive': True, 'restarts': 0, 'dropped': 0}, 'up_down:ETH:5m': {'alive': True, 'restarts': 0, 'dropped': 0}, 'up_down:BTC:15m': {'alive': True, 'restarts': 0, 'dropped': 0}, 'up_down:ETH:15m': {'alive': True, 'restarts': 0, 'dropped': 0}}
+---ORDERS---
+0
+quantdinger-polymarket-observer quantdinger-backend:pmws-bc-1ebc6c3 Up 19 minutes (healthy)
+quantdinger-scheduler-worker quantdinger-backend:rollback-20261018p50-99d4415 Up 24 hours (healthy)
+quantdinger-trading-worker quantdinger-backend:rollback-20261018p50-99d4415 Up 24 hours (healthy)
+quantdinger-celery-beat quantdinger-backend:rollback-20261018p50-99d4415 Up 24 hours (healthy)
+quantdinger-backend quantdinger-backend:rollback-20261018p50-99d4415 Up 24 hours (healthy)
+quantdinger-celery-worker quantdinger-backend:rollback-20261018p50-99d4415 Up 24 hours (healthy)
+quantdinger-opend-relay quantdinger-backend:rollback-20261018p50-99d4415 Up 24 hours (healthy)

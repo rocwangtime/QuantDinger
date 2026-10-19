@@ -1,0 +1,19 @@
+2026-10-20 01:36:14.839467+08
+promotions=0
+close_1008=0
+close_1013=0
+paper_running=true
+mps=1332.7425366685409
+cpu_cores=1.662036327718823
+rss=527532032
+---CHILD_READY---
+up_down:BTC:15m ready_count= 1 spare_ready= 1 / 1 env_age= [0.0] blockers= [[]]
+up_down:BTC:5m ready_count= 1 spare_ready= 1 / 1 env_age= [0.0] blockers= [[]]
+up_down:ETH:15m ready_count= 1 spare_ready= 1 / 1 env_age= [0.0] blockers= [[]]
+up_down:ETH:5m ready_count= 1 spare_ready= 1 / 1 env_age= [0.0] blockers= [[]]
+BTC5m_CHILD_READY True
+---HOT_FAIL---
+none
+---SSL---
+0
+---PROMOTE_LOG---

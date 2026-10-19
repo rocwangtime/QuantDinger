@@ -1,0 +1,27 @@
+2026-10-20 01:28:06.137548+08
+running=true
+mode=ws
+ws_connected=8
+mps=1547.7194037439867
+age_s=0.000572107033804059
+promotions=0
+close_1008=0
+close_1013=0
+ipc_dropped=0
+paper_running=true
+cpu_cores=0.5919239640112037
+rss=508678144
+---CHILD_READY---
+up_down:BTC:15m {'ready': None, 'ready_backup_count': None, 'connected': None, 'envelope_fresh': None, 'link_fresh': None, 'blockers': None, 'role': None}
+up_down:BTC:5m {'ready': None, 'ready_backup_count': None, 'connected': None, 'envelope_fresh': None, 'link_fresh': None, 'blockers': None, 'role': None}
+up_down:ETH:15m {'ready': None, 'ready_backup_count': None, 'connected': None, 'envelope_fresh': None, 'link_fresh': None, 'blockers': None, 'role': None}
+up_down:ETH:5m {'ready': None, 'ready_backup_count': None, 'connected': None, 'envelope_fresh': None, 'link_fresh': None, 'blockers': None, 'role': None}
+---HOT_COV---
+up_down:BTC:15m ready= True ready_backup_count= 1
+up_down:BTC:5m ready= False ready_backup_count= 1
+up_down:ETH:15m ready= False ready_backup_count= 1
+up_down:ETH:5m ready= False ready_backup_count= 1
+---HOT_FAIL---
+---SSL---
+0
+---PROMOTE_LOG---

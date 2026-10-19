@@ -1,0 +1,102 @@
+<class 'dict'> ['up_down:BTC:5m', 'up_down:ETH:5m', 'up_down:BTC:15m', 'up_down:ETH:15m']
+{
+  "up_down:BTC:5m": {
+    "feed": "up_down:BTC:5m",
+    "group": "up_down:BTC:5m",
+    "spares": [
+      {
+        "ready": true,
+        "shard": 0,
+        "source": "feed-10003",
+        "blockers": [],
+        "connected": true,
+        "link_fresh": true,
+        "pong_age_s": 2.931,
+        "seen_assets": 2,
+        "data_suspect": false,
+        "envelope_age_s": 0.002,
+        "envelope_fresh": true,
+        "missing_assets": [],
+        "received_frames": 98390,
+        "required_assets": 2,
+        "subscribe_initial": false,
+        "queue_wait_seconds": 0
+      }
+    ],
+    "ready_count": 1,
+    "spare_count": 1,
+    "liveness_backup": true
+  },
+  "up_down:ETH:5m": {
+    "feed": "up_down:ETH:5m",
+    "group": "up_down:ETH:5m",
+    "spares": [
+      {
+        "ready": true,
+        "shard": 0,
+        "source": "feed-30003",
+        "blockers": [],
+        "connected": true,
+        "link_fresh": true,
+        "pong_age_s": 5.445,
+        "seen_assets": 2,
+        "data_suspect": false,
+        "envelope_age_s": 0.109,
+        "envelope_fresh": true,
+        "missing_assets": [],
+        "received_frames": 47755,
+        "required_assets": 2,
+        "subscribe_initial": false,
+        "queue_wait_seconds": 0
+      }
+    ],
+    "ready_count": 1,
+    "spare_count": 1,
+    "liveness_backup": true
+  },
+  "up_down:BTC:15m": {
+    "feed": "up_down:BTC:15m",
+    "group": "up_down:BTC:15m",
+    "spares": [
+      {
+        "ready": true,
+        "shard": 0,
+        "source": "feed-3",
+        "blockers": [],
+        "connected": true,
+        "link_fresh": true,
+        "pong_age_s": 2.866,
+        "seen_assets": 2,
+        "data_suspect": false,
+        "envelope_age_s": 0.004,
+        "envelope_fresh": true,
+        "missing_assets": [],
+        "received_frames": 28984,
+        "required_assets": 2,
+        "subscribe_initial": false,
+        "queue_wait_seconds": 0
+      }
+    ],
+    "ready_count": 1,
+    "spare_count": 1,
+    "liveness_backup": true
+  },
+  "up_down:ETH:15m": {
+    "feed": "up_down:ETH:15m",
+    "group": "up_down:ETH:15m",
+    "spares": [
+      {
+        "ready": true,
+        "shard": 0,
+        "source": "feed-20003",
+        "blockers": [],
+        "connected": true,
+        "link_fresh": true,
+        "pong_age_s": 3.112,
+        "seen_assets": 2,
+        "data_suspect": false,
+        "envelope_age_s": 0.406,
+        "envelope_fresh": true,
+        "missing_assets": [],
+        "received_frames": 17475,
+        "required_asse

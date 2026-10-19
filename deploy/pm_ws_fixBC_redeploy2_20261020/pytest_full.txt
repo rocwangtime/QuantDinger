@@ -1,0 +1,133 @@
+........................................................................ [  1%]
+........................................................................ [  2%]
+........................................................................ [  4%]
+........................................................................ [  5%]
+........................................................................ [  7%]
+........................................................................ [  8%]
+........................................................................ [ 10%]
+........................................................................ [ 11%]
+........................................................................ [ 13%]
+........................................................................ [ 14%]
+........................................................................ [ 16%]
+........................................................................ [ 17%]
+........................................................................ [ 19%]
+........................................................................ [ 20%]
+........................................................................ [ 22%]
+........................................................................ [ 23%]
+........................................................................ [ 24%]
+........................................................................ [ 26%]
+........................................................................ [ 27%]
+........................................................................ [ 29%]
+........................................................................ [ 30%]
+................................................ssssssssssss............ [ 32%]
+.................................................s...................... [ 33%]
+........................................................................ [ 35%]
+........................................................................ [ 36%]
+........................................................................ [ 38%]
+....................................sssss............................... [ 39%]
+........................................................................ [ 41%]
+........................................................................ [ 42%]
+........................................................................ [ 44%]
+........................................................................ [ 45%]
+........................................................................ [ 47%]
+........................................................................ [ 48%]
+........................................................................ [ 49%]
+........................................................................ [ 51%]
+........................................................................ [ 52%]
+........................................................................ [ 54%]
+........................................................................ [ 55%]
+........................................................................ [ 57%]
+........................................................................ [ 58%]
+........................................................................ [ 60%]
+........................................................................ [ 61%]
+........................................................................ [ 63%]
+........................................................................ [ 64%]
+........................................................................ [ 66%]
+........................................................................ [ 67%]
+........................................................................ [ 69%]
+........................................................................ [ 70%]
+.............ssssss..................................................... [ 72%]
+........................................................................ [ 73%]
+........................................................................ [ 74%]
+........................................................................ [ 76%]
+........................................................................ [ 77%]
+........................................................................ [ 79%]
+........................................................................ [ 80%]
+........................................................................ [ 82%]
+........................................................................ [ 83%]
+........................................................................ [ 85%]
+........................................................................ [ 86%]
+........................................................................ [ 88%]
+........................................................................ [ 89%]
+........................................................................ [ 91%]
+........................................................................ [ 92%]
+........................................................................ [ 94%]
+........................................................................ [ 95%]
+........................................................................ [ 96%]
+........................................................................ [ 98%]
+........................................................................ [ 99%]
+....                                                                     [100%]
+=============================== warnings summary ===============================
+tests/integration/test_polymarket_jobs.py: 14 warnings
+  /tmp/fixG/w81/backend_api_python/tests/../app/utils/agent_jobs.py:101: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    created_at = datetime.utcnow()
+
+tests/integration/test_polymarket_jobs.py::test_evidence_is_durable_hash_verified_and_omitted_from_history
+  /tmp/fixG/w81/backend_api_python/tests/../app/utils/agent_jobs.py:245: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = datetime.utcnow()
+
+tests/test_agent_backtest_billing.py::test_celery_delivery_does_not_repeat_claimed_or_terminal_job[running]
+tests/test_agent_backtest_billing.py::test_celery_worker_uses_atomic_terminal_helpers[False]
+tests/test_agent_backtest_billing.py::test_celery_worker_uses_atomic_terminal_helpers[True]
+tests/test_strategy_evolution.py::test_celery_persists_structured_evolution_failure
+  /tmp/fixG/w81/backend_api_python/tests/../app/tasks/agent_jobs.py:64: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    if not agent_jobs._set_status(job_id, "running", started_at=datetime.utcnow()):
+
+tests/test_agent_scoring.py::test_horizons_skip_weekend_and_hk_holiday
+tests/test_agent_scoring.py::test_horizons_skip_weekend_and_hk_holiday
+  /tmp/pm-round6-venv/lib/python3.12/site-packages/exchange_calendars/exchange_calendar_xhkg.py:363: DeprecationWarning: The 'generic' unit for NumPy timedelta is deprecated, and will raise an error in the future. This includes implicit conversion of bare integers (e.g. `+ 1`). Please use a specific unit instead.
+    easter_monday = EasterMonday.dates(years[0], years[-1] + 1)
+
+tests/test_crypto_kline_exchange_matrix.py::test_crypto_kline_is_pure_ohlcv_and_preserves_price_precision
+  /tmp/fixG/w81/backend_api_python/tests/../app/data_sources/crypto.py:730: DeprecationWarning: datetime.datetime.utcfromtimestamp() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.fromtimestamp(timestamp, datetime.UTC).
+    first_ts = _dt.utcfromtimestamp(klines[0]['time']).isoformat()
+
+tests/test_crypto_kline_exchange_matrix.py::test_crypto_kline_is_pure_ohlcv_and_preserves_price_precision
+  /tmp/fixG/w81/backend_api_python/tests/../app/data_sources/crypto.py:731: DeprecationWarning: datetime.datetime.utcfromtimestamp() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.fromtimestamp(timestamp, datetime.UTC).
+    last_ts = _dt.utcfromtimestamp(klines[-1]['time']).isoformat()
+
+tests/test_indicator_signal_alerts.py: 28 warnings
+  /tmp/fixG/w81/backend_api_python/tests/../app/services/indicator_signal_alerts.py:763: DeprecationWarning: datetime.datetime.utcfromtimestamp() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.fromtimestamp(timestamp, datetime.UTC).
+    return datetime.utcfromtimestamp(value).isoformat()
+
+tests/test_polymarket_ws_replay.py::test_measured_cold_start_reaches_physical_peak_bound
+  /tmp/pm-round6-venv/lib/python3.12/site-packages/_pytest/threadexception.py:58: PytestUnhandledThreadExceptionWarning: Exception in thread polymarket-book-fallback
+  
+  Traceback (most recent call last):
+    File "/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/threading.py", line 1075, in _bootstrap_inner
+      self.run()
+    File "/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/threading.py", line 1012, in run
+      self._target(*self._args, **self._kwargs)
+    File "/tmp/fixG/w81/backend_api_python/tests/../app/services/polymarket/observer.py", line 1662, in fire
+      time.sleep(delay)
+      ^^^^^^^^^^
+  AttributeError: 'types.SimpleNamespace' object has no attribute 'sleep'
+  
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+    warnings.warn(pytest.PytestUnhandledThreadExceptionWarning(msg))
+
+tests/test_strategy_v2_bar_phase_ordering.py::test_opening_callback_entry_is_protected_on_its_entry_bar[101-90-stop_loss_pct=0.05-stop_loss-95-before_trading_start-1d]
+tests/test_strategy_v2_bar_phase_ordering.py::test_opening_callback_entry_is_protected_on_its_entry_bar[101-90-stop_loss_pct=0.05-stop_loss-95-rebalance-1d]
+tests/test_strategy_v2_bar_phase_ordering.py::test_opening_callback_entry_is_protected_on_its_entry_bar[101-90-stop_loss_pct=0.05-stop_loss-95-on_rebalance-1d]
+tests/test_strategy_v2_bar_phase_ordering.py::test_opening_callback_entry_is_protected_on_its_entry_bar[110-99-take_profit_pct=0.05-take_profit-105-before_trading_start-1d]
+tests/test_strategy_v2_bar_phase_ordering.py::test_opening_callback_entry_is_protected_on_its_entry_bar[110-99-take_profit_pct=0.05-take_profit-105-rebalance-1d]
+tests/test_strategy_v2_bar_phase_ordering.py::test_opening_callback_entry_is_protected_on_its_entry_bar[110-99-take_profit_pct=0.05-take_profit-105-on_rebalance-1d]
+tests/test_strategy_v2_bar_phase_ordering.py::test_intrabar_stop_is_visible_at_close_but_cannot_trigger_same_open_reentry
+tests/test_strategy_v2_bar_phase_ordering.py::test_close_callback_can_consume_stop_reason_and_queues_for_next_bar
+  /tmp/fixG/w81/backend_api_python/tests/test_strategy_v2_bar_phase_ordering.py:14: Pandas4Warning: 'd' is deprecated and will be removed in a future version, please use 'D' instead.
+    index=pd.date_range("2026-01-01", periods=len(rows), freq=frequency),
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+4876 passed, 26 skipped, 60 warnings in 336.12s (0:05:36)
+EXIT=0

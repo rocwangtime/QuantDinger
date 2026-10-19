@@ -1,0 +1,26 @@
+tokens 2 ['106858611781825213317820900109434732425123339868101819159829901670826391555603', '86112148162164490834334866493286644793626764153004592944409726692945145657132']
+captured 8
+frame 0 keys ['market', 'price_changes', 'timestamp', 'event_type'] n_pc 2
+  row0 keys ['asset_id', 'price', 'size', 'side', 'hash', 'best_bid', 'best_ask']
+  tips 2 assets ['106858611781825213317820900109434732425123339868101819159829901670826391555603', '86112148162164490834334866493286644793626764153004592944409726692945145657132'] stamps_ok True stamps ['1792429527310', '1792429527310']
+  missing_required []
+frame 1 keys ['market', 'price_changes', 'timestamp', 'event_type'] n_pc 2
+  row0 keys ['asset_id', 'price', 'size', 'side', 'hash', 'best_bid', 'best_ask']
+  tips 2 assets ['106858611781825213317820900109434732425123339868101819159829901670826391555603', '86112148162164490834334866493286644793626764153004592944409726692945145657132'] stamps_ok True stamps ['1792429527316', '1792429527316']
+  missing_required []
+frame 2 keys ['market', 'price_changes', 'timestamp', 'event_type'] n_pc 2
+  row0 keys ['asset_id', 'price', 'size', 'side', 'hash', 'best_bid', 'best_ask']
+  tips 2 assets ['86112148162164490834334866493286644793626764153004592944409726692945145657132', '106858611781825213317820900109434732425123339868101819159829901670826391555603'] stamps_ok True stamps ['1792429527316', '1792429527316']
+  missing_required []
+frame 3 keys ['market', 'price_changes', 'timestamp', 'event_type'] n_pc 2
+  row0 keys ['asset_id', 'price', 'size', 'side', 'hash', 'best_bid', 'best_ask']
+  tips 2 assets ['86112148162164490834334866493286644793626764153004592944409726692945145657132', '106858611781825213317820900109434732425123339868101819159829901670826391555603'] stamps_ok True stamps ['1792429527317', '1792429527317']
+  missing_required []
+frame 4 keys ['market', 'price_changes', 'timestamp', 'event_type'] n_pc 2
+  row0 keys ['asset_id', 'price', 'size', 'side', 'hash', 'best_bid', 'best_ask']
+  tips 2 assets ['106858611781825213317820900109434732425123339868101819159829901670826391555603', '86112148162164490834334866493286644793626764153004592944409726692945145657132'] stamps_ok True stamps ['1792429527318', '1792429527318']
+  missing_required []
+prod [('price_change', 'UP', '123', 'h1'), ('price_change', 'DN', '123', 'h2')]
+lab [('price_change', 'UP', '123', 'h1'), ('price_change', 'DN', '123', 'h2')]
+etype_mid [('price_change', 'UP', '999', 'h1'), ('price_change', 'DN', '999', 'h2')]
+one_asset [('price_change', 'UP', '1', 'h1')]
