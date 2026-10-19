@@ -175,6 +175,21 @@ def test_liveness_backup_promotes_and_holds_until_a_book():
     assert backup['need_book'] == {'an'}
 
 
+def test_liveness_books_count_as_snapshots_for_repair():
+    manager = observer.MarketConnections()
+    manager.liveness_backup = True
+    state = dict(redundant=True, assets=['ay', 'an'], liveness_assets={'ay'}, shadow=type('S', (), {'books': {}})())
+    assert manager.redundant_seen(state) == {'ay'}
+    inbox = _Inbox()
+    state.update(connected=True, worker=threading.current_thread(), inbox=inbox,
+                 subscribe_pending=[], recover_assets={'ay', 'an'})
+    manager.states[0] = dict(connected=True, assets=['ay', 'an'], inbox=_Inbox())
+    raw = json.dumps([dict(event_type='book', asset_id='ay', timestamp=5, hash='hay', bids=[], asks=[])])
+    manager.liveness_receive(0, state, raw, datetime.now(timezone.utc), inbox)
+    assert state['recover_assets'] == {'an'}
+    assert manager.redundant_seen(state) == {'ay'}
+
+
 def test_dropped_deltas_are_fenced_until_a_book():
     feeds = GroupFeeds(replay=True)
     feeds.note_drop('up_down:BTC:5m', ['ay', ''], 4)

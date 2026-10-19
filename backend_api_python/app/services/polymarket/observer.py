@@ -1271,7 +1271,7 @@ class MarketConnections:
         self.primary_first_lag_seconds = 0.05
         # Feed processes set this. Backups then check liveness and hash only.
         self.liveness_backup = False
-        self.stage_lock = threading.Lock()
+        self.stage_lock = RLock()
         self.stage_cpu = dict(primary_parse=0.0, primary_apply=0.0, backup_parse=0.0, backup_apply=0.0)
 
     def backup_items(self):
@@ -1301,10 +1301,17 @@ class MarketConnections:
         except Exception:
             return False
 
+    def redundant_seen(self, state):
+        """Assets whose backup book is current enough to skip a snapshot repair."""
+        if self.liveness_backup:
+            return set(state.get('liveness_assets') or ())
+        shadow = state.get('shadow')
+        return set(shadow.books.keys()) if shadow is not None else set()
+
     def _charge(self, name, started):
         if started is None:
             return
-        spent = time.process_time() - started
+        spent = process_time() - started
         with self.stage_lock:
             self.stage_cpu[name] = self.stage_cpu.get(name, 0.0) + spent
 
@@ -1320,6 +1327,9 @@ class MarketConnections:
             if kind == 'book' and stamp and digest:
                 state.setdefault('liveness_assets', set()).add(asset)
                 state.setdefault('liveness_hash', {})[asset] = digest
+                pending = state.get('recover_assets')
+                if pending:
+                    pending.discard(asset)
         primary = self.states.get(index)
         required = set(primary.get('assets') or []) if primary is not None else set(state.get('required_assets') or ())
         healthy = (state.get('connected') and bool(required) and required <= set(state.get('liveness_assets') or ())
@@ -2796,17 +2806,17 @@ class MarketConnections:
                     parsing_at = time.monotonic()
                     standby = bool(state.get('standby'))
                     if self.liveness_backup and state.get('redundant'):
-                        parse_cpu = time.process_time()
+                        parse_cpu = process_time()
                         self.liveness_receive(index, state, raw, received_at, inbox)
                         self._charge('backup_parse', parse_cpu)
                         inbox.processing_received_at = None
                         inbox.processing_charged_bytes = 0
                         continue
-                    parse_cpu = time.process_time()
+                    parse_cpu = process_time()
                     event = self.parsed_frames.parse(raw)
                     self._charge('backup_parse' if standby else 'primary_parse', parse_cpu)
                     inbox.parse_max_seconds = max(inbox.parse_max_seconds, time.monotonic() - parsing_at)
-                    apply_cpu = time.process_time()
+                    apply_cpu = process_time()
                     if standby:
                         self.shadow_receive(index, state, event, received_at, inbox, epoch)
                         self._charge('backup_apply', apply_cpu)
@@ -3157,8 +3167,10 @@ class MarketConnections:
                     state['socket'].send(json.dumps(dict(operation='unsubscribe', assets_ids=sorted(state['unsubscribe_pending']))))
                     state.pop('unsubscribe_pending')
                 if state['connected'] and now >= state.get('snapshot_retry_at', now + 10):
-                    missing = (set(state['assets']) - state['shadow'].books.keys() - set(state.get('subscribe_pending', [])) if state.get('redundant')
-                               else set(state['assets']) & self.continuity.pending_assets())
+                    if state.get('redundant'):
+                        missing = set(state['assets']) - self.redundant_seen(state) - set(state.get('subscribe_pending', []))
+                    else:
+                        missing = set(state['assets']) & self.continuity.pending_assets()
                     state.setdefault('recover_assets', set()).update(missing)
                     if state.get('redundant'):
                         state.setdefault('_rest_missing_assets', set()).update(missing)
@@ -3172,14 +3184,21 @@ class MarketConnections:
                         # Never erase a usable ladder to start an HTTP repair.
                         automatic = state.pop('_rest_missing_assets', set()) & recover
                         if not state['inbox'].delivery_gap:
-                            recover -= automatic & state['shadow'].books.keys()
+                            recover -= automatic & self.redundant_seen(state)
                         if recover:
                             # Explicit gap/continuity repairs remain mandatory.
                             # Only obsolete automatic missing-book work cancels.
                             state['ready'] = False
-                            for asset in recover:
-                                state['shadow'].books.pop(asset, None)
-                                state['shadow'].recorder.metadata.pop(asset, None)
+                            if self.liveness_backup:
+                                live = state.get('liveness_assets') or set()
+                                hashes = state.get('liveness_hash') or {}
+                                for asset in recover:
+                                    live.discard(asset)
+                                    hashes.pop(asset, None)
+                            else:
+                                for asset in recover:
+                                    state['shadow'].books.pop(asset, None)
+                                    state['shadow'].recorder.metadata.pop(asset, None)
                             self.update_hot_coverage(now)
                             if not self.request_snapshot(index, state, recover):
                                 state.setdefault('recover_assets', set()).update(recover)
