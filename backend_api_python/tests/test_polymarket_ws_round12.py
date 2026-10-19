@@ -110,7 +110,7 @@ def test_drop_reasons_distinguish_overflow_recovery_and_close():
     assert not inbox.put('invalid')
     inbox.discard('shutdown_discarded')
     assert inbox.drop_reasons == dict(overflow=1, resync_rejected=1, invalid_rejected=1,
-                                     resync_discarded=4, shutdown_discarded=1)
+                                     resync_discarded=4, shutdown_discarded=1, superseded=0)
     assert inbox.dropped == sum(inbox.drop_reasons.values()) == 8
     assert inbox.discard_max_seconds >= 0
 

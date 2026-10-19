@@ -11,6 +11,7 @@ import argparse
 import hashlib
 import json
 import logging
+import os
 import threading
 import time
 from collections import deque
@@ -24,7 +25,7 @@ from app.services.polymarket.account_history import BookHistory
 from app.services.polymarket.ws_transport import TransportDiagnostics
 
 
-def run(seconds=15, rate=1896, levels=140, cold_pairs=19, stage_profile=False):
+def run(seconds=15, rate=1896, levels=140, cold_pairs=19, stage_profile=False, backup_service_ms=0):
     sockets, http = [], []
     stages = {}
     stage_lock = threading.Lock()
@@ -109,6 +110,12 @@ def run(seconds=15, rate=1896, levels=140, cold_pairs=19, stage_profile=False):
         owners = [m.balancer.assignment[market['yesAssetId']] for market in markets]
         primary = [m.states[i]['socket'] for i in owners]
         backups = [m.backups[i]['socket'] for i in owners]
+        original_receive = m.redundant_receive
+        def delayed_receive(*args, **kwargs):
+            if backup_service_ms:
+                time.sleep(backup_service_ms / 1000)
+            return original_receive(*args, **kwargs)
+        stack.enter_context(patch.object(m, 'redundant_receive', delayed_receive))
         # Generation excluded from the measurement; production-sized 76-digit IDs
         # are not required for book work but payload bytes are reported explicitly.
         raws = []
@@ -131,6 +138,9 @@ def run(seconds=15, rate=1896, levels=140, cold_pairs=19, stage_profile=False):
         clock_drift = 0
         published_before = p.messages
         peak = 0
+        memory_samples = []
+        per_backup = {i: [0, 0] for i in m.backups}
+        coverage_before = m.update_hot_coverage(time.monotonic())
         began, cpu = time.monotonic(), time.process_time()
         wall_began = time.time()
         try:
@@ -155,17 +165,35 @@ def run(seconds=15, rate=1896, levels=140, cold_pairs=19, stage_profile=False):
                     peak = max(peak, candidate['inbox'].pending_wait_seconds())
                     ready += m.backup_ready(candidate)
                     samples += 1
+                for i, candidate in m.backups.items():
+                    per_backup[i][0] += int(m.backup_ready(candidate))
+                    per_backup[i][1] += 1
+                if burst % 20 == 0:
+                    with open('/proc/self/statm') as statm:
+                        rss = int(statm.read().split()[1]) * os.sysconf('SC_PAGE_SIZE')
+                    memory_samples.append(dict(at=time.monotonic()-began, rss=rss,
+                                               **m.memory_metrics(time.monotonic())))
             while any(s['inbox'].queue.qsize() or s['inbox'].processing_received_at
                       for s in list(m.states.values()) + list(m.backups.values())):
                 if time.monotonic()-began > seconds+10:
                     raise RuntimeError('workers did not drain')
                 time.sleep(.01)
             used = time.process_time()-cpu
+            coverage_after = m.update_hot_coverage(time.monotonic())
+            time_ready = {key: (row['ready_seconds']-coverage_before[key]['ready_seconds']) /
+                max(1e-9, row['observed_seconds']-coverage_before[key]['observed_seconds'])
+                for key, row in coverage_after.items() if row['active']}
             result = dict(seconds=time.monotonic()-began, frames=frames, bytes=total_bytes,
                 cpu_s=used, ms_per_wire_message=used/frames*1000, peak_backup_queue_ms=peak*1000,
                 published=p.messages-published_before,
                 ms_per_published_message=used/max(1, p.messages-published_before)*1000,
                 ready_ratio=ready/samples, resyncs=sum(s['inbox'].resyncs for s in m.backups.values()),
+                backup_service_ms=backup_service_ms,
+                ready_by_shard={i: r/n for i, (r, n) in per_backup.items()},
+                time_ready_by_group=time_ready,
+                compactions=sum(getattr(s['inbox'], 'compactions', 0) for s in m.backups.values()),
+                memory_samples=memory_samples,
+                backup_queue_byte_limits={i: s['inbox'].queue.byte_limit for i, s in m.backups.items()},
                 http_attempts=len(http), history=p.paper_account.history.metrics(),
                 clock_drift_s=clock_drift,
                 drops={i: dict(s['inbox'].drop_reasons) for i, s in m.backups.items()},
@@ -179,7 +207,10 @@ def run(seconds=15, rate=1896, levels=140, cold_pairs=19, stage_profile=False):
         result['expected_book_sha256'] = hashlib.sha256(json.dumps(expected, sort_keys=True).encode()).hexdigest()
         result['valid'] = (result['published'] == len(raws)
             and result['final_book_sha256'] == result['expected_book_sha256']
-            and result['resyncs'] == 0)
+            and result['resyncs'] == 0
+            and min(result['ready_by_shard'].values()) >= .9
+            and min(result['time_ready_by_group'].values()) >= .9
+            and result['peak_backup_queue_ms'] <= 2000)
         if stage_profile:
             result['stage_profile_inclusive'] = stages
         return result
@@ -192,10 +223,12 @@ if __name__ == '__main__':
     parser.add_argument('--levels', type=int, default=140)
     parser.add_argument('--cold-pairs', type=int, default=19)
     parser.add_argument('--stage-profile', action='store_true')
+    parser.add_argument('--backup-service-ms', type=float, default=0,
+                        help='extra per-frame backup service time; identical pressure on both trees')
     args = parser.parse_args()
     logging.getLogger('app.services.polymarket').setLevel(logging.ERROR)
-    if args.seconds < 1 or args.rate < 1 or not 2 <= args.levels <= 600 or args.cold_pairs < 0:
+    if args.seconds < 1 or args.rate < 1 or not 2 <= args.levels <= 600 or args.cold_pairs < 0 or args.backup_service_ms < 0:
         parser.error('seconds/rate must be positive, levels 2..600, cold-pairs nonnegative')
-    result = run(args.seconds, args.rate, args.levels, args.cold_pairs, args.stage_profile)
+    result = run(args.seconds, args.rate, args.levels, args.cold_pairs, args.stage_profile, args.backup_service_ms)
     print(json.dumps(result))
     raise SystemExit(0 if result['valid'] else 1)

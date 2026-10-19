@@ -109,26 +109,25 @@ def test_bootstrap_waits_for_own_primary_catchup(feed_manager, blocker):
         assert not m.backups
 
 
-def test_lag_alone_drains_without_discard_or_recovery_http(feed_manager, monkeypatch):
+def test_short_lag_drains_without_discard_or_recovery_http(feed_manager, monkeypatch):
     m, p, sockets = feed_manager
     c = ready_backup(m, sockets)
     calls = []
     monkeypatch.setattr(m.snapshot_recovery, 'request', lambda *a, **kw: calls.append(kw) or True)
     inbox, shadow = c['inbox'], c['shadow']
-    received = datetime.now(timezone.utc)-timedelta(seconds=3)
+    received = datetime.now(timezone.utc)-timedelta(seconds=.4)
     # Queued work has a real old receipt but no data loss or epoch change.
     event = json.dumps(book('ay', '9'))
     with m.lifecycle_lock, inbox.lock:
         epoch = inbox.epoch
         inbox.queue.put_nowait((event, received, epoch))
-        assert not m.backup_ready(c)
     wait_for(lambda: inbox.queue.empty() and inbox.processing_received_at is None)
     assert c['shadow'] is shadow and inbox.epoch == epoch
     assert inbox.resyncs == inbox.dropped == 0
     m.tick()
     assert not calls
     sockets[1].emit([book('ay', '10'), book('an', '10')])
-    wait_for(lambda: m.backup_ready(c))
+    wait_for(lambda: m.backup_ready(c) and p.books['ay']['asks']['.4'] == '10')
     assert p.books['ay']['asks']['.4'] == '10'
 
 

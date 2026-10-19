@@ -8,7 +8,7 @@ import time
 from time import process_time
 from contextlib import contextmanager
 from collections import deque
-from itertools import groupby
+from itertools import groupby, islice
 import random
 from queue import Queue, Full, Empty
 from threading import RLock, Event
@@ -1016,11 +1016,13 @@ class ReceiveQueue:
     """Elastic bounded FIFO; a gap requests snapshots on the existing socket."""
     def __init__(self, maximum, ceiling=None):
         self.queue = WireQueue(maximum, int(ws_setting('RECEIVE_QUEUE_BYTES', 16 * 1024 * 1024, 1024)))
+        self.primary_byte_limit = self.queue.byte_limit
         self.ceiling = max(maximum, ceiling or maximum)
         self.lock = RLock()
         self.resync = Event()
         self.epoch = 0
         self.resyncs = 0
+        self.compactions = 0
         self.delivery_gap = False
         self.lag_seconds = 0
         self.lock_wait_seconds = 0
@@ -1029,7 +1031,7 @@ class ReceiveQueue:
         self.processing_charged_bytes = 0
         self.dropped = 0
         self.drop_reasons = dict(overflow=0, resync_rejected=0, invalid_rejected=0,
-                                 resync_discarded=0, shutdown_discarded=0)
+                                 resync_discarded=0, shutdown_discarded=0, superseded=0)
         self.high_water = 0
         self.received_frames = self.received_bytes = 0
         self.callback_max_seconds = self.parse_max_seconds = 0
@@ -2079,7 +2081,7 @@ class MarketConnections:
                     queue_depth=inbox.queue.qsize(), queue_wait_seconds=inbox.pending_wait_seconds(),
                     queue_capacity=inbox.queue.maxsize, queue_high_water=inbox.high_water, drops=inbox.dropped,
                     queue_charged_bytes=inbox.queue.charged_bytes, queue_byte_limit=inbox.queue.byte_limit,
-                    drop_reasons=dict(inbox.drop_reasons), resyncs=inbox.resyncs,
+                    drop_reasons=dict(inbox.drop_reasons), resyncs=inbox.resyncs, compactions=inbox.compactions,
                     receive_bytes_per_second=self.ingress_rate(state),
                     admission_pressure_reasons=self.subscriptions.pressure_reasons(state),
                     readiness_blockers=self.readiness_blockers(state),
@@ -2228,6 +2230,78 @@ class MarketConnections:
             row['target_backup_count'] = self.backup_target()
         return rows
 
+    def compact_backup(self, index, state, inbox):
+        """Replace an obsolete FIFO prefix only with complete independent WS books.
+
+        Decode a bounded recent tail outside shared locks. No primary books,
+        fabricated receipt times, subscriptions or HTTP requests are involved.
+        Trades in the removed prefix are alert-only historical evidence.
+        Called by this inbox's sole consumer, before popping its next frame.
+        """
+        if not state.get('standby') or not state.get('redundant'):
+            return False
+        with inbox.queue.mutex:
+            tail = list(reversed(list(islice(reversed(inbox.queue.queue), 256))))
+        now = datetime.now(timezone.utc)
+        anchors = {}
+        for item in reversed(tail):
+            raw, received, epoch = item
+            if (now - received).total_seconds() > .5 or epoch != inbox.epoch:
+                break
+            try:
+                event = self.parsed_frames.parse(raw)
+                for kind, payload in recording.events(event):
+                    asset = str(payload.get('asset_id') or payload.get('assetId') or '')
+                    at = recording.exchange_time(payload.get('timestamp'))
+                    if (kind == 'book' and asset in state['assets'] and at is not None
+                            and 'bids' in payload and 'asks' in payload):
+                        anchors.setdefault(asset, (item, at))
+            except (ValueError, TypeError, AttributeError, KeyError):
+                return False
+            if set(anchors) == set(state['assets']):
+                break
+        if not state['assets'] or set(anchors) != set(state['assets']):
+            return False
+        first = next(item for item in tail if any(row[0] is item for row in anchors.values()))
+        with self.lifecycle_lock, inbox.lock:
+            if (state.get('inbox') is not inbox or not state.get('standby') or state.get('retired')
+                    or inbox.invalid.is_set() or inbox.resync.is_set() or inbox.delivery_gap
+                    or set(anchors) != set(state['assets'])
+                    or not any(i == index and s is state for i, s in self.backup_items())):
+                return False
+            shadow = state['shadow']
+            with shadow.lock:
+                if any(at < shadow.merge.latest.get(asset, at) for asset, (_, at) in anchors.items()):
+                    return False
+            if (datetime.now(timezone.utc) - first[1]).total_seconds() > 1:
+                return False
+            self.update_hot_coverage(time.monotonic())
+            with inbox.queue.mutex:
+                if not any(item is first for item in inbox.queue.queue) or inbox.queue.queue[0] is first:
+                    return False
+                count = 0
+                while inbox.queue.queue[0] is not first:
+                    inbox.queue._get()
+                    count += 1
+                inbox.epoch += 1  # Fence HTTP work launched before compaction.
+                inbox.queue.queue = deque((raw, received, inbox.epoch)
+                    for raw, received, _ in inbox.queue.queue)
+                inbox.queue.not_full.notify_all()
+            inbox.compactions += 1
+            inbox.dropped += count
+            inbox.drop_reasons['superseded'] += count
+            inbox.queue_wait_seconds = inbox.lag_seconds = 0
+            state['shadow'] = ShadowBooks(state['assets'])
+            state['ready'] = False
+            self.update_hot_coverage(time.monotonic())
+            now = time.monotonic()
+            if now - state.get('compaction_alert_at', -float('inf')) >= 60:
+                state['compaction_alert_at'] = now
+                _LOG.warning('Polymarket WS backup history continuity uncertain shard=%s '
+                             'superseded_frames=%s compactions=%s scope=historical_alert_only',
+                             index, inbox.drop_reasons['superseded'], inbox.compactions)
+            return True
+
     def redundant_receive(self, index, state, event, received_at, inbox, epoch=None):
         # Building a private ladder must not hold every feed's publication lock.
         # ShadowBooks has its own short lock; release it before lifecycle entry.
@@ -2367,6 +2441,7 @@ class MarketConnections:
                     self.complete_recovery(index, state, 'backup')
                 state.update(standby=False, redundant=False, promoted_at=datetime.now(timezone.utc).isoformat(), rotate_failures=0, rotate_retry_at=0,
                              backup_started=True, backup_failures=0, backup_retry_at=0)
+                inbox.queue.byte_limit = inbox.primary_byte_limit
                 state['unsubscribe_pending'] = extra
                 state.pop('shadow')
                 # Fence the old generation before exposing its replacement.
@@ -2540,6 +2615,9 @@ class MarketConnections:
         state['attempts'] += 1
         inbox = ReceiveQueue(updown.setting('WS_RECEIVE_QUEUE_MAX', 2048, 1, 100000),
                              updown.setting('WS_RECEIVE_QUEUE_CEILING', 16384, 1, 100000))
+        if state.get('standby') and state.get('redundant'):
+            # Bound raw retention independently of decoded/history caches.
+            inbox.queue.byte_limit = min(inbox.queue.byte_limit, 2 * 1024 * 1024)
         state['receive_drops'] = state.get('receive_drops', 0) + (state['inbox'].dropped if state.get('inbox') else 0)
         state['inbox'] = inbox
         inbox.activated = {a: datetime.max.replace(tzinfo=timezone.utc) for a in state['assets']}
@@ -2575,9 +2653,15 @@ class MarketConnections:
 
         def process_frames():
             while not self.closed and state.get('inbox') is inbox and not inbox.invalid.is_set():
-                # Queue age is not missing data. Drain it in order; readiness
-                # still checks queue age and exchange watermarks. Only actual
-                # loss/epoch invalidation may discard frames and demand REST.
+                if state.get('standby') and state.get('redundant') and not inbox.resync.is_set():
+                    age = inbox.pending_wait_seconds()
+                    if age > .25 or inbox.queue.charged_bytes > 1024 * 1024:
+                        compacted = self.compact_backup(index, state, inbox)
+                        if not compacted and age > 1.5:
+                            with inbox.lock:
+                                inbox.epoch += 1
+                                inbox.delivery_gap = True
+                                inbox.resync.set()
                 if inbox.resync.is_set():
                     if state.get('standby'):
                         if not state.get('redundant'):
@@ -3126,7 +3210,7 @@ class MarketConnections:
                 i: dict(**self.connection_role(s), depth=s['inbox'].queue.qsize(), drops=s.get('receive_drops', 0) + s['inbox'].dropped,
                         high_water=s['inbox'].high_water, capacity=s['inbox'].queue.maxsize,
                         charged_bytes=s['inbox'].queue.charged_bytes, byte_limit=s['inbox'].queue.byte_limit,
-                        resyncs=s['inbox'].resyncs, lag_seconds=s['inbox'].lag_seconds,
+                        resyncs=s['inbox'].resyncs, compactions=s['inbox'].compactions, lag_seconds=s['inbox'].lag_seconds,
                         drop_reasons=dict(s['inbox'].drop_reasons),
                         queue_wait_seconds=s['inbox'].queue_wait_seconds,
                         lock_wait_seconds=s['inbox'].lock_wait_seconds,
@@ -3155,8 +3239,8 @@ class MarketConnections:
                           ws_takeover_gap_scope='failed_source_receipt_to_recovery; detection_to_takeover_ms_is_control_time',
                           ws_acceptance_gap_scope='merged_gap_ms; physical_source_silence_and_historical_trades_are_alert_only',
                           ws_pong_timeout_seconds=22,
-                          ws_backup_max_lag_seconds=ws_setting('BACKUP_MAX_LAG_SECONDS', 2, 1),
-                          ws_backup_queue_lag_action='drain_in_order; resync_only_on_loss_or_epoch_change',
+                          ws_backup_max_lag_seconds=1.5,
+                          ws_backup_queue_lag_action='fresh_ws_snapshot_compaction; resync_above_1.5s; backup_raw_cap_2MiB',
                           ws_pressure_scope='physical_connection_and_owned_group',
                           ws_rest_recovery=self.snapshot_recovery.metrics(),
                           ws_reserves={i: self.backup_metrics(i, c, now) for i, c in self.reserves.items()},
