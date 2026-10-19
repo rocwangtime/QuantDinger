@@ -6,7 +6,7 @@ import socket
 import sys
 import threading
 import time
-from time import process_time
+from time import process_time, thread_time
 from contextlib import contextmanager
 from collections import deque
 from itertools import groupby
@@ -1405,10 +1405,12 @@ class MarketConnections:
     def _stage_sampled(self):
         """True for one frame in STAGE_SAMPLE_EVERY.
 
-        process_time() is a real syscall (CLOCK_PROCESS_CPUTIME_ID). Two per
-        frame were ~11% of a hot book thread in the 2026-10-20 py-spy profile.
-        Sampled frames are charged STAGE_SAMPLE_EVERY times, so stage_cpu
-        keeps its meaning (CPU seconds by stage) as an unbiased estimate.
+        A CPU clock read is a real syscall. Two per frame were ~11% of a hot
+        book thread in the 2026-10-20 py-spy profile. Sampled frames are
+        charged STAGE_SAMPLE_EVERY times, so stage_cpu keeps its meaning (CPU
+        seconds by stage). The clock is thread_time(): a process clock also
+        counts the other threads that run while this frame waits for the GIL,
+        and a 1-in-64 sample multiplies that leak by 64.
         """
         self.stage_frames += 1
         return self.stage_frames % STAGE_SAMPLE_EVERY == 0
@@ -1416,7 +1418,7 @@ class MarketConnections:
     def _charge(self, name, started):
         if started is None:
             return
-        spent = (process_time() - started) * STAGE_SAMPLE_EVERY
+        spent = (thread_time() - started) * STAGE_SAMPLE_EVERY
         with self.stage_lock:
             self.stage_cpu[name] = self.stage_cpu.get(name, 0.0) + spent
 
@@ -3252,17 +3254,17 @@ class MarketConnections:
                     standby = bool(state.get('standby'))
                     sampled = self._stage_sampled()
                     if self.liveness_backup and state.get('redundant'):
-                        parse_cpu = process_time() if sampled else None
+                        parse_cpu = thread_time() if sampled else None
                         self.liveness_receive(index, state, raw, received_at, inbox)
                         self._charge('backup_parse', parse_cpu)
                         inbox.processing_received_at = None
                         inbox.processing_charged_bytes = 0
                         continue
-                    parse_cpu = process_time() if sampled else None
+                    parse_cpu = thread_time() if sampled else None
                     event = self.parsed_frames.parse(raw)
                     self._charge('backup_parse' if standby else 'primary_parse', parse_cpu)
                     inbox.parse_max_seconds = max(inbox.parse_max_seconds, time.monotonic() - parsing_at)
-                    apply_cpu = process_time() if sampled else None
+                    apply_cpu = thread_time() if sampled else None
                     if standby:
                         self.shadow_receive(index, state, event, received_at, inbox, epoch)
                         self._charge('backup_apply', apply_cpu)
