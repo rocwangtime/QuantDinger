@@ -775,17 +775,21 @@ class Pipeline:
                 if inbox and (inbox.invalid.is_set() or inbox.resync.is_set() or
                               (epoch is not None and epoch != inbox.epoch)):
                     return
+                # One wall-clock read per publication: queue lag, publish
+                # latency and last_message_at all describe this same moment.
+                published = datetime.now(timezone.utc)
                 if inbox:
-                    inbox.lag_seconds = (datetime.now(timezone.utc) - received).total_seconds()
+                    inbox.lag_seconds = (published - received).total_seconds()
                 event = recording.owned_events(event, owned)
                 changed = ws_apply_event(event, self.books)
-                self.recording.receive(event, changed, self.markets, self.asset_markets, received, owned)
+                self.recording.receive(event, changed, self.markets, self.asset_markets, received, owned,
+                                       published=published)
                 if self.paper_account:
                     self.paper_account.history.record(event, int(received.timestamp() * 1000))
                 self.dirty.update(self.asset_markets[a] for a in changed if a in self.asset_markets)
                 self.messages += 1
                 self.last_message = time.monotonic()
-                self.last_message_at = datetime.now(timezone.utc).isoformat()
+                self.last_message_at = published.isoformat()
         except (ValueError, TypeError, KeyError) as exc:
             with _LOCK:
                 STATUS["last_error"] = str(exc)[:160]
@@ -919,7 +923,11 @@ class Pipeline:
                 self.queue.condition.wait(interval)
 
     def metrics(self):
+        # Copy under the publication lock; sort/percentile work happens after
+        # release so a status read never stalls every primary worker.
         with self.lock:
+            view = self.recording.metrics_view(self.books)
+            groups = {a: balance_key(self.markets[m]) for a, m in self.asset_markets.items()}
             result = {'messages_received': self.messages,
                       'last_message_at': self.last_message_at,
                       'messages_per_second': self.messages / max(.001, time.monotonic() - self.started),
@@ -930,11 +938,11 @@ class Pipeline:
                           pending_records=len(self.recording.pending),
                           delivery_samples=len(self.recording.delivery_samples),
                           **(self.paper_account.history.metrics() if self.paper_account else dict(history_events=0))),
-                      'pair_rejections': dict(self.pair_rejections),
-                      **self.recording.metrics(self.books,
-                          {a: balance_key(self.markets[m]) for a, m in self.asset_markets.items()},
-                          activity_rates(STATUS.get('ws_group_rates', {})), ws_setting('HOT_GROUP_MSG_PER_S', 100, 0)),
-                      **self.references.metrics()}
+                      'pair_rejections': dict(self.pair_rejections)}
+        result.update(self.recording.metrics(view['books'], groups,
+                          activity_rates(STATUS.get('ws_group_rates', {})), ws_setting('HOT_GROUP_MSG_PER_S', 100, 0),
+                          view=view))
+        result.update(self.references.metrics())
         metrics = self.queue.snapshot()
         if self.inflight:
             metrics['writer_lag_seconds'] = max(metrics['writer_lag_seconds'], time.monotonic() - self.inflight[0][3])
@@ -1242,6 +1250,9 @@ class MarketConnections:
         self.cpu_at, self.cpu_seconds = time.monotonic(), process_time()
         self.tick_at = self.cpu_at
         self.tick_gap_max = 0
+        self.tick_gap_last = 0
+        self.status_at = -float('inf')
+        self.hot_coverage_rows = {}
         self.closed = False
         self.pong_checked_at = 0
         self.memory_at = 0
@@ -1662,7 +1673,7 @@ class MarketConnections:
         def supervise():
             while not self.supervisor_stop.wait(.2) and not _STOP.is_set():
                 try:
-                    self.tick()
+                    self.tick(status=False)
                 except Exception:
                     _LOG.exception('Polymarket WS supervisor failed')
         def sample():
@@ -2870,9 +2881,17 @@ class MarketConnections:
         state['worker'].start()
         state['thread'].start()
 
-    def tick(self):
+    # Status is observation, not control. The supervisor runs recovery every
+    # 0.2s; rebuilding the full STATUS that often held lifecycle_lock for the
+    # whole build (r17 root cause: ~6 builds/s). Explicit callers (market loop,
+    # tests) still rebuild every call; the supervisor only when it is stale.
+    STATUS_REFRESH_SECONDS = 1.0
+
+    def tick(self, status=True):
         with self.lifecycle_lock:
-            self._tick()
+            if self._tick() is not False and (
+                    status or time.monotonic() - self.status_at >= self.STATUS_REFRESH_SECONDS):
+                self.publish_status()
 
     def background_snapshot_tick(self, now):
         # Outage dispatch always precedes optional background work.
@@ -2913,14 +2932,15 @@ class MarketConnections:
                     break
 
     def _tick(self):
+        """Control only: recovery, rotation, rates. Returns False when skipped."""
         if self.closed or _STOP.is_set():
-            return
+            return False
         live = self.active_catalogue(self.markets)
         if {m['id'] for m in live} != {m['id'] for m in self.markets}:
             if _PIPELINE:
                 _PIPELINE.set_markets(live)
             self._sync(live)
-            return
+            return False
         now = time.monotonic()
         self.parsed_frames.prune(now)
         self.pong_timeout_tick(now)
@@ -3090,10 +3110,19 @@ class MarketConnections:
                     # workers lag. Never learn backlog as low ingress demand.
                     with balancer.lock:
                         balancer.ingress_byte_rates[next(iter(keys))] = inbox.byte_rate
+        # Zero-spare integration keeps its 0.2s supervisor resolution.
+        self.hot_coverage_rows = self.update_hot_coverage(time.monotonic())
+        self.tick_gap_last = tick_gap
+
+    def publish_status(self):
+        """Rebuild STATUS from the current control state (caller holds lifecycle_lock)."""
+        now = time.monotonic()
+        self.status_at = now
+        tick_gap = self.tick_gap_last
         cpu_now = process_time()
         cpu_cores = (cpu_now - self.cpu_seconds) / (now - self.cpu_at) if now > self.cpu_at else 0
         self.cpu_at, self.cpu_seconds = now, cpu_now
-        hot_coverage = self.update_hot_coverage(time.monotonic())
+        hot_coverage = self.hot_coverage_rows
         aux_memory = self.memory_metrics(now)
         with _LOCK:
             STATUS.setdefault('rebalance_count', 0)

@@ -53,10 +53,16 @@ env_set_quoted "$env_file" ADMIN_PASSWORD "$expected"
 [ "$(grep -c '^ADMIN_PASSWORD=' "$env_file")" -eq 1 ]
 """
 
+    # Hermetic environment: install.sh runs under `set -u` and derives its
+    # default install dir from $HOME, so a runner without HOME (or with a real
+    # one) must not change or be touched by this test.
+    home = tmp_path / "home"
+    home.mkdir()
     subprocess.run(
         [BASH, "-c", program, "bash", str(INSTALL_SCRIPT), str(env_file), password],
         check=True,
-        env={**os.environ, "QUANTDINGER_INSTALL_LIB_ONLY": "true"},
+        env={**os.environ, "QUANTDINGER_INSTALL_LIB_ONLY": "true", "HOME": str(home),
+             "QUANTDINGER_INSTALL_DIR": str(tmp_path / "install")},
     )
 
     assert dotenv_values(env_file)["ADMIN_PASSWORD"] == password

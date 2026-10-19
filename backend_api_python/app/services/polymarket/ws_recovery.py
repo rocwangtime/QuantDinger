@@ -21,7 +21,10 @@ class SnapshotRecovery:
         self.latencies = deque(maxlen=128)
         self.counts = {kind: Counter() for kind in ('recovery', 'warmup', 'pressure')}
         # Rolling hour at one-second resolution; fixed 3600 bucket bound.
+        # hour_totals is the running sum of every retained bucket: added on
+        # count, subtracted on expiry, so metrics() never re-sums the hour.
         self.hour = {}
+        self.hour_totals = Counter()
         self.background_starts = deque()
         self.background_active = 0
         self.last_http_at = -float('inf')
@@ -30,11 +33,17 @@ class SnapshotRecovery:
         self.counts[kind][field] += amount
         bucket = self.hour.setdefault(int(now), Counter())
         bucket[kind, field] += amount
+        self.hour_totals[kind, field] += amount
         self.expire_hour(now)
 
     def expire_hour(self, now):
         while self.hour and next(iter(self.hour)) <= int(now) - 3600:
-            del self.hour[next(iter(self.hour))]
+            for key, amount in self.hour.pop(next(iter(self.hour))).items():
+                left = self.hour_totals[key] - amount
+                if left:
+                    self.hour_totals[key] = left
+                else:
+                    del self.hour_totals[key]
 
     def prepare(self, state, assets, parallel=False):
         """Prepare current token bodies before a fault; never cache old quotes."""
@@ -189,7 +198,7 @@ class SnapshotRecovery:
     def metrics(self):
         with self.lock:
             self.expire_hour(time.monotonic())
-            hourly = sum(self.hour.values(), Counter())
+            hourly = self.hour_totals  # O(1); equals sum(self.hour.values(), Counter())
             fields = ('attempts', 'requests', 'completed', 'failures', 'throttled', 'deferred')
             categories = {kind: dict(total={f: counts[f] for f in fields},
                 rolling_hour={f: hourly[kind, f] for f in fields}) for kind, counts in self.counts.items()}
