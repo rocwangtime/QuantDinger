@@ -1,0 +1,25 @@
+2026-10-20 00:26:35.628209+08
+running=true
+mode=ws
+ws_connected=8
+mps=1612.9194159153235
+age_s=0.002882516011595726
+promotions=0
+close_1008=0
+close_1013=0
+ipc_dropped=0
+paper_running=true
+cpu_cores=1.7342046787600978
+rss=520265728
+---GROUPS---
+{"cold": {"hot": false, "pid": 62, "alive": true, "batches": 0, "dropped": 0, "restarts": 0, "backoff_s": 0.0, "restart_alert": false}, "up_down:BTC:5m": {"hot": true, "pid": 56, "alive": true, "batches": 0, "dropped": 0, "restarts": 0, "backoff_s": 0.0, "restart_alert": false}, "up_down:ETH:5m": {"hot": true, "pid": 60, "alive": true, "batches": 0, "dropped": 0, "restarts": 0, "backoff_s": 0.0, "restart_alert": false}, "up_down:BTC:15m": {"hot": true, "pid": 54, "alive": true, "batches": 0, "dropped": 0, "restarts": 0, "backoff_s": 0.0, "restart_alert": false}, "up_down:ETH:15m": {"hot": true, "pid": 58, "alive": true, "batches": 0, "dropped": 0, "restarts": 0, "backoff_s": 0.0, "restart_alert": false}}
+---HOT_COV---
+up_down:BTC:15m ready= False ready_backup_count= 0 ratio= None reasons= ['no_backup', 'disconnected', 'stale_envelope', 'ingress_pressure', 'missing_envelope']
+up_down:BTC:5m ready= False ready_backup_count= 0 ratio= None reasons= ['no_backup', 'disconnected', 'stale_envelope', 'ingress_pressure', 'missing_envelope', 'current_subscription']
+up_down:ETH:15m ready= False ready_backup_count= 0 ratio= None reasons= ['no_backup', 'disconnected', 'stale_envelope', 'ingress_pressure', 'missing_envelope']
+up_down:ETH:5m ready= False ready_backup_count= 0 ratio= None reasons= ['no_backup', 'disconnected', 'stale_envelope', 'ingress_pressure', 'missing_envelope']
+---HOT_FAIL---
+---SSL---
+0
+---PROMOTE_LOG---
+0
