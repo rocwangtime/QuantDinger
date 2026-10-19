@@ -1272,6 +1272,9 @@ def book_fallback_repeat_seconds():
 
 # A long REST miss must not flush an unbounded burst into the primary queue.
 HELD_CHANGES_MAX = 256
+# A liveness backup is healthy while envelopes are still arriving. This is
+# shorter than the 22s PONG timeout and longer than a quiet 5m print gap.
+LIVENESS_ENVELOPE_SECONDS = 15
 
 
 class _LivenessShadow:
@@ -1395,31 +1398,79 @@ class MarketConnections:
         with self.stage_lock:
             self.stage_cpu[name] = self.stage_cpu.get(name, 0.0) + spent
 
+    def _liveness_required(self, index, state):
+        primary = self.states.get(index) if index is not None else None
+        if primary is not None and primary is not state:
+            return {str(asset) for asset in (primary.get('assets') or [])}
+        return {str(asset) for asset in (state.get('required_assets') or state.get('assets') or [])}
+
+    def _liveness_envelope_fresh(self, state, now=None):
+        last = state.get('liveness_at')
+        if last is None:
+            return False
+        now = time.monotonic() if now is None else now
+        return now - last <= LIVENESS_ENVELOPE_SECONDS
+
+    def _queue_lag_breaks_backup(self, state, inbox):
+        """A deep backup queue rewinds a shadow ladder. Liveness has none.
+
+        Production sat at 1.5–1.9 cores with the spare queue past the 1s ready
+        limit and often past the 2s resync. That is when the spare has to stay
+        promotable. Overflow still raises resync through ReceiveQueue.put.
+        """
+        if self.liveness_backup and state.get('redundant'):
+            return False
+        return bool(state.get('redundant') and inbox and not inbox.resync.is_set()
+                    and inbox.pending_wait_seconds() > ws_setting('BACKUP_MAX_LAG_SECONDS', 2, 1))
+
+    def liveness_healthy(self, index, state):
+        """Ready without a shadow ladder.
+
+        Connection is up, the generation is intact (not invalid, resync, or a
+        delivery gap), the required assets are subscribed, and each has a
+        recent timestamped envelope. A book hash is kept when one arrives.
+        Queue depth, catch-up against the primary ladder, and "no full book
+        yet" are shadow-book gates. They stay off this path: production books
+        are sparse and a loaded backup queue is exactly when promotion is needed.
+        """
+        inbox = state.get('inbox')
+        if not state.get('redundant') or not state.get('connected') or state.get('retired') or state.get('data_suspect'):
+            return False
+        if not inbox or inbox.invalid.is_set() or inbox.resync.is_set() or inbox.delivery_gap:
+            return False
+        required = self._liveness_required(index, state)
+        if not required or state.get('subscribe_initial'):
+            return False
+        if required.intersection(state.get('subscribe_pending') or []):
+            return False
+        if not required <= {str(asset) for asset in (state.get('liveness_assets') or ())}:
+            return False
+        hashes = state.get('liveness_hash') or {}
+        if any(asset in hashes and not hashes[asset] for asset in required):
+            return False
+        return self._liveness_envelope_fresh(state)
+
     def liveness_receive(self, index, state, raw, received_at, inbox):
         """Backup path that does not rebuild a book. Failover resyncs from a snapshot."""
         from .ws_payloads import cheap_envelope
         if inbox.invalid.is_set() or state.get('retired'):
             return
-        assets = set(state.get('assets') or [])
+        assets = {str(asset) for asset in (state.get('assets') or [])}
+        now = time.monotonic()
         for kind, asset, stamp, digest in cheap_envelope(raw):
-            if asset not in assets:
+            if asset not in assets or not stamp:
                 continue
-            if kind == 'book' and stamp and digest:
-                state.setdefault('liveness_assets', set()).add(asset)
+            state.setdefault('liveness_assets', set()).add(asset)
+            state['liveness_at'] = now
+            if kind == 'book' and digest:
                 state.setdefault('liveness_hash', {})[asset] = digest
                 pending = state.get('recover_assets')
                 if pending:
                     pending.discard(asset)
-        primary = self.states.get(index)
-        required = set(primary.get('assets') or []) if primary is not None else set(state.get('required_assets') or ())
-        healthy = (state.get('connected') and bool(required) and required <= set(state.get('liveness_assets') or ())
-                   and not inbox.invalid.is_set() and not inbox.resync.is_set() and not inbox.delivery_gap
-                   and inbox.pending_wait_seconds() <= self.backup_queue_limit(state)
-                   and not required.intersection(state.get('subscribe_pending', []))
-                   and not required.intersection(state.get('recover_assets', [])))
+        healthy = self.liveness_healthy(index, state)
         if healthy != bool(state.get('ready')):
             state['ready'] = healthy
-            self.update_hot_coverage(time.monotonic())
+            self.update_hot_coverage(now)
         self._promote_liveness_backup(index, state)
 
     def _remember_books(self, state, event):
@@ -1655,13 +1706,10 @@ class MarketConnections:
         if candidate and candidate.get('primary_index') in self.states:
             required = set(self.states[candidate['primary_index']]['assets'])
         if self.liveness_backup and candidate and candidate.get('redundant'):
-            return bool(candidate.get('ready') and candidate.get('connected') and inbox and required
-                        and required <= set(candidate.get('liveness_assets') or ())
-                        and not inbox.invalid.is_set() and not inbox.resync.is_set()
-                        and not inbox.delivery_gap
-                        and inbox.pending_wait_seconds() <= self.backup_queue_limit(candidate)
-                        and not required.intersection(candidate.get('subscribe_pending', []))
-                        and not required.intersection(candidate.get('recover_assets', [])))
+            shard = candidate.get('primary_index')
+            if shard is None:
+                shard = next((i for i, item in self.backup_items() if item is candidate), None)
+            return self.liveness_healthy(shard, candidate)
         shadow = candidate.get('shadow') if candidate else None
         return bool(candidate and candidate.get('ready') and candidate.get('connected') and inbox
                     and required
@@ -1678,17 +1726,16 @@ class MarketConnections:
         inbox = state['inbox']
         required = set(self.states[state['primary_index']]['assets'])
         if self.liveness_backup and state.get('redundant'):
-            seen = set(state.get('liveness_assets') or ())
+            seen = {str(asset) for asset in (state.get('liveness_assets') or ())}
             return [name for name, blocked in (
                 ('disconnected', not state.get('connected')),
                 ('invalid', inbox.invalid.is_set()), ('resync', inbox.resync.is_set()),
                 ('delivery_gap', inbox.delivery_gap),
-                ('queue_wait', inbox.pending_wait_seconds() > self.backup_queue_limit(state)),
-                ('current_subscription', bool(required.intersection(state.get('subscribe_pending', [])))),
-                ('snapshot_repair', bool(required.intersection(state.get('recover_assets', [])))),
-                ('missing_snapshot', not required <= seen),
-                ('missing_timestamp', not required <= seen),
-                ('catchup', not state.get('ready'))) if blocked]
+                ('data_suspect', bool(state.get('data_suspect'))),
+                ('current_subscription', bool(state.get('subscribe_initial')
+                    or required.intersection(state.get('subscribe_pending') or []))),
+                ('missing_envelope', not required <= seen),
+                ('stale_envelope', not self._liveness_envelope_fresh(state))) if blocked]
         shadow = state['shadow']
         return [name for name, blocked in (
             ('disconnected', not state.get('connected')),
@@ -2559,7 +2606,10 @@ class MarketConnections:
                 health = candidate.get('data_health')
                 transport = getattr(getattr(candidate.get('socket'), 'transport', None), 'last', {})
                 if health and health.sample(now, transport):
-                    candidate.setdefault('recover_assets', set()).update(candidate['assets'])
+                    # A missing full book is not a liveness failure. Queueing
+                    # every asset for REST repair cleared ready on every tick.
+                    if not (self.liveness_backup and candidate.get('redundant')):
+                        candidate.setdefault('recover_assets', set()).update(candidate['assets'])
             first = self.backups.get(index)
             if (dialing or index in self.reserves or first and self.backup_target() < 2
                     or not old['connected'] or not old['assets']
@@ -2985,8 +3035,7 @@ class MarketConnections:
                 if self._primary_blocks_backup(index, state):
                     time.sleep(0.001)
                     continue
-                if (state.get('redundant') and not inbox.resync.is_set()
-                        and inbox.pending_wait_seconds() > ws_setting('BACKUP_MAX_LAG_SECONDS', 2, 1)):
+                if self._queue_lag_breaks_backup(state, inbox):
                     with inbox.lock:
                         inbox.epoch += 1
                         inbox.delivery_gap = True
@@ -3430,15 +3479,26 @@ class MarketConnections:
                     state['socket'].send(json.dumps(dict(operation='unsubscribe', assets_ids=sorted(state['unsubscribe_pending']))))
                     state.pop('unsubscribe_pending')
                 if state['connected'] and now >= state.get('snapshot_retry_at', now + 10):
-                    if state.get('redundant'):
-                        missing = set(state['assets']) - self.redundant_seen(state) - set(state.get('subscribe_pending', []))
+                    if state.get('redundant') and self.liveness_backup:
+                        # Do not wipe envelope health or force ready false while
+                        # waiting for a sparse WS book. Promotion resyncs by REST.
+                        state['snapshot_retry_at'] = now + 10
+                        state.pop('recover_assets', None)
+                        state.pop('_rest_missing_assets', None)
                     else:
-                        missing = set(state['assets']) & self.continuity.pending_assets()
-                    state.setdefault('recover_assets', set()).update(missing)
-                    if state.get('redundant'):
-                        state.setdefault('_rest_missing_assets', set()).update(missing)
-                    state['snapshot_retry_at'] = now + (.5 if state.get('redundant') else 10)
+                        if state.get('redundant'):
+                            missing = set(state['assets']) - self.redundant_seen(state) - set(state.get('subscribe_pending', []))
+                        else:
+                            missing = set(state['assets']) & self.continuity.pending_assets()
+                        state.setdefault('recover_assets', set()).update(missing)
+                        if state.get('redundant'):
+                            state.setdefault('_rest_missing_assets', set()).update(missing)
+                        state['snapshot_retry_at'] = now + (.5 if state.get('redundant') else 10)
                 recover = state.pop('recover_assets', set()) & set(state['assets'])
+                if self.liveness_backup and state.get('redundant'):
+                    # Queued snapshot repair is the shadow-book path. Applying
+                    # it here cleared ready on every 0.5s pass in production.
+                    recover = set()
                 if recover and state['connected'] and not state.get('subscribe_initial'):
                     if state.get('redundant'):
                         # Repair full snapshots without tearing down the live stream.

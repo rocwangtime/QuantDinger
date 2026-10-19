@@ -201,16 +201,20 @@ def cheap_envelope(raw):
     tips = []
     kind = asset = stamp = digest = None
 
-    def flush():
+    def flush(reset_stamp=False):
         nonlocal asset, stamp, digest
         if kind and asset:
             tips.append((kind, asset, stamp, digest))
-        asset = stamp = digest = None
+        asset = digest = None
+        # A price_change carries one timestamp for every nested asset. A new
+        # event_type starts a new object, so its own timestamp must win.
+        if reset_stamp:
+            stamp = None
 
     for match in _ENVELOPE_FIELD.finditer(raw):
         key, value = match.group(1), match.group(2)
         if key == 'event_type':
-            flush()
+            flush(reset_stamp=True)
             kind = value
         elif key == 'asset_id':
             if asset:
