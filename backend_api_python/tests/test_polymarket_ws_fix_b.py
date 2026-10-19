@@ -263,6 +263,200 @@ def test_rest_snapshot_releases_price_changes_within_1_5s(monkeypatch):
     assert any(row.get('operation') == 'subscribe' and row.get('assets_ids') == ['ay'] for row in sent)
 
 
+def _failover_backup(manager, pipeline, monkeypatch):
+    inbox = _Inbox()
+    inbox.epoch = 1
+    sent = []
+
+    class Sock:
+        def send(self, raw):
+            sent.append(json.loads(raw))
+
+    backup = dict(redundant=False, connected=True, standby=False, assets=['ay', 'an'],
+                  worker=threading.current_thread(), inbox=inbox, source='backup',
+                  subscribe_pending=[], recover_assets=[], lock=threading.RLock(), socket=Sock())
+    manager.states[0] = backup
+    manager.balancer.assignment = {'ay': 0, 'an': 0}
+    monkeypatch.setattr(observer, '_PIPELINE', pipeline)
+    pipeline.set_markets([dict(id='0', yesAssetId='ay', noAssetId='an')])
+    return backup, sent
+
+
+def test_rest_book_survives_a_change_inserted_before_the_write(monkeypatch):
+    """The old clear happened before the pipeline write. A newer price_change in
+    that window made FeedMerge drop the REST book after the hold was already gone.
+    """
+    from app.services.polymarket.ws_redundancy import FeedMerge
+    manager = observer.MarketConnections()
+    pipeline = observer.Pipeline()
+    pipeline.recording.enabled = False
+    backup, _sent = _failover_backup(manager, pipeline, monkeypatch)
+    stamp = int(datetime(2026, 10, 19, tzinfo=timezone.utc).timestamp() * 1000)
+    book_at = datetime.fromtimestamp(stamp / 1000, timezone.utc)
+    merge = FeedMerge({})
+    merge.latest['ay'] = merge.snapshots['ay'] = book_at
+    merge.latest['an'] = merge.snapshots['an'] = book_at
+    manager.merges[0] = merge
+    backup['book_marks'] = {
+        'ay': (book_at, 'hay', stamp),
+        'an': (book_at, 'han', stamp),
+    }
+    backup['need_book'] = {'ay', 'an'}
+    held = backup
+    real_filter = FeedMerge.filter
+
+    def filtering(self, event, source, owned, backup=False):
+        # Reader behavior at the old clear-point: need_book is already empty,
+        # so the newer change is applied before the REST book is judged.
+        if source == 'rest' and not held.get('need_book'):
+            newer = dict(event_type='price_change', timestamp=stamp + 50, price_changes=[
+                dict(asset_id='ay', price='.9', size='9', side='BUY', hash='race')])
+            real_filter(self, newer, 'primary', owned, False)
+        return real_filter(self, event, source, owned, backup)
+
+    monkeypatch.setattr(FeedMerge, 'filter', filtering)
+    book_holds = []
+    original = pipeline.receive
+
+    def receive(raw, owned=None, received_at=None, inbox=None, epoch=None):
+        items = raw if isinstance(raw, list) else [raw]
+        if any(isinstance(item, dict) and (item.get('event_type') or item.get('type')) == 'book' for item in items):
+            book_holds.append(set(backup.get('need_book') or ()))
+        return original(raw, owned, received_at, inbox, epoch)
+
+    pipeline.receive = receive
+
+    def publish_rest(state, assets, publish, warm=False, pressure=False):
+        publish([
+            dict(event_type='book', asset_id='ay', timestamp=stamp + 10, hash='rest-ay',
+                 bids=[dict(price='.4', size='7')], asks=[dict(price='.6', size='1')]),
+            dict(event_type='book', asset_id='an', timestamp=stamp + 10, hash='rest-an',
+                 bids=[dict(price='.4', size='7')], asks=[dict(price='.6', size='1')]),
+        ], datetime.now(timezone.utc))
+        return True
+
+    manager.snapshot_recovery.request = publish_rest
+    assert manager.request_snapshot(0, backup, ['ay', 'an']) is True
+    assert book_holds and book_holds[0] == {'ay', 'an'}
+    assert 'need_book' not in backup
+    assert pipeline.books['ay']['bids']['.4'] == '7'
+    assert pipeline.books['ay']['bids'].get('.9') != '9'
+
+
+def test_filtered_rest_book_stays_held_and_resubscribes_now(monkeypatch):
+    from app.services.polymarket.ws_redundancy import FeedMerge
+    manager = observer.MarketConnections()
+    pipeline = observer.Pipeline()
+    pipeline.recording.enabled = False
+    backup, sent = _failover_backup(manager, pipeline, monkeypatch)
+    stamp = int(datetime(2026, 10, 19, tzinfo=timezone.utc).timestamp() * 1000)
+    newer = datetime.fromtimestamp((stamp + 100) / 1000, timezone.utc)
+    merge = FeedMerge({})
+    merge.latest['ay'] = merge.snapshots['ay'] = newer
+    manager.merges[0] = merge
+    backup['book_marks'] = {'ay': (newer, 'live', stamp + 100)}
+    backup['need_book'] = {'ay'}
+    began = time.monotonic()
+
+    def publish_rest(state, assets, publish, warm=False, pressure=False):
+        publish([dict(event_type='book', asset_id='ay', timestamp=stamp, hash='old',
+                      bids=[dict(price='.4', size='1')], asks=[dict(price='.6', size='1')])],
+                datetime.now(timezone.utc))
+        return True
+
+    manager.snapshot_recovery.request = publish_rest
+    assert manager.request_snapshot(0, backup, ['ay']) is True
+    assert backup.get('need_book') == {'ay'}
+    assert time.monotonic() - began < 0.3
+    assert any(row.get('operation') == 'subscribe' and row.get('assets_ids') == ['ay'] for row in sent)
+    assert 'ay' not in pipeline.books
+
+
+def test_rest_request_false_resubscribes_within_1_5s(monkeypatch):
+    manager = observer.MarketConnections()
+    pipeline = observer.Pipeline()
+    pipeline.recording.enabled = False
+    backup, sent = _failover_backup(manager, pipeline, monkeypatch)
+    stamp = int(datetime(2026, 10, 19, tzinfo=timezone.utc).timestamp() * 1000)
+    book_at = datetime.fromtimestamp(stamp / 1000, timezone.utc)
+    backup['book_marks'] = {'ay': (book_at, 'hay', stamp), 'an': (book_at, 'han', stamp)}
+    backup['need_book'] = {'ay', 'an'}
+    held = dict(event_type='price_change', timestamp=stamp + 5, price_changes=[
+        dict(asset_id='ay', price='.41', size='2', hash='new')])
+    assert manager._release_resync(backup, held) is None
+    manager.snapshot_recovery.request = lambda *args, **kwargs: False
+    began = time.monotonic()
+    assert manager.request_snapshot(0, backup, ['ay', 'an']) is False
+    assert time.monotonic() - began <= 1.5
+    assert time.monotonic() - began < 0.3
+    assert any(row.get('operation') == 'subscribe' and row.get('assets_ids') == ['an', 'ay'] for row in sent)
+    assert backup.get('need_book') == {'ay', 'an'}
+    book = dict(event_type='book', asset_id='ay', timestamp=stamp + 10, hash='pushed',
+                bids=[dict(price='.4', size='7')], asks=[dict(price='.6', size='1')])
+    manager._release_resync(backup, book)
+    live = manager._release_resync(backup, dict(
+        event_type='price_change', timestamp=stamp + 20, price_changes=[
+            dict(asset_id='ay', price='.42', size='3', hash='live')]))
+    assert time.monotonic() - began <= 1.5
+    assert 'ay' not in (backup.get('need_book') or set())
+    assert live['price_changes'][0]['hash'] == 'live'
+
+
+def test_book_fallback_retries_and_held_changes_are_bounded(monkeypatch):
+    assert observer.book_fallback_seconds() == 0.8
+    assert observer.book_fallback_repeat_seconds() == 1.5
+    manager = observer.MarketConnections()
+    sent = []
+
+    class Sock:
+        def send(self, raw):
+            sent.append(json.loads(raw))
+
+    backup = dict(connected=True, assets=['ay'], socket=Sock(), need_book={'ay'})
+    manager.states[0] = backup
+    monkeypatch.setattr(observer, 'book_fallback_seconds', lambda: 0.02)
+    monkeypatch.setattr(observer, 'book_fallback_repeat_seconds', lambda: 0.02)
+    manager._arm_book_fallback(0, backup)
+    deadline = time.monotonic() + 1
+    while time.monotonic() < deadline and sum(row.get('operation') == 'subscribe' for row in sent) < 2:
+        time.sleep(0.01)
+    assert sum(row.get('operation') == 'subscribe' for row in sent) >= 2
+    manager._cancel_book_fallback(backup)
+    state = {'need_book': {'ay'}}
+    last = observer.HELD_CHANGES_MAX + 40
+    for i in range(last):
+        manager._release_resync(state, dict(event_type='price_change', timestamp=i, price_changes=[
+            dict(asset_id='ay', price='.4', size=str(i), hash=str(i))]))
+    assert len(state['held_changes']) == observer.HELD_CHANGES_MAX
+    assert state['held_changes'][-1]['price_changes'][0]['hash'] == str(last - 1)
+    assert state['held_changes_dropped'] == 40
+
+
+def test_env_file_zero_selects_the_in_process_engine(monkeypatch):
+    from app.commands.polymarket_observer import enable_group_processes
+    monkeypatch.delenv('POLYMARKET_OBSERVER_PROCESS_PER_GROUP', raising=False)
+
+    def fake_load(path, override=False):
+        assert override is False
+        if 'POLYMARKET_OBSERVER_PROCESS_PER_GROUP' not in os.environ:
+            os.environ['POLYMARKET_OBSERVER_PROCESS_PER_GROUP'] = '0'
+        return True
+
+    monkeypatch.setattr('dotenv.load_dotenv', fake_load)
+    enable_group_processes()
+    assert os.environ['POLYMARKET_OBSERVER_PROCESS_PER_GROUP'] == '0'
+    assert process_per_group_enabled() is False
+    os.environ.pop('POLYMARKET_OBSERVER_PROCESS_PER_GROUP', None)
+
+
+def test_compose_passes_process_per_group_into_the_observer():
+    root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+    expected = '${POLYMARKET_OBSERVER_PROCESS_PER_GROUP:-1}'
+    for name in ('docker-compose.yml', 'docker-compose.ghcr.yml'):
+        text = open(os.path.join(root, name), encoding='utf-8').read()
+        assert expected in text
+
+
 def test_promotion_replays_the_primary_book_within_1_5s(monkeypatch):
     """The promoted socket has no ladder. REST must echo the primary's last book."""
     from app.services.polymarket.ws_group_process import _replay_snapshot

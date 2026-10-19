@@ -648,16 +648,32 @@ def without_stale_books(event, metadata):
     return event
 
 
+def _replay_rest_mode():
+    """Replay-only. echo, delay:SECONDS, or fail. Unset matches echo."""
+    return os.getenv('QD_REPLAY_REST_MODE', 'echo').strip().lower() or 'echo'
+
+
 def _replay_snapshot(state, assets, publish, warm=False, pressure=False):
     """Echo the last applied book hash so failover does not wait for the next WS book.
 
     The fingerprint is asset, timestamp and hash. FeedMerge drops that copy
-    instead of rebuilding the ladder from the empty bids below. The publish
-    callback still releases `need_book` and the newer buffered price changes.
-    Assets with no carried mark stay held; the caller arms the resubscribe fallback.
+    instead of rebuilding the ladder from the empty bids below. A dropped echo
+    does not release `need_book`; the caller resubscribes so the pushed book can.
+    Assets with no carried mark stay held.
+
+    QD_REPLAY_REST_MODE=fail returns False (rate-limit). delay:SECONDS sleeps
+    before the same echo. Production never sets this.
     """
     if warm or pressure:
         return False
+    mode = _replay_rest_mode()
+    if mode == 'fail':
+        return False
+    if mode.startswith('delay:'):
+        try:
+            time.sleep(max(0.0, float(mode.split(':', 1)[1])))
+        except ValueError:
+            pass
     marks = state.get('book_marks') or {}
     books = []
     for asset in assets:

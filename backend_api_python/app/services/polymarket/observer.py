@@ -1216,8 +1216,22 @@ def socket_pending_bytes(app):
 
 
 def book_fallback_seconds():
-    """After this long with no snapshot, resubscribe so the server pushes a book."""
+    """First resubscribe wait when a REST attempt did not release the hold.
+
+    Production REST p95 is 285ms and the max is 378ms. 0.8s still covers a slow
+    success. A rate-limited request returns False and resubscribes immediately
+    instead of waiting out this delay.
+    """
+    return 0.8
+
+
+def book_fallback_repeat_seconds():
+    """Retry interval after the first fallback, while the hold is still up."""
     return 1.5
+
+
+# A long REST miss must not flush an unbounded burst into the primary queue.
+HELD_CHANGES_MAX = 256
 
 
 class _LivenessShadow:
@@ -1437,7 +1451,7 @@ class MarketConnections:
                 rows = payload.get(field) or [] if field else []
                 assets = {str(row.get('asset_id') or row.get('assetId') or '') for row in rows if isinstance(row, dict)}
                 if assets & set(pending):
-                    state.setdefault('held_changes', []).append(item)
+                    self._hold_change(state, item)
                     continue
             apply.append(item)
         apply.extend(self._flush_held(state))
@@ -1450,8 +1464,20 @@ class MarketConnections:
             return apply[0]
         return apply
 
+    def _hold_change(self, state, item):
+        held = state.setdefault('held_changes', [])
+        held.append(item)
+        overflow = len(held) - HELD_CHANGES_MAX
+        if overflow > 0:
+            del held[:overflow]
+            state['held_changes_dropped'] = state.get('held_changes_dropped', 0) + overflow
+
     def _accept_rest_books(self, state, events):
-        """Release each asset whose REST book is not older than the last applied one."""
+        """Release assets whose book is in `events` and not older than the last one.
+
+        `events` must be the books FeedMerge actually wrote. A stale or duplicate
+        REST book is absent, so that asset stays held.
+        """
         pending = state.get('need_book')
         if not pending:
             return []
@@ -1476,31 +1502,43 @@ class MarketConnections:
     def _cancel_book_fallback(self, state):
         state['book_fallback_token'] = state.get('book_fallback_token', 0) + 1
 
+    def _resubscribe_books(self, index, state):
+        """Ask the server to push a book for assets still held."""
+        if self.states.get(index) is not state or state.get('retired') or not state.get('connected'):
+            return False
+        sock = state.get('socket')
+        pending = sorted(state.get('need_book') or ())
+        if sock is None or not pending:
+            return False
+        try:
+            sock.send(json.dumps(dict(assets_ids=pending, operation='unsubscribe')))
+            sock.send(json.dumps(dict(assets_ids=pending, type='market', operation='subscribe')))
+        except Exception:
+            _LOG.exception('Polymarket WS book resubscribe failed shard=%s', index)
+            return False
+        return True
+
     def _arm_book_fallback(self, index, state):
-        """Resubscribe assets still waiting, so the server pushes a book."""
+        """Resubscribe assets still waiting. First wait, then repeat until release."""
         if not state.get('need_book'):
             return
         token = state.get('book_fallback_token', 0) + 1
         state['book_fallback_token'] = token
-        delay = book_fallback_seconds()
+        first = book_fallback_seconds()
+        repeat = book_fallback_repeat_seconds()
 
         def fire():
-            if delay > 0:
-                time.sleep(delay)
-            with self.lifecycle_lock:
-                if state.get('book_fallback_token') != token or not state.get('need_book'):
-                    return
-                if self.states.get(index) is not state or state.get('retired') or not state.get('connected'):
-                    return
-                sock = state.get('socket')
-                pending = sorted(state.get('need_book') or ())
-                if sock is None or not pending:
-                    return
-                try:
-                    sock.send(json.dumps(dict(assets_ids=pending, operation='unsubscribe')))
-                    sock.send(json.dumps(dict(assets_ids=pending, type='market', operation='subscribe')))
-                except Exception:
-                    _LOG.exception('Polymarket WS book resubscribe failed shard=%s', index)
+            delay = first
+            while True:
+                if delay > 0:
+                    time.sleep(delay)
+                with self.lifecycle_lock:
+                    if state.get('book_fallback_token') != token or not state.get('need_book'):
+                        return
+                    if self.states.get(index) is not state or state.get('retired') or not state.get('connected'):
+                        return
+                    self._resubscribe_books(index, state)
+                delay = repeat
 
         threading.Thread(target=fire, name='polymarket-book-fallback', daemon=True).start()
 
@@ -1838,8 +1876,9 @@ class MarketConnections:
                         return
                     self.redundant_receive(index, state, events, started, inbox)
                 elif self.states.get(index) is state and _PIPELINE:
-                    with state['lock']:
-                        extra = self._accept_rest_books(state, events) if state.get('need_book') else []
+                    # lifecycle → pipeline → state. The reader releases the state
+                    # lock before taking the pipeline lock, so a newer price_change
+                    # cannot land between the REST write and the hold release.
                     with _PIPELINE.lock:
                         owned = {a for a in assets if self.balancer.assignment.get(a) == index}
                         # Seed from live watermarks: late REST may never roll back WS.
@@ -1849,18 +1888,29 @@ class MarketConnections:
                             self.continuity.receive(merged, 'rest', datetime.now(timezone.utc))
                             _PIPELINE.receive(merged, owned, datetime.now(timezone.utc))
                             self.continuity.publication(_PIPELINE.recording.metadata, owned)
+                        with state['lock']:
+                            extra = self._accept_rest_books(state, merged) if state.get('need_book') else []
                         if extra:
-                            kept = merge.filter(extra, state.get('source') or 'rest', owned)
+                            source = state.get('source') or 'rest'
+                            kept = merge.filter(extra, source, owned)
                             if kept:
-                                self.continuity.receive(kept, state.get('source') or 'rest', datetime.now(timezone.utc))
+                                self.continuity.receive(kept, source, datetime.now(timezone.utc))
                                 _PIPELINE.receive(kept, owned, datetime.now(timezone.utc))
                                 self.continuity.publication(_PIPELINE.recording.metadata, owned)
                         self.complete_recovery(index, state, 'rest_snapshot')
                     if state.get('need_book'):
+                        # The book was filtered. Stay held and ask for a push now;
+                        # the timer covers a push that never arrives.
+                        self._resubscribe_books(index, state)
                         self._arm_book_fallback(index, state)
         if pressure:
-            return self.snapshot_recovery.request(state, assets, publish, pressure=True)
-        return self.snapshot_recovery.request(state, assets, publish)
+            accepted = self.snapshot_recovery.request(state, assets, publish, pressure=True)
+        else:
+            accepted = self.snapshot_recovery.request(state, assets, publish)
+        if (accepted is False and state.get('need_book') and self.states.get(index) is state
+                and not state.get('retired')):
+            self._resubscribe_books(index, state)
+        return accepted
 
     def sync(self, markets, prewarm=None):
         with self.lifecycle_lock:

@@ -19,7 +19,21 @@ def configure_allocator():
 
 
 def enable_group_processes():
-    """One feed process per hot group. Set POLYMARKET_OBSERVER_PROCESS_PER_GROUP=0 to roll back."""
+    """One feed process per hot group.
+
+    Roll back with POLYMARKET_OBSERVER_PROCESS_PER_GROUP=0. Read process env and
+    .env before the default: setdefault('1') first would stick, because
+    load_dotenv(override=False) cannot replace a value already written.
+    """
+    try:
+        from pathlib import Path
+
+        from dotenv import load_dotenv
+        backend_dir = Path(__file__).resolve().parents[2]
+        load_dotenv(backend_dir / '.env', override=False)
+        load_dotenv(backend_dir.parent / '.env', override=False)
+    except Exception:
+        pass
     os.environ.setdefault('POLYMARKET_OBSERVER_PROCESS_PER_GROUP', '1')
 
 
