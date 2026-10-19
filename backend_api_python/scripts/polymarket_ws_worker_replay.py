@@ -431,7 +431,8 @@ def run_processes(seconds=20, rate=3300, levels=140, cold_pairs=19, market_loop=
 def _run_processes_inner(seconds, rate, levels, cold_pairs, market_loop, weighted, kicks, burner, stop_burn):
     from app.services.polymarket.ws_group_process import (
         FAILOVER_GAP_DEFINITION, HOT_ORDER, PRIMARY_QUEUE_AGE_DEFINITION,
-        PROD_FRAME_WEIGHTS, GroupFeeds, planned_events, queue_age_series)
+        PROD_FRAME_WEIGHTS, GroupFeeds, planned_events, queue_age_series,
+        ready_drops_while_receiving)
     with ExitStack() as stack:
         stack.enter_context(patch.dict('os.environ', {
             'POLYMARKET_OBSERVER_WS_SHARDS': '4',
@@ -564,9 +565,11 @@ def _run_processes_inner(seconds, rate, levels, cold_pairs, market_loop, weighte
         by_group = {key: age_report(feeds.children[key].samples) for key in hot_keys if key in feeds.children}
         overall_age = age_report(samples)
         ready_by_group = {}
+        ready_live_drops_by_group = {}
         for key in hot_keys:
             rows_k = [row for row in feeds.children[key].samples if row.get('role') == 'backup' and 'ready' in row]
             ready_by_group[key] = (sum(bool(row.get('ready')) for row in rows_k) / len(rows_k)) if rows_k else None
+            ready_live_drops_by_group[key] = ready_drops_while_receiving(rows_k)
         ready_rows = [row for row in samples if row.get('role') == 'backup' and 'ready' in row]
         status = observer.snapshot()
         codes = []
@@ -600,6 +603,7 @@ def _run_processes_inner(seconds, rate, levels, cold_pairs, market_loop, weighte
             resyncs += row.get('resyncs') or 0
         published = pipeline.messages - published_before
         ready_ratio = (sum(bool(row.get('ready')) for row in ready_rows) / len(ready_rows)) if ready_rows else None
+        ready_live_drops = ready_drops_while_receiving(ready_rows)
         primary_p99 = pct(primary, .99) * 1000 if primary else None
         gap_max = max(gaps) if gaps else None
         codes_1008 = sum(code == 1008 for code in codes)
@@ -607,6 +611,8 @@ def _run_processes_inner(seconds, rate, levels, cold_pairs, market_loop, weighte
         result = dict(mode='process-per-group', weighted=weighted, seconds=elapsed, rate=rate,
                       logical=logical, published=published,
                       ready_ratio=ready_ratio, ready_samples=len(ready_rows),
+                      ready_live_drops=ready_live_drops,
+                      ready_live_drops_by_group=ready_live_drops_by_group,
                       resyncs=resyncs,
                       primary_queue_wait_ms=dict(p50=pct(primary, .5) * 1000 if primary else None,
                                                  p99=primary_p99,
@@ -633,6 +639,7 @@ def _run_processes_inner(seconds, rate, levels, cold_pairs, market_loop, weighte
                       valid=(final == expect and not snapshot_errors
                              and codes_1008 == 0 and not feeds.restarts and status.get('mode') == 'ws'
                              and ready_ratio is not None and ready_ratio >= 0.95
+                             and ready_live_drops == 0
                              and primary_p99 is not None and primary_p99 < 250 and gap_ok))
         return result
 

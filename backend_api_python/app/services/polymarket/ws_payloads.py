@@ -190,41 +190,84 @@ class ParsedFrames:
 
 
 _ENVELOPE_FIELD = re.compile(r'"(event_type|asset_id|timestamp|hash)"\s*:\s*"?([^"\\,}\s]+)"?')
+# Strings are opaque so a brace inside a size cannot split an object. The
+# matcher stays in C; the Python loop only sees braces and whole strings.
+_JSON_ATOM = re.compile(r'"(?:\\.|[^"\\])*"|[{}]')
+
+
+def _json_objects(raw):
+    """Top-level JSON objects. Nested bid rows stay inside their parent."""
+    depth = 0
+    start = None
+    for match in _JSON_ATOM.finditer(raw):
+        token = match.group(0)
+        if token[0] == '"':
+            continue
+        if token == '{':
+            if depth == 0:
+                start = match.start()
+            depth += 1
+            continue
+        if depth:
+            depth -= 1
+        if depth == 0 and start is not None:
+            yield raw[start:match.end()]
+            start = None
+
+
+def _tips_for_object(blob):
+    """One event. Field order inside the object does not matter.
+
+    A live price_change puts `timestamp` and often `event_type` after every
+    `price_changes` row. Flushing on the next asset_id, or on event_type
+    before the kind is known, drops the first outcome or the whole frame.
+    """
+    kind = stamp = None
+    pending_hash = None
+    rows = []
+    asset = digest = None
+
+    def close():
+        nonlocal asset, digest, pending_hash
+        if asset:
+            rows.append((asset, digest if digest is not None else pending_hash))
+        asset = digest = None
+
+    for match in _ENVELOPE_FIELD.finditer(blob):
+        key, value = match.group(1), match.group(2)
+        if key == 'event_type':
+            if kind is None:
+                kind = value
+        elif key == 'asset_id':
+            close()
+            asset = value
+        elif key == 'timestamp' and stamp is None:
+            stamp = value
+        elif key == 'hash':
+            if asset and digest is None:
+                digest = value
+            elif asset is None and pending_hash is None:
+                pending_hash = value
+    close()
+    if not kind:
+        return []
+    return [(kind, row_asset, stamp, row_digest) for row_asset, row_digest in rows]
 
 
 def cheap_envelope(raw):
-    """Timestamp, asset and hash only. Does not build bid or ask ladders."""
+    """Timestamp, asset and hash only. Does not build bid or ask ladders.
+
+    Each top-level object is one event. The parent timestamp applies to every
+    asset in that object, including assets that appear before the timestamp
+    and when `event_type` is the last key.
+    """
     if isinstance(raw, (bytes, bytearray)):
         raw = raw.decode('utf-8', 'replace')
     if not isinstance(raw, str) or not raw:
         return []
     tips = []
-    kind = asset = stamp = digest = None
-
-    def flush(reset_stamp=False):
-        nonlocal asset, stamp, digest
-        if kind and asset:
-            tips.append((kind, asset, stamp, digest))
-        asset = digest = None
-        # A price_change carries one timestamp for every nested asset. A new
-        # event_type starts a new object, so its own timestamp must win.
-        if reset_stamp:
-            stamp = None
-
-    for match in _ENVELOPE_FIELD.finditer(raw):
-        key, value = match.group(1), match.group(2)
-        if key == 'event_type':
-            flush(reset_stamp=True)
-            kind = value
-        elif key == 'asset_id':
-            if asset:
-                flush()
-            asset = value
-        elif key == 'timestamp' and stamp is None:
-            stamp = value
-        elif key == 'hash' and digest is None:
-            digest = value
-    flush()
+    for blob in _json_objects(raw):
+        tips.extend(_tips_for_object(blob))
     return tips
 
 

@@ -1272,8 +1272,10 @@ def book_fallback_repeat_seconds():
 
 # A long REST miss must not flush an unbounded burst into the primary queue.
 HELD_CHANGES_MAX = 256
-# A liveness backup is healthy while envelopes are still arriving. This is
-# shorter than the 22s PONG timeout and longer than a quiet 5m print gap.
+# A liveness backup is healthy while envelopes are still arriving, or while
+# the socket has answered PING inside this same window. 15s is shorter than
+# the 22s PONG timeout. Exchange timestamps are not compared to the wall clock:
+# liveness_at is the monotonic time the frame was received.
 LIVENESS_ENVELOPE_SECONDS = 15
 
 
@@ -1411,6 +1413,41 @@ class MarketConnections:
         now = time.monotonic() if now is None else now
         return now - last <= LIVENESS_ENVELOPE_SECONDS
 
+    def _liveness_pong_age(self, state, now):
+        """Age of the last TEXT PONG. None when this socket has never answered."""
+        socket = state.get('socket')
+        transport = getattr(socket, 'transport', None) if socket is not None else None
+        if transport is None:
+            return None
+        pongs = getattr(transport, 'pongs', None)
+        pong_at = getattr(transport, 'pong_at', None)
+        if pongs and pong_at is not None:
+            return now - pong_at
+        last = getattr(transport, 'last', None)
+        if not isinstance(last, dict):
+            return None
+        try:
+            count = int(last.get('pongs') or 0)
+        except (TypeError, ValueError):
+            return None
+        if count <= 0:
+            return None
+        age = last.get('pong_age_seconds')
+        return age if isinstance(age, (int, float)) else None
+
+    def _liveness_link_fresh(self, state, now=None):
+        """Envelope receive time, or a PONG no older than the envelope window.
+
+        A quiet print does not drop a spare that has already seen every
+        required asset and is still answering PING. A socket that stops
+        answering falls out of this window before the 22s PONG timeout.
+        """
+        now = time.monotonic() if now is None else now
+        if self._liveness_envelope_fresh(state, now):
+            return True
+        age = self._liveness_pong_age(state, now)
+        return age is not None and age <= LIVENESS_ENVELOPE_SECONDS
+
     def _queue_lag_breaks_backup(self, state, inbox):
         """A deep backup queue rewinds a shadow ladder. Liveness has none.
 
@@ -1448,7 +1485,7 @@ class MarketConnections:
         hashes = state.get('liveness_hash') or {}
         if any(asset in hashes and not hashes[asset] for asset in required):
             return False
-        return self._liveness_envelope_fresh(state)
+        return self._liveness_link_fresh(state)
 
     def liveness_receive(self, index, state, raw, received_at, inbox):
         """Backup path that does not rebuild a book. Failover resyncs from a snapshot."""
@@ -1735,7 +1772,7 @@ class MarketConnections:
                 ('current_subscription', bool(state.get('subscribe_initial')
                     or required.intersection(state.get('subscribe_pending') or []))),
                 ('missing_envelope', not required <= seen),
-                ('stale_envelope', not self._liveness_envelope_fresh(state))) if blocked]
+                ('stale_envelope', not self._liveness_link_fresh(state))) if blocked]
         shadow = state['shadow']
         return [name for name, blocked in (
             ('disconnected', not state.get('connected')),
