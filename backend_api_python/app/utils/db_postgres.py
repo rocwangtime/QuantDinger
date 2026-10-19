@@ -11,6 +11,7 @@ Pool tuning (all via env, safe defaults):
     DB_POOL_HEALTH_CHECK      "true" / "false"              default "true"
 """
 import os
+import re
 import time
 import threading
 from typing import Optional, Any, List, Dict
@@ -431,6 +432,31 @@ def _pool_stats(pg_pool) -> Dict[str, int]:
     }
 
 
+# Tables known to have no ``id`` column. execute() does not append
+# ``RETURNING id`` for them. Each failed attempt costs a savepoint, a failing
+# statement, a rollback and a full ERROR + STATEMENT entry in the PostgreSQL
+# log (the statement carries the whole JSON payload). The seed lists the
+# upsert-only tables from migrations; any other table is added the first time
+# PostgreSQL reports the column missing, once per process.
+_NO_ID_TABLES = {
+    'qd_polymarket_observer_status',
+    'qd_polymarket_paper_accounts',
+    'qd_polymarket_paper_daily',
+    'qd_polymarket_ws_daily',
+}
+_INSERT_TABLE = re.compile(r'^\s*INSERT\s+INTO\s+((?:"[^"]+"|[A-Za-z_][\w$]*)(?:\.(?:"[^"]+"|[A-Za-z_][\w$]*))?)',
+                           re.IGNORECASE)
+
+
+def _insert_table(query: str) -> Optional[str]:
+    """Unqualified, unquoted, lower-case target table of an INSERT, or None."""
+    match = _INSERT_TABLE.match(query)
+    if not match:
+        return None
+    name = match.group(1).split('.')[-1]
+    return name[1:-1] if name.startswith('"') else name.lower()
+
+
 class PostgresCursor:
     """PostgreSQL cursor wrapper with placeholder conversion for backward compatibility"""
     
@@ -480,7 +506,8 @@ class PostgresCursor:
         is_insert = query.strip().upper().startswith('INSERT')
         has_returning = 'RETURNING' in query.upper()
 
-        if is_insert and not has_returning:
+        table = _insert_table(query) if is_insert and not has_returning else None
+        if is_insert and not has_returning and table not in _NO_ID_TABLES:
             q_with_id = query.rstrip(';').rstrip() + ' RETURNING id'
             savepoint = '_pg_ins_ret_id'
             try:
@@ -519,6 +546,8 @@ class PostgresCursor:
                 )
                 if not is_missing_id:
                     raise
+                if table:
+                    _NO_ID_TABLES.add(table)
                 if savepoint:
                     try:
                         self._cursor.execute("ROLLBACK TO SAVEPOINT _pg_ins_ret_id")
