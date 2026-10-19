@@ -1,0 +1,18 @@
+diff --git a/backend_api_python/app/services/polymarket/ws_group_process.py b/backend_api_python/app/services/polymarket/ws_group_process.py
+index fce6471..47d0ef5 100644
+--- a/backend_api_python/app/services/polymarket/ws_group_process.py
++++ b/backend_api_python/app/services/polymarket/ws_group_process.py
+@@ -180,9 +180,12 @@ def weighted_counts(total, weights):
+     return counts
+ 
+ 
++_BOOK_EVERY = max(1, int(os.getenv('QD_REPLAY_BOOK_EVERY', '5') or 5))  # VERIFY-ONLY
++
++
+ def wire_event(identity, sequence, assets, levels, at):
+     """Prod-shaped public book / price_change. `identity` keeps hashes unique."""
+-    if sequence % 5 == 0:
++    if sequence % _BOOK_EVERY == 0:
+         return [dict(event_type='book', asset_id=asset, timestamp=at, hash=f'{identity}{asset}',
+                      bids=[dict(price=str(level / 1000), size='3') for level in range(400 - levels // 2, 400)],
+                      asks=[dict(price=str(level / 1000), size='4') for level in range(600, 600 + levels // 2)])
