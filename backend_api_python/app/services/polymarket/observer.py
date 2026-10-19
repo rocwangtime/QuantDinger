@@ -13,7 +13,7 @@ from itertools import groupby
 import random
 from queue import Queue, Full, Empty
 from threading import RLock, Event
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from .observer_db import connection as get_db_connection
 from .account_history import max_pair_skew_ms, pair_rejection
@@ -1277,6 +1277,11 @@ HELD_CHANGES_MAX = 256
 # the 22s PONG timeout. Exchange timestamps are not compared to the wall clock:
 # liveness_at is the monotonic time the frame was received.
 LIVENESS_ENVELOPE_SECONDS = 15
+# One frame in this many is timed for stage_cpu (see _stage_sampled).
+STAGE_SAMPLE_EVERY = 64
+# Acceptance limit for a business gap. A connected primary whose oldest
+# queued frame is older than this is a gap even without a kick (F4).
+BUSINESS_GAP_SECONDS = 1.5
 
 
 class _LivenessShadow:
@@ -1311,6 +1316,9 @@ class MarketConnections:
         self.snapshot_recovery = SnapshotRecovery()
         self.parsed_frames = ParsedFrames()
         self.primary_failures = {}
+        # Hot group -> backlog episodes on a connected primary (F4).
+        self.backlog_gaps = {}
+        self.backlog_open = {}
         self.double_kicks = DoubleKicks()
         self.cache_maintenance_at = 0
         self.sampler = None
@@ -1358,6 +1366,7 @@ class MarketConnections:
         self.liveness_backup = False
         self.stage_lock = RLock()
         self.stage_cpu = dict(primary_parse=0.0, primary_apply=0.0, backup_parse=0.0, backup_apply=0.0)
+        self.stage_frames = 0
 
     def backup_items(self):
         return list(self.backups.items()) + list(self.reserves.items())
@@ -1393,10 +1402,21 @@ class MarketConnections:
         shadow = state.get('shadow')
         return set(shadow.books.keys()) if shadow is not None else set()
 
+    def _stage_sampled(self):
+        """True for one frame in STAGE_SAMPLE_EVERY.
+
+        process_time() is a real syscall (CLOCK_PROCESS_CPUTIME_ID). Two per
+        frame were ~11% of a hot book thread in the 2026-10-20 py-spy profile.
+        Sampled frames are charged STAGE_SAMPLE_EVERY times, so stage_cpu
+        keeps its meaning (CPU seconds by stage) as an unbiased estimate.
+        """
+        self.stage_frames += 1
+        return self.stage_frames % STAGE_SAMPLE_EVERY == 0
+
     def _charge(self, name, started):
         if started is None:
             return
-        spent = process_time() - started
+        spent = (process_time() - started) * STAGE_SAMPLE_EVERY
         with self.stage_lock:
             self.stage_cpu[name] = self.stage_cpu.get(name, 0.0) + spent
 
@@ -3230,18 +3250,19 @@ class MarketConnections:
                 try:
                     parsing_at = time.monotonic()
                     standby = bool(state.get('standby'))
+                    sampled = self._stage_sampled()
                     if self.liveness_backup and state.get('redundant'):
-                        parse_cpu = process_time()
+                        parse_cpu = process_time() if sampled else None
                         self.liveness_receive(index, state, raw, received_at, inbox)
                         self._charge('backup_parse', parse_cpu)
                         inbox.processing_received_at = None
                         inbox.processing_charged_bytes = 0
                         continue
-                    parse_cpu = process_time()
+                    parse_cpu = process_time() if sampled else None
                     event = self.parsed_frames.parse(raw)
                     self._charge('backup_parse' if standby else 'primary_parse', parse_cpu)
                     inbox.parse_max_seconds = max(inbox.parse_max_seconds, time.monotonic() - parsing_at)
-                    apply_cpu = process_time()
+                    apply_cpu = process_time() if sampled else None
                     if standby:
                         self.shadow_receive(index, state, event, received_at, inbox, epoch)
                         self._charge('backup_apply', apply_cpu)
@@ -3489,8 +3510,98 @@ class MarketConnections:
     # tests) still rebuild every call; the supervisor only when it is stale.
     STATUS_REFRESH_SECONDS = 1.0
 
+    def observe_backlog(self, now=None):
+        """Count a connected primary's backlog over BUSINESS_GAP_SECONDS as a business gap.
+
+        At a kick, merged_gap_ms equals the primary's own queue age (7/7 events
+        on 2026-10-20). The same age on a primary that is never kicked was not
+        counted anywhere. An episode opens when the oldest queued frame is older
+        than the limit, stays open across an overflow resync, and closes when the
+        queue drains, the socket closes or the state is replaced. gap_s is the
+        largest age seen, the same quantity merged_gap_ms reports at a kick.
+        """
+        wall = datetime.now(timezone.utc)
+        current = set()
+        for index, state in list(self.states.items()):
+            inbox = state.get('inbox')
+            if inbox is None or state.get('standby') or state.get('retired'):
+                continue
+            current.add(id(state))
+            alive = bool(state.get('connected')) and not inbox.invalid.is_set()
+            try:
+                lag = inbox.pending_wait_seconds()
+            except Exception:
+                continue
+            opened = self.backlog_open.get(id(state))
+            if alive and (lag > BUSINESS_GAP_SECONDS or (opened and inbox.resync.is_set())):
+                if opened is None:
+                    groups = {self.balancer.groups.get(a, '').split(':outcome:')[0]
+                              for a in state.get('assets') or []} & HOT_SERIES
+                    if not groups:
+                        continue
+                    opened = self.backlog_open[id(state)] = dict(
+                        groups=sorted(groups), source=state.get('source'), inbox=inbox,
+                        started_at=wall - timedelta(seconds=lag), gap_s=lag, resyncs_at_open=inbox.resyncs)
+                opened['gap_s'] = max(opened['gap_s'], lag)
+                opened['started_at'] = min(opened['started_at'], wall - timedelta(seconds=lag))
+                continue
+            if opened is not None:
+                self._close_backlog(id(state), wall, 'drained' if alive else 'closed')
+        for key in [k for k in self.backlog_open if k not in current]:
+            self._close_backlog(key, wall, 'replaced')
+
+    def _close_backlog(self, key, wall, ended_by):
+        opened = self.backlog_open.pop(key, None)
+        if opened is None:
+            return
+        event = dict(source=opened['source'], started_at=opened['started_at'].isoformat(),
+                     ended_at=wall.isoformat(), gap_s=round(opened['gap_s'], 3),
+                     resyncs=max(0, opened['inbox'].resyncs - opened['resyncs_at_open']), ended_by=ended_by)
+        for group in opened['groups']:
+            row = self.backlog_gaps.setdefault(group, dict(events=0, closed=0, seconds=0.0, max_gap_s=0.0,
+                                                          recent=deque(maxlen=32)))
+            row['events'] += 1
+            row['closed'] += ended_by == 'closed'
+            row['seconds'] += max(0.0, (wall - opened['started_at']).total_seconds())
+            row['max_gap_s'] = max(row['max_gap_s'], opened['gap_s'])
+            row['recent'].append(event)
+
+    def business_gap_metrics(self):
+        """One gap metric per hot group: kicks and backlog episodes, same unit (seconds).
+
+        kick_* come from ws_hot_primary_failures merged_gap_ms. backlog_* are
+        connected-primary episodes from observe_backlog. over_limit counts both.
+        A kick that ends a backlog episode appears in each list but is one
+        event; over_limit counts it once (backlog episodes ended by a close).
+        """
+        out = {}
+        groups = set(self.primary_failures) | set(self.backlog_gaps) | {
+            g for opened in self.backlog_open.values() for g in opened['groups']}
+        for group in sorted(groups):
+            kicks = [e.get('merged_gap_ms') or 0 for e in self.primary_failures.get(group, {}).get('events', [])]
+            row = self.backlog_gaps.get(group, dict(events=0, closed=0, seconds=0.0, max_gap_s=0.0, recent=()))
+            open_now = [o for o in self.backlog_open.values() if group in o['groups']]
+            kick_over = sum(1 for ms in kicks if ms > BUSINESS_GAP_SECONDS * 1000)
+            out[group] = dict(
+                limit_s=BUSINESS_GAP_SECONDS,
+                kick_events=len(kicks), kick_over_limit=kick_over,
+                kick_max_gap_s=round(max(kicks, default=0) / 1000, 3),
+                backlog_events=row['events'], backlog_seconds=round(row['seconds'], 3),
+                backlog_max_gap_s=round(row['max_gap_s'], 3),
+                backlog_open=[dict(source=o['source'], started_at=o['started_at'].isoformat(),
+                                   gap_s=round(o['gap_s'], 3)) for o in open_now],
+                over_limit=kick_over + max(0, row['events'] - row['closed']) + len(open_now),
+                max_gap_s=round(max([max(kicks, default=0) / 1000, row['max_gap_s'],
+                                     *(o['gap_s'] for o in open_now)]), 3),
+                recent=list(row['recent'])[-16:])
+        return out
+
     def tick(self, status=True):
         with self.lifecycle_lock:
+            try:
+                self.observe_backlog()
+            except Exception:
+                _LOG.exception('Polymarket WS backlog gap observation failed')
             if self._tick() is not False and (
                     status or time.monotonic() - self.status_at >= self.STATUS_REFRESH_SECONDS):
                 self.publish_status()
@@ -3794,6 +3905,9 @@ class MarketConnections:
                           ws_hot_primary_failures={k: dict(total=v['total'], without_ready_backup=v['without_ready_backup'],
                               events=[{field: value for field, value in e.items() if not field.startswith('_')}
                                   for e in v['events']]) for k, v in self.primary_failures.items()},
+                          ws_business_gaps=self.business_gap_metrics(),
+                          ws_business_gap_scope=('per hot group: kick merged_gap_ms and connected-primary queue age '
+                                                 'over limit_s, both in seconds; over_limit counts each once'),
                           ws_takeover_gap_scope='failed_source_receipt_to_recovery; detection_to_takeover_ms_is_control_time',
                           ws_acceptance_gap_scope='merged_gap_ms; physical_source_silence_and_historical_trades_are_alert_only',
                           ws_pong_timeout_seconds=22,
