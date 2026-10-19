@@ -136,7 +136,9 @@ def test_pong_timeout_promotes_unready_backup_preserves_merged_books_and_repleni
     monkeypatch.setattr(m, 'request_snapshot', lambda *args: requests.append(args))
     started = time.monotonic()
     m.tick()
-    wait_for(lambda: m.states[0] is candidate, .9)
+    # Promotion publishes the new primary before retire() on that same worker.
+    # A status sample can see the swap first. Wait until the old socket is marked.
+    wait_for(lambda: m.states[0] is candidate and old.get('retired'), .9)
     assert time.monotonic() - started < 1
     assert old.get('retired') and p.books == before
     assert requests  # Missing private evidence is repaired after promotion.
