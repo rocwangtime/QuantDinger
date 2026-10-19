@@ -159,6 +159,7 @@ def test_liveness_backup_promotes_and_holds_until_a_book():
     manager.retire = lambda state: retired.append(state)
     manager.request_snapshot = lambda index, state, assets, pressure=False: snaps.append(list(assets))
     manager.redundancy_tick = lambda now: None
+    manager._arm_book_fallback = lambda index, state: None
     inbox = _Inbox()
     backup = dict(redundant=True, connected=True, standby=True, assets=['ay', 'an'],
                   worker=threading.current_thread(), inbox=inbox, source='backup',
@@ -240,6 +241,7 @@ def test_primary_1013_promotes_a_ready_liveness_backup_without_a_ws_book():
     manager.retire = lambda state: retired.append(state)
     manager.redundancy_tick = lambda now: None
     manager.update_hot_coverage = lambda now: None
+    manager._arm_book_fallback = lambda index, state: None
     manager.liveness_receive(0, backup, _price_change('ay', 'an'), datetime.now(timezone.utc), backup['inbox'])
     assert manager.backup_ready(backup) and shadow.books == {}
     # closed() on 1013: the primary is down and its generation is invalid.
