@@ -86,13 +86,14 @@ def test_each_failure_has_a_reason_and_stale_backs_off(books, monkeypatch):
     metrics = _run(recovery, state, 'stale', books)
     assert metrics['failure_reasons']['recovery'] == {'stale': 1}
     assert metrics['last_failure']['reason'] == 'stale' and metrics['last_failure']['age_s'] >= 2.5
-    # First stale answer of a streak: 1s, not 0.5s.
-    assert 0.6 < state['rest_retry_at'] - time.monotonic() <= 1
+    # First stale answer of a streak keeps the normal 0.5s retry (live books).
+    assert 0.2 < state['rest_retry_at'] - time.monotonic() <= 0.5
     assert recovery.request(state, ['a', 'b'], lambda *a: None) is False
-    assert metrics['categories']['recovery']['total']['stale_backoff'] == 1
+    assert metrics['categories']['recovery']['total'].get('stale_backoff', 0) == 0
     # Still stale: the cached book stays for seconds, wait 5s.
     _run(recovery, state, 'stale', books)
     assert state['rest_retry_at'] - time.monotonic() > 4 and state['_rest_stale_streak'] == 2
+    assert recovery.metrics()['categories']['recovery']['total']['stale_backoff'] == 1
     _run(recovery, state, 'fresh', books)
     assert '_rest_stale_streak' not in state
     for mode, reason in (('http429', 'http_429'), ('incomplete', 'incomplete'), ('slow', 'read_timeout')):
