@@ -130,6 +130,19 @@ def run(seconds=15, rate=1896, levels=140, cold_pairs=19, stage_profile=False, l
         stack.enter_context(patch.dict('sys.modules', {'websocket': SimpleNamespace(WebSocketApp=Socket)}))
         stack.enter_context(patch.object(observer, '_STOP', threading.Event()))
         stack.enter_context(patch.object(observer, 'STATUS', dict(reconnect_count=0, slow_consumer_count=0)))
+        # Business latency: synthetic exchange timestamp -> merged publication
+        # (Pipeline.receive returns), whichever physical copy delivered it.
+        merged_lag, schedule = [], {}
+        original_receive = observer.Pipeline.receive
+        def receive(self, raw, *args, **kwargs):
+            result = original_receive(self, raw, *args, **kwargs)
+            stamp = raw[0].get('timestamp') if isinstance(raw, list) and raw and isinstance(raw[0], dict) else \
+                raw.get('timestamp') if isinstance(raw, dict) else None
+            if isinstance(stamp, int) and schedule and stamp >= schedule['epoch']:
+                # Lag behind the replay's own emission schedule (burst start).
+                merged_lag.append(time.time()*1000 - schedule['wall_ms'] - (stamp - schedule['epoch'])//50*50)
+            return result
+        stack.enter_context(patch.object(observer.Pipeline, 'receive', receive))
         if prod_gil:
             previous_switch = observer.sys.getswitchinterval()
             stack.callback(observer.sys.setswitchinterval, previous_switch)
@@ -227,6 +240,7 @@ def run(seconds=15, rate=1896, levels=140, cold_pairs=19, stage_profile=False, l
         peak = 0
         began, cpu = time.monotonic(), time.process_time()
         wall_began = time.time()
+        schedule.update(epoch=epoch, wall_ms=wall_began*1000)
         try:
             for burst in range(int(seconds/.05)+7):
                 time.sleep(max(0, began + burst*.05-time.monotonic()))
@@ -276,6 +290,8 @@ def run(seconds=15, rate=1896, levels=140, cold_pairs=19, stage_profile=False, l
                                            max=max(primary_waits)*1000, samples=len(primary_waits)),
                 backup_queue_wait_ms=dict(p50=pct(backup_waits, .5)*1000, p99=pct(backup_waits, .99)*1000,
                                           max=max(backup_waits)*1000, samples=len(backup_waits)),
+                merged_publication_lag_ms=dict(p50=pct(merged_lag, .5), p99=pct(merged_lag, .99),
+                                               max=max(merged_lag, default=None), samples=len(merged_lag)),
                 backup_lifecycle_wait_sampled_ms=dict(p99=pct(backup_lifecycle, .99)*1000,
                                                       max=max(backup_lifecycle)*1000),
                 primary_pipeline_wait_sampled_ms=dict(p99=pct(primary_lock, .99)*1000,
