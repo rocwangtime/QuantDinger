@@ -1265,9 +1265,37 @@ class MarketConnections:
         self.aux_memory = {}
         self.markets = []
         self.prewarm_markets = []
+        # Per-group processes set this so a backup parse cannot hold the GIL
+        # while its own primary queue is old. In-process callers leave it off.
+        self.primary_first = False
+        self.primary_first_lag_seconds = 0.05
 
     def backup_items(self):
         return list(self.backups.items()) + list(self.reserves.items())
+
+    def _primary_blocks_backup(self, index, state):
+        """Pause this backup worker while its primary queue is actually old.
+
+        Only a process that sets primary_first uses the rule. A disconnected
+        or invalidated primary is never paused, otherwise promotion cannot run.
+        An empty queue is not a backlog: pending_wait_seconds keeps the previous
+        frame's receive time after the worker blocks in queue.get, and that age
+        would climb on an idle socket.
+        """
+        if not self.primary_first or not state.get('redundant'):
+            return False
+        primary = self.states.get(index)
+        if primary is None or primary is state or not primary.get('connected'):
+            return False
+        inbox = primary.get('inbox')
+        if inbox is None or inbox.invalid.is_set():
+            return False
+        try:
+            if inbox.queue.qsize() <= 0:
+                return False
+            return inbox.pending_wait_seconds() > self.primary_first_lag_seconds
+        except Exception:
+            return False
 
     @staticmethod
     def backup_queue_limit(candidate):
@@ -2582,6 +2610,9 @@ class MarketConnections:
 
         def process_frames():
             while not self.closed and state.get('inbox') is inbox and not inbox.invalid.is_set():
+                if self._primary_blocks_backup(index, state):
+                    time.sleep(0.001)
+                    continue
                 if (state.get('redundant') and not inbox.resync.is_set()
                         and inbox.pending_wait_seconds() > ws_setting('BACKUP_MAX_LAG_SECONDS', 2, 1)):
                     with inbox.lock:

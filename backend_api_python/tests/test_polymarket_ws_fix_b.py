@@ -1,6 +1,7 @@
 """Fix B: one feed process per hot group. In-process engine stays the default."""
 import json
 import os
+import re
 import signal
 import threading
 import time
@@ -9,14 +10,19 @@ from datetime import datetime, timezone
 from app.services.polymarket import observer
 from app.services.polymarket.ws_group_process import (
     HOT_ORDER, PROD_FRAME_WEIGHTS, GroupFeeds, even_plan, merge_feed_status,
-    partition, planned_events, process_per_group_enabled, weighted_counts, without_stale_books)
+    partition, planned_events, process_per_group_enabled, queue_age_series,
+    weighted_counts, without_stale_books)
+
+_FEED_ID = re.compile(r'^feed-\d+$')
 
 
 def _paths(value, prefix=''):
     if isinstance(value, dict):
         found = set()
         for key, item in value.items():
-            name = '#' if isinstance(key, int) or (isinstance(key, str) and str(key).isdigit()) else str(key)
+            raw = str(key)
+            # Shard indexes and feed generation counters are instance ids.
+            name = '#' if isinstance(key, int) or raw.isdigit() or _FEED_ID.match(raw) else raw
             child = f'{prefix}.{name}'
             found.add(child)
             found |= _paths(item, child)
@@ -47,9 +53,61 @@ def test_observer_command_defaults_group_processes_on(monkeypatch):
     monkeypatch.delenv('POLYMARKET_OBSERVER_PROCESS_PER_GROUP', raising=False)
     enable_group_processes()
     assert os.environ['POLYMARKET_OBSERVER_PROCESS_PER_GROUP'] == '1'
+    # setdefault writes the variable with no monkeypatch undo. Drop it before
+    # setenv so the fixture records "absent" and later tests stay in-process.
+    os.environ.pop('POLYMARKET_OBSERVER_PROCESS_PER_GROUP', None)
     monkeypatch.setenv('POLYMARKET_OBSERVER_PROCESS_PER_GROUP', '0')
     enable_group_processes()
     assert os.environ['POLYMARKET_OBSERVER_PROCESS_PER_GROUP'] == '0'
+
+
+def test_queue_age_series_covers_the_window_not_only_kicks():
+    t0 = 1_000_000.0
+    samples = [
+        dict(role='primary', t=t0 + 0.1, wait=0.002, depth=1),
+        dict(role='primary', t=t0 + 0.4, wait=7.2, depth=40),
+        dict(role='backup', t=t0 + 0.4, wait=9, depth=3),
+        dict(role='primary', t=t0 + 1.2, wait=0.01, depth=0),
+        dict(role='primary', t=t0 - 1, wait=5, depth=9),
+    ]
+    assert queue_age_series(samples, t0) == [
+        dict(second=0, queue_age_ms=7200.0, depth_max=40, samples=2),
+        dict(second=1, queue_age_ms=10.0, depth_max=0, samples=1),
+    ]
+
+
+class _LagInbox:
+    def __init__(self, wait, depth, invalid=False):
+        self.wait = wait
+        self.queue = type('Q', (), {'qsize': lambda self: depth})()
+        self.invalid = threading.Event()
+        if invalid:
+            self.invalid.set()
+
+    def pending_wait_seconds(self):
+        return self.wait
+
+
+def test_primary_first_yields_only_for_a_live_backlogged_primary():
+    manager = observer.MarketConnections()
+    assert manager.primary_first is False
+    backup = dict(redundant=True, connected=True)
+    primary = dict(connected=True, inbox=_LagInbox(0.2, 4))
+    manager.states[0] = primary
+    assert manager._primary_blocks_backup(0, backup) is False
+    manager.primary_first = True
+    assert manager._primary_blocks_backup(0, backup) is True
+    primary['inbox'] = _LagInbox(0.01, 4)
+    assert manager._primary_blocks_backup(0, backup) is False
+    primary['inbox'] = _LagInbox(7.2, 0)
+    assert manager._primary_blocks_backup(0, backup) is False
+    primary['inbox'] = _LagInbox(0.2, 4, invalid=True)
+    assert manager._primary_blocks_backup(0, backup) is False
+    primary['inbox'] = _LagInbox(0.2, 4)
+    primary['connected'] = False
+    assert manager._primary_blocks_backup(0, backup) is False
+    primary['connected'] = True
+    assert manager._primary_blocks_backup(0, dict(redundant=False)) is False
 
 
 def test_partition_puts_each_hot_series_alone():

@@ -19,6 +19,12 @@ Step C (backups that do not build a book) is intentionally not here. Readiness
 and promotion still use the shadow book. Changing that redefines failover and
 would widen this patch past the process boundary.
 
+Inside a feed process the backup worker yields while its primary queue still
+holds a frame older than 50ms, so the backup cannot keep the GIL when that
+primary is behind. The replay gate's failover_gaps_s is kick-to-next-forwarded
+event (see FAILOVER_GAP_DEFINITION). It is not merged_gap_ms and not the
+hot-primary-failure business_gap flag.
+
 Rollback: POLYMARKET_OBSERVER_PROCESS_PER_GROUP=0 keeps the in-process engine.
 The observer command defaults the variable to 1. Tests leave it unset.
 """
@@ -80,6 +86,24 @@ _STOP_CHILD = threading.Event()
 
 def process_per_group_enabled():
     return os.getenv('POLYMARKET_OBSERVER_PROCESS_PER_GROUP', '0').lower() in {'1', 'true', 'yes'}
+
+
+# The gate reports this interval. Do not confuse it with the two production
+# signals that disagreed at 16:26 SGT on 2026-10-19 (business-gap log 7.7ms,
+# ws_continuity.merged_gap_ms 0.695s). Those formulas are unchanged.
+FAILOVER_GAP_DEFINITION = (
+    'failover_gaps_s is seconds from mark_kick, recorded before the 1013 '
+    'on_close, until that group forwards the next merged event with a higher '
+    'outbox sequence. It is not ws_continuity.merged_gap_ms and not the '
+    'hot-primary-failure business_gap flag.'
+)
+PRIMARY_QUEUE_AGE_DEFINITION = (
+    'pending_wait_seconds of ReceiveQueue (oldest frame queued or in parse), '
+    'sampled every 50ms for the whole window on each group while the socket '
+    'stays open, not only at a kick or disconnect. series_1s is the max of '
+    'those samples in each whole second after the window start. '
+    'primary_queue_wait_ms is the pooled distribution; its p99 is the pass/fail check.'
+)
 
 
 def _send(conn, obj):
@@ -625,20 +649,47 @@ def _drive(manager, spec):
             _LOG.exception('replay emit failed role=%s', role)
 
 
+def queue_age_series(samples, t0):
+    """Max primary queue age and depth in each whole second at or after t0."""
+    buckets = {}
+    for row in samples or []:
+        if row.get('role') != 'primary':
+            continue
+        stamp = row.get('t')
+        wait = row.get('wait')
+        if not isinstance(stamp, (int, float)) or not isinstance(wait, (int, float)):
+            continue
+        if stamp < t0:
+            continue
+        second = int(stamp - t0)
+        bucket = buckets.setdefault(second, dict(wait=0.0, depth=0, n=0))
+        bucket['wait'] = max(bucket['wait'], float(wait))
+        depth = row.get('depth')
+        if isinstance(depth, (int, float)):
+            bucket['depth'] = max(bucket['depth'], int(depth))
+        bucket['n'] += 1
+    return [dict(second=second, queue_age_ms=round(buckets[second]['wait'] * 1000, 3),
+                 depth_max=buckets[second]['depth'], samples=buckets[second]['n'])
+            for second in sorted(buckets)]
+
+
 def _sample_loop(manager, outbox):
     while not _STOP_CHILD.wait(0.05):
         rows = []
         try:
+            now = time.time()
             for state in list(manager.states.values()):
                 inbox = state.get('inbox')
                 if inbox:
-                    rows.append(dict(role='primary', wait=inbox.pending_wait_seconds(),
+                    rows.append(dict(role='primary', t=now, depth=inbox.queue.qsize(),
+                                     wait=inbox.pending_wait_seconds(),
                                      lock=getattr(inbox, 'lock_wait_seconds', 0) or 0, resyncs=inbox.resyncs))
             for _, state in manager.backup_items():
                 inbox = state.get('inbox')
                 if not inbox:
                     continue
-                rows.append(dict(role='backup', wait=inbox.pending_wait_seconds(),
+                rows.append(dict(role='backup', t=now, depth=inbox.queue.qsize(),
+                                 wait=inbox.pending_wait_seconds(),
                                  life=getattr(inbox, 'lifecycle_wait_seconds', 0) or 0,
                                  ready=bool(manager.backup_ready(state)), resyncs=inbox.resyncs))
         except Exception:
@@ -766,6 +817,7 @@ def child_main(spec, data_conn, control_conn):
         flusher.start()
         _install_forwarder(outbox)
         manager = observer.MarketConnections()
+        manager.primary_first = True
         manager.backup_serial = int(spec.get('shard_base') or 0) * 10000
         _publish_hook(manager, outbox, spec['key'], int(spec.get('shard_base') or 0))
         if spec.get('rates'):

@@ -12,6 +12,10 @@ the same frames. --even keeps the legacy round-robin; the default for that
 mode is the production frame mix. --background-load F is a second process
 burning about F cores. --kicks N injects one 1013 per hot group. --confine-cpus
 N pins this process, the feeds and the burner to N CPUs.
+The process-mode result includes primary_queue_age_by_group (50ms samples for
+the whole window, then a 1s max series per hot group, including up_down:BTC:5m).
+failover_gaps_s is kick-to-next-forwarded merged event, not merged_gap_ms and
+not the hot-primary-failure business_gap flag.
 
 Fix-A options (all default off, so earlier invocations are unchanged):
 --lock-timing wraps lifecycle_lock and Pipeline.lock with an outermost
@@ -387,7 +391,8 @@ def run_processes(seconds=20, rate=3300, levels=140, cold_pairs=19, market_loop=
 
 def _run_processes_inner(seconds, rate, levels, cold_pairs, market_loop, weighted, kicks, burner, stop_burn):
     from app.services.polymarket.ws_group_process import (
-        PROD_FRAME_WEIGHTS, HOT_ORDER, GroupFeeds, planned_events)
+        FAILOVER_GAP_DEFINITION, HOT_ORDER, PRIMARY_QUEUE_AGE_DEFINITION,
+        PROD_FRAME_WEIGHTS, GroupFeeds, planned_events, queue_age_series)
     with ExitStack() as stack:
         stack.enter_context(patch.dict('os.environ', {
             'POLYMARKET_OBSERVER_WS_SHARDS': '4',
@@ -460,6 +465,7 @@ def _run_processes_inner(seconds, rate, levels, cold_pairs, market_loop, weighte
         feeds.gaps.clear()
         published_before = pipeline.messages
         rss_began = observer.process_rss_bytes()
+        wall0 = time.time()
         began = time.monotonic()
         cpu = time.process_time()
         burner_at = _proc_cpu_seconds(burner.pid) if burner is not None else None
@@ -484,6 +490,18 @@ def _run_processes_inner(seconds, rate, levels, cold_pairs, market_loop, weighte
         samples = [row for child in feeds.children.values() for row in child.samples]
         primary = [row['wait'] for row in samples if row.get('role') == 'primary' and row.get('wait') is not None]
         backup = [row['wait'] for row in samples if row.get('role') == 'backup' and row.get('wait') is not None]
+
+        def age_report(rows):
+            waits = [row['wait'] for row in rows if row.get('role') == 'primary' and isinstance(row.get('wait'), (int, float))]
+            series = queue_age_series(rows, wall0)
+            return dict(p50=pct(waits, .5) * 1000 if waits else None,
+                        p99=pct(waits, .99) * 1000 if waits else None,
+                        max=max(waits) * 1000 if waits else None, samples=len(waits),
+                        series_1s=series,
+                        series_max_ms=max((point['queue_age_ms'] for point in series), default=None))
+
+        by_group = {key: age_report(feeds.children[key].samples) for key in hot_keys if key in feeds.children}
+        overall_age = age_report(samples)
         ready_rows = [row for row in samples if row.get('role') == 'backup' and 'ready' in row]
         status = observer.snapshot()
         codes = []
@@ -528,10 +546,14 @@ def _run_processes_inner(seconds, rate, levels, cold_pairs, market_loop, weighte
                       primary_queue_wait_ms=dict(p50=pct(primary, .5) * 1000 if primary else None,
                                                  p99=primary_p99,
                                                  max=max(primary) * 1000 if primary else None, samples=len(primary)),
+                      primary_queue_age_by_group=by_group,
+                      primary_queue_age=overall_age,
+                      primary_queue_age_definition=PRIMARY_QUEUE_AGE_DEFINITION,
                       backup_queue_wait_ms=dict(p50=pct(backup, .5) * 1000 if backup else None,
                                                 p99=pct(backup, .99) * 1000 if backup else None,
                                                 max=max(backup) * 1000 if backup else None, samples=len(backup)),
                       failover_gaps_s=gaps, failover_gap_max_s=gap_max,
+                      failover_gap_definition=FAILOVER_GAP_DEFINITION,
                       kicks=len(kick_at), codes_1008=codes_1008,
                       close_reasons=status.get('close_reason_counts'),
                       parent_mode=status.get('mode'),
