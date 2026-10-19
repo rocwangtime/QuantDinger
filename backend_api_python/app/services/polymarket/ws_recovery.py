@@ -17,7 +17,6 @@ STALE_SECONDS = 2
 # book for a while (1.6-4.4s seen on 2026-10-20), so 0.5s retries only fail.
 # The first stale answer of a streak waits 1s (a live book is rarely stale
 # twice), the next ones 5s. A completed repair ends the streak.
-STALE_FIRST_RETRY_SECONDS = 0.5  # same cadence as any failure: a live book is rarely stale twice
 STALE_RETRY_SECONDS = 5
 FAILURE_LOG_SECONDS = 30
 
@@ -250,9 +249,9 @@ class SnapshotRecovery:
             if reason == 'stale':
                 # Same cached book for seconds: do not burn the 10s budget.
                 streak = state['_rest_stale_streak'] = state.get('_rest_stale_streak', 0) + 1
-                wait = STALE_FIRST_RETRY_SECONDS if streak == 1 else STALE_RETRY_SECONDS
-                state[retry_key] = max(state.get(retry_key, 0), now + wait)
                 if streak > 1:
+                    # First stale answer keeps the normal retry set at request start.
+                    state[retry_key] = max(state.get(retry_key, 0), now + STALE_RETRY_SECONDS)
                     self.count(kind, 'stale_backoff', now)
             self.unlogged[reason] += 1
             emit = now - self.logged_at >= FAILURE_LOG_SECONDS
