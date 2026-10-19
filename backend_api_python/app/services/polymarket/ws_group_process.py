@@ -817,7 +817,7 @@ def child_main(spec, data_conn, control_conn):
         flusher.start()
         _install_forwarder(outbox)
         manager = observer.MarketConnections()
-        manager.primary_first = True
+        manager.primary_first = os.getenv('QD_REPLAY_PRIMARY_FIRST', '1') != '0'  # VERIFY-ONLY toggle
         manager.backup_serial = int(spec.get('shard_base') or 0) * 10000
         _publish_hook(manager, outbox, spec['key'], int(spec.get('shard_base') or 0))
         if spec.get('rates'):

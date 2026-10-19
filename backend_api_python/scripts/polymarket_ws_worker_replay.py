@@ -438,6 +438,17 @@ def _run_processes_inner(seconds, rate, levels, cold_pairs, market_loop, weighte
                     except Exception as exc:
                         snapshot_errors.append(repr(exc)[:200])
             threads.append(threading.Thread(target=loop, name='replay-market-loop', daemon=True))
+        parent_load = float(os.environ.get('QD_REPLAY_PARENT_GIL_LOAD', '0') or 0)
+        if parent_load > 0:
+            def gil_burn():
+                while not background_stop.is_set():
+                    t0 = time.perf_counter()
+                    while time.perf_counter() < t0 + 0.02 * parent_load:
+                        pass
+                    rest = 0.02 - (time.perf_counter() - t0)
+                    if rest > 0:
+                        time.sleep(rest)
+            threads.append(threading.Thread(target=gil_burn, name='replay-parent-gil', daemon=True))
         for thread in threads:
             thread.start()
         weights = [PROD_FRAME_WEIGHTS[key] for key in HOT_ORDER] if weighted else None
@@ -481,6 +492,13 @@ def _run_processes_inner(seconds, rate, levels, cold_pairs, market_loop, weighte
             time.sleep(0.05)
         # Drain the 300 ms backup skew plus one batch.
         time.sleep(0.6)
+        if os.environ.get('QD_REPLAY_FULL_DRAIN') == '1':
+            last, still = pipeline.messages, time.monotonic()
+            hard = time.monotonic() + 20
+            while time.monotonic() < hard and time.monotonic() - still < 1.5:
+                time.sleep(0.1)
+                if pipeline.messages != last:
+                    last, still = pipeline.messages, time.monotonic()
         parent_cpu = time.process_time() - cpu
         elapsed = time.monotonic() - began
         background_stop.set()
@@ -502,6 +520,10 @@ def _run_processes_inner(seconds, rate, levels, cold_pairs, market_loop, weighte
 
         by_group = {key: age_report(feeds.children[key].samples) for key in hot_keys if key in feeds.children}
         overall_age = age_report(samples)
+        ready_by_group = {}
+        for key in hot_keys:
+            rows_k = [row for row in feeds.children[key].samples if row.get('role') == 'backup' and 'ready' in row]
+            ready_by_group[key] = (sum(bool(row.get('ready')) for row in rows_k) / len(rows_k)) if rows_k else None
         ready_rows = [row for row in samples if row.get('role') == 'backup' and 'ready' in row]
         status = observer.snapshot()
         codes = []
@@ -547,7 +569,7 @@ def _run_processes_inner(seconds, rate, levels, cold_pairs, market_loop, weighte
                                                  p99=primary_p99,
                                                  max=max(primary) * 1000 if primary else None, samples=len(primary)),
                       primary_queue_age_by_group=by_group,
-                      primary_queue_age=overall_age,
+                      primary_queue_age=overall_age, ready_by_group=ready_by_group,
                       primary_queue_age_definition=PRIMARY_QUEUE_AGE_DEFINITION,
                       backup_queue_wait_ms=dict(p50=pct(backup, .5) * 1000 if backup else None,
                                                 p99=pct(backup, .99) * 1000 if backup else None,
