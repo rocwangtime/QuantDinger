@@ -208,6 +208,41 @@ def test_ready_drop_while_receiving_fails_the_gate():
     assert ready_drops_while_receiving(dropped) == 1
 
 
+def test_child_ready_probe_is_copied_not_summed():
+    """A second child must not add its number into the spare that owns the group."""
+    btc = dict(group='up_down:BTC:5m', feed='up_down:BTC:5m', liveness_backup=True,
+               ready_count=1, spare_count=1,
+               spares=[dict(ready=True, blockers=[], received_frames=40, envelope_age_s=0.2)])
+    eth = dict(group='up_down:ETH:5m', feed='up_down:ETH:5m', liveness_backup=True,
+               ready_count=0, spare_count=1,
+               spares=[dict(ready=False, blockers=['stale_envelope'], received_frames=12)])
+    other = dict(group='up_down:BTC:5m', feed='up_down:ETH:5m', liveness_backup=True,
+                 ready_count=4, spare_count=1,
+                 spares=[dict(ready=False, blockers=['missing_envelope'], received_frames=0)])
+    parts = [
+        dict(key='up_down:BTC:5m', status={
+            'ws_child_ready': {'up_down:BTC:5m': btc},
+            'ws_hot_backup_by_group': {'up_down:BTC:5m': {'ready_backup_count': 1},
+                                       'up_down:ETH:5m': {'ready_backup_count': 0}}}),
+        dict(key='up_down:ETH:5m', status={
+            'ws_child_ready': {'up_down:ETH:5m': eth, 'up_down:BTC:5m': other},
+            'ws_hot_backup_by_group': {'up_down:BTC:5m': {'ready_backup_count': 0},
+                                       'up_down:ETH:5m': {'ready_backup_count': 0}}}),
+    ]
+    merged = merge_feed_status(parts)
+    probe = merged['ws_child_ready']['up_down:BTC:5m']
+    assert probe['ready_count'] == 1 and probe['feed'] == 'up_down:BTC:5m'
+    assert probe['spares'][0]['received_frames'] == 40
+    assert probe['also'][0]['ready_count'] == 4 and probe['also'][0]['feed'] == 'up_down:ETH:5m'
+    assert merged['ws_child_ready']['up_down:ETH:5m']['spares'][0]['blockers'] == ['stale_envelope']
+    assert merged['ws_hot_backup_by_group']['up_down:BTC:5m']['ready_backup_count'] == 1
+    assert merged['ws_hot_backup_by_group']['up_down:ETH:5m']['ready_backup_count'] == 0
+    flipped = merge_feed_status(list(reversed(parts)))
+    owned = flipped['ws_child_ready']['up_down:BTC:5m']
+    assert owned['ready_count'] == 1 and owned['feed'] == 'up_down:BTC:5m'
+    assert owned['also'][0]['feed'] == 'up_down:ETH:5m'
+
+
 class _Inbox:
     def __init__(self):
         self.invalid = threading.Event()
@@ -333,6 +368,12 @@ def test_ready_backup_count_includes_a_liveness_spare():
     assert observer.STATUS['ws_hot_backup_by_group']['up_down:BTC:5m']['ready_backup_count'] == 1
     assert observer.STATUS['ws_backups'][0]['ready'] is True
     assert shadow.books == {}
+    probe = manager.child_ready_probe()['up_down:BTC:5m']
+    assert probe['ready_count'] == 1 and probe['spare_count'] == 1
+    spare = probe['spares'][0]
+    assert spare['ready'] is True and spare['blockers'] == []
+    assert spare['seen_assets'] == 2 and spare['required_assets'] == 2
+    assert spare['envelope_fresh'] is True and spare['missing_assets'] == []
 
 
 def test_exchange_frames_keep_a_receiving_spare_ready(monkeypatch):
@@ -376,6 +417,9 @@ def test_fresh_pong_holds_ready_across_a_quiet_gap(monkeypatch):
     assert manager.backup_ready(backup) is True
     assert 'stale_envelope' not in manager.readiness_blockers(backup)
     assert manager.update_hot_coverage(clock['now'])['up_down:BTC:5m']['ready_backup_count'] == 1
+    probe = manager.child_ready_probe(clock['now'])['up_down:BTC:5m']['spares'][0]
+    assert probe['ready'] is True and probe['envelope_fresh'] is False and probe['link_fresh'] is True
+    assert probe['pong_age_s'] == 1 and 'stale_envelope' not in probe['blockers']
     backup['liveness_assets'] = {'ay'}
     assert manager.backup_ready(backup) is False
     assert 'missing_envelope' in manager.readiness_blockers(backup)

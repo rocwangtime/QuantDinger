@@ -300,6 +300,31 @@ def merge_feed_status(parts):
                     if isinstance(row, dict) and 'shard' in row and isinstance(row.get('shard'), int):
                         row = dict(row, shard=row['shard'] + base)
                     rows.append(row)
+            elif key == 'ws_child_ready' and isinstance(value, dict):
+                # Copy each child's spare probe. Do not add ready_count: other
+                # children publish nothing for this group, and a sum would hide
+                # a healthy spare behind someone else's zero.
+                bucket = merged.setdefault(key, {})
+                feed = part.get('key')
+                for group, row in value.items():
+                    if not isinstance(row, dict):
+                        continue
+                    copied = copy.deepcopy(row)
+                    copied['feed'] = feed or copied.get('feed')
+                    prior = bucket.get(group)
+                    if not isinstance(prior, dict):
+                        bucket[group] = copied
+                        continue
+                    copied_owns = copied.get('feed') == group
+                    prior_owns = prior.get('feed') == group
+                    prefer = copied_owns and not prior_owns or (
+                        copied_owns == prior_owns
+                        and (copied.get('spare_count') or 0) > (prior.get('spare_count') or 0))
+                    if prefer:
+                        copied['also'] = [prior, *list(prior.get('also') or [])]
+                        bucket[group] = copied
+                    else:
+                        prior.setdefault('also', []).append(copied)
             elif key in MERGE_DICTS and isinstance(value, dict):
                 bucket = merged.setdefault(key, {})
                 for sub, item in value.items():
