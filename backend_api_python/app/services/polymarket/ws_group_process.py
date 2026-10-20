@@ -552,6 +552,14 @@ class ReplaySocket:
         self.sock = None
         from .ws_transport import TransportDiagnostics
         self.transport = TransportDiagnostics()
+        self.stalled_until = 0.0
+
+    def stall(self, seconds):
+        """Replay-only dead link: no frames and no PONG for `seconds`, socket stays open."""
+        self.stalled_until = time.monotonic() + max(0.0, float(seconds))
+
+    def stalled(self):
+        return time.monotonic() < self.stalled_until
 
     def run_forever(self, **kwargs):
         self.callbacks['on_open'](self)
@@ -559,7 +567,8 @@ class ReplaySocket:
 
     def send(self, raw):
         if raw == 'PING':
-            self.transport.pong()
+            if not self.stalled():
+                self.transport.pong()
             return
         message = json.loads(raw)
         if message.get('operation') == 'unsubscribe':
@@ -582,6 +591,8 @@ class ReplaySocket:
         self.stopped.set()
 
     def emit(self, raw):
+        if self.stalled():
+            return
         self.transport.read(len(raw) if isinstance(raw, str) else len(raw))
         self.callbacks['on_message'](self, raw)
 
@@ -727,6 +738,18 @@ def without_stale_books(event, metadata):
     if previous is not None and at is not None and at < previous:
         return None
     return event
+
+
+def _replay_stall_seconds():
+    """Replay-only. QD_REPLAY_KICK_MODE=stall:SECONDS turns each kick into a silent primary
+    (no frames, no PONG, socket open) instead of a 1013 close. Production never sets this."""
+    mode = os.getenv('QD_REPLAY_KICK_MODE', '').strip().lower()
+    if not mode.startswith('stall:'):
+        return 0.0
+    try:
+        return max(0.0, float(mode.split(':', 1)[1]))
+    except ValueError:
+        return 0.0
 
 
 def _replay_rest_mode():
@@ -975,7 +998,10 @@ def _control_loop(manager, outbox, control, replay):
                 _arm_replay_echo()
             outbox.mark_kick()
             sock = _socket_for(manager, 'primary')
-            if sock is not None and hasattr(sock, 'kick'):
+            stall = _replay_stall_seconds()
+            if stall and sock is not None and hasattr(sock, 'stall'):
+                sock.stall(stall)
+            elif sock is not None and hasattr(sock, 'kick'):
                 sock.kick(message.get('code', 1013), message.get('reason') or 'slow consumer')
         elif op == 'emit' and replay:
             sock = _socket_for(manager, message.get('role') or 'primary')
