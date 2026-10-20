@@ -1277,6 +1277,7 @@ HELD_CHANGES_MAX = 256
 # the 22s PONG timeout. Exchange timestamps are not compared to the wall clock:
 # liveness_at is the monotonic time the frame was received.
 LIVENESS_ENVELOPE_SECONDS = 15
+LIVENESS_SILENCE_COOLDOWN_SECONDS = 60
 
 
 class _LivenessShadow:
@@ -1356,6 +1357,8 @@ class MarketConnections:
         self.primary_first_lag_seconds = 0.05
         # Feed processes set this. Backups then check liveness and hash only.
         self.liveness_backup = False
+        # Primary byte silence seen from a receiving liveness spare (per group).
+        self.liveness_silence = {}
         self.stage_lock = RLock()
         self.stage_cpu = dict(primary_parse=0.0, primary_apply=0.0, backup_parse=0.0, backup_apply=0.0)
 
@@ -1508,7 +1511,58 @@ class MarketConnections:
         if healthy != bool(state.get('ready')):
             state['ready'] = healthy
             self.update_hot_coverage(now)
+        if healthy:
+            self._liveness_byte_silence(index, state, now)
         self._promote_liveness_backup(index, state)
+
+    def _liveness_byte_silence(self, index, state, now=None):
+        """Mark a silent primary suspect while this spare still receives.
+
+        The shadow path does this in redundant_receive; a liveness spare never
+        runs that, so without this a dead link waits for the 22s PONG timeout
+        (09:36 ETH15m on 2026-10-20: 24s gap while the spare read 205 KB/s).
+        Requires the primary to be byte-quiet (data and PONG) for the hot
+        silence window and this spare to have an envelope newer than the
+        primary's last byte within 1s. A quiet market silences both, so it
+        never fires. At most one per group per LIVENESS_SILENCE_COOLDOWN_SECONDS;
+        later ones fall back to the PONG timeout.
+        """
+        now = time.monotonic() if now is None else now
+        old = self.states.get(index)
+        if (old is None or old is state or not old.get('connected') or old.get('data_suspect')
+                or old.get('pong_dead') or old.get('retired') or old.get('standby')):
+            return False
+        old_inbox = old.get('inbox')
+        if old_inbox is None or old_inbox.invalid.is_set():
+            return False
+        transport = getattr(old.get('socket'), 'transport', None)
+        last_byte = max((at for at in (getattr(old_inbox, 'last_byte_at', None), getattr(transport, 'last_read_at', None))
+                         if at is not None), default=None)
+        if last_byte is None:
+            return False
+        quiet = min(5, ws_setting('HOT_BYTE_SILENCE_SECONDS', 4, 3))
+        mine = state.get('liveness_at')
+        if now - last_byte < quiet or mine is None or mine <= last_byte or now - mine > 1:
+            return False
+        received = getattr(state.get('inbox'), 'last_data_at', None)
+        if received is not None and received <= last_byte:
+            return False
+        groups = sorted({self.balancer.groups.get(a, '').split(':outcome:')[0] for a in old.get('assets') or []} - {''})
+        key = groups[0] if groups else str(index)
+        row = self.liveness_silence.setdefault(key, dict(promotions=0, suppressed=0, last_at=None, last_silence_s=None))
+        silence = round(now - last_byte, 3)
+        last = row.get('_last_monotonic')
+        if last is not None and now - last < LIVENESS_SILENCE_COOLDOWN_SECONDS:
+            row['suppressed'] += 1
+            return False
+        row.update(promotions=row['promotions'] + 1, last_at=datetime.now(timezone.utc).isoformat(),
+                   last_silence_s=silence, _last_monotonic=now)
+        old.update(data_suspect=True, failure_reason='byte_silence')
+        old.setdefault('failed_at', now)
+        _LOG.warning('Polymarket WS primary byte silence group=%s shard=%s silence_s=%s spare=%s',
+                     key, index, silence, state.get('source'))
+        self.record_primary_failure(index, old, None)
+        return True
 
     def _remember_books(self, state, event):
         marks = state.setdefault('book_marks', {})
@@ -3845,6 +3899,7 @@ class MarketConnections:
                           ws_hot_rotate_seconds=ws_setting('HOT_ROTATE_SECONDS', 0, 0),
                           ws_hot_byte_silence_seconds=min(5, ws_setting('HOT_BYTE_SILENCE_SECONDS', 4, 3)),
                           ws_backup_promotions=self.backup_promotions,
+                          ws_liveness_silence={k: {f: v for f, v in row.items() if not f.startswith('_')} for k, row in self.liveness_silence.items()},
                           ws_backups={i: self.backup_metrics(i, s, now) for i, s in self.backups.items()},
                           ws_merge_metrics={i: dict(duplicates=m.duplicates, stale=m.stale, evictions=m.evictions,
                               entries=len(m.seen), capacity=m.maximum, sources_per_entry_limit=4,
