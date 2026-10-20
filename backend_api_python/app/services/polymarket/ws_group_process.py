@@ -453,6 +453,14 @@ def _merge_recovery(left, right):
     latency['max'] = max(latency.get('max') or 0, other.get('max') or 0)
     latency['p95'] = max((value for value in (latency.get('p95'), other.get('p95')) if value is not None), default=None)
     merged['latency_ms'] = latency
+    reasons = merged.get('failure_reasons') or {}
+    for name, row in (right.get('failure_reasons') or {}).items():
+        reasons[name] = _sum_numbers(reasons.get(name, {}), row)
+    if reasons:
+        merged['failure_reasons'] = reasons
+    last = [row for row in (left.get('last_failure'), right.get('last_failure')) if row]
+    if last:
+        merged['last_failure'] = max(last, key=lambda row: row.get('at') or '')
     return merged
 
 
