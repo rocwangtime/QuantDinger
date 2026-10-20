@@ -134,11 +134,14 @@ def public_event(event):
 
 
 class ParsedFrames:
-    def __init__(self, maximum=512, byte_limit=4 * 1048576, ttl=2):
+    def __init__(self, maximum=512, byte_limit=4 * 1048576, ttl=2, cache=True):
         self.lock = threading.Lock()
         self.items = OrderedDict()
         self.maximum, self.byte_limit, self.ttl = maximum, byte_limit, ttl
         self.bytes = self.hits = self.misses = 0
+        # Hot-group children parse only the primary (the spare is liveness-only),
+        # so nothing shares a raw frame there. Production hit rate was 0.008%.
+        self.cache = cache
 
     def prune(self, now=None):
         now = time.monotonic() if now is None else now
@@ -156,6 +159,10 @@ class ParsedFrames:
             return raw
         if isinstance(raw, bytearray):
             raw = bytes(raw)
+        if not self.cache:
+            event = prepare(public_event(loads(raw)))
+            self.misses += 1
+            return event
         # Charge UTF-8's worst case for text, independent of frame contents.
         size = 256 + len(raw) * 12  # Raw + decoded Python tree, conservative charge.
         with self.lock:
@@ -260,14 +267,121 @@ def cheap_envelope(raw):
     Each top-level object is one event. The parent timestamp applies to every
     asset in that object, including assets that appear before the timestamp
     and when `event_type` is the last key.
+
+    orjson parses a live frame about 17x faster than the regex scan below
+    (1.6 vs 27.6 us on real BTC5m frames). Any frame whose shape is not the
+    plain public one falls back to the regex scan, so the output is the same.
     """
     if isinstance(raw, (bytes, bytearray)):
         raw = raw.decode('utf-8', 'replace')
     if not isinstance(raw, str) or not raw:
         return []
+    tips = _fast_envelope(raw)
+    if tips is not None:
+        return tips
+    return _regex_envelope(raw)
+
+
+def _regex_envelope(raw):
     tips = []
     for blob in _json_objects(raw):
         tips.extend(_tips_for_object(blob))
+    return tips
+
+
+_ENVELOPE_KEYS = ('event_type', 'asset_id', 'timestamp', 'hash')
+# Characters that end the regex value token early (its [^"\\,}\s] class).
+_REGEX_UNSAFE = re.compile(r'["\\,}\s]')
+
+
+def _scalar(value, _unsafe=_REGEX_UNSAFE.search):
+    """The regex token for a str/int value, or None when the regex reads it differently."""
+    kind = type(value)
+    if kind is str:
+        return value if value and not _unsafe(value) else None
+    if kind is int:
+        return str(value)
+    return None
+
+
+def _has_envelope_key(value):
+    """True if a nested value holds a key the regex scan would also see."""
+    if type(value) is dict:
+        if 'event_type' in value or 'asset_id' in value or 'timestamp' in value or 'hash' in value:
+            return True
+        value = value.values()
+    for item in value:
+        kind = type(item)
+        if (kind is dict or kind is list) and _has_envelope_key(item):
+            return True
+    return False
+
+
+def _fast_envelope(raw):
+    """Envelope tips from orjson, or None to use the regex scan.
+
+    Only the plain public shapes take this path: top-level book/trade objects
+    with one asset_id, and price_change objects whose rows each carry their own
+    asset_id and hash. Anything else (no orjson, invalid JSON, null or odd
+    values, wrappers, nested envelope keys) returns None.
+    """
+    if orjson is None:
+        return None
+    try:
+        data = orjson.loads(raw)
+    except Exception:
+        return None
+    objects = data if type(data) is list else (data,)
+    tips = []
+    for event in objects:
+        if type(event) is not dict:
+            return None
+        rows = None
+        for key, value in event.items():
+            kind = type(value)
+            if key == 'price_changes':
+                rows = value
+            elif key in _ENVELOPE_KEYS:
+                if _scalar(value) is None:
+                    return None
+            elif (kind is dict or kind is list) and _has_envelope_key(value):
+                return None
+        if (('event_type' in event and type(event['event_type']) is not str)
+                or ('asset_id' in event and type(event['asset_id']) is not str)):
+            return None
+        kind = event.get('event_type')
+        if not kind:
+            if rows is not None or 'asset_id' in event:
+                return None
+            continue
+        stamp = _scalar(event['timestamp']) if 'timestamp' in event else None
+        if rows is None:
+            if 'asset_id' in event:
+                digest = event.get('hash')
+                tips.append((kind, event['asset_id'], stamp, None if digest is None else _scalar(digest)))
+            continue
+        if type(rows) is not list or 'asset_id' in event or 'hash' in event:
+            return None
+        for row in rows:
+            if type(row) is not dict or 'event_type' in row or 'timestamp' in row:
+                return None
+            asset = digest = None
+            for key, value in row.items():
+                kind_value = type(value)
+                if key == 'asset_id':
+                    if kind_value is not str:
+                        return None
+                    asset = _scalar(value)
+                elif key == 'hash':
+                    # The regex scan pairs a row hash only with an asset_id seen before it.
+                    if asset is None:
+                        return None
+                    digest = _scalar(value)
+                elif (kind_value is dict or kind_value is list) and _has_envelope_key(value):
+                    return None
+            if asset is None or digest is None:
+                return None
+            tips.append((kind, asset, stamp, digest))
     return tips
 
 

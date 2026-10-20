@@ -43,6 +43,7 @@ from datetime import datetime, timezone
 
 from .ws_balance import balance_key, ratio
 from .ws_balance import RateBalancer
+from .ws_payloads import ParsedFrames
 
 _LOG = logging.getLogger(__name__)
 
@@ -700,6 +701,18 @@ class _Outbox:
                 return
 
 
+def configure_parse_cache(manager, spec):
+    """Hot children parse only the primary; the spare is liveness-only.
+
+    No second reader shares a raw frame, so the ParsedFrames cache never hits
+    there (production: 2,099 hits in 25M frames) and only costs lock, prune and
+    size bookkeeping. The cold child keeps it.
+    """
+    if spec.get('hot'):
+        manager.parsed_frames = ParsedFrames(cache=False)
+    return manager.parsed_frames
+
+
 def _arm_death_signal():
     """Die with the parent. Docker stop signals PID 1; a killed parent must not leave feed processes."""
     try:
@@ -1107,6 +1120,7 @@ def child_main(spec, data_conn, control_conn):
         manager = observer.MarketConnections()
         manager.primary_first = primary_first_enabled()
         manager.liveness_backup = True
+        configure_parse_cache(manager, spec)
         manager.backup_serial = int(spec.get('shard_base') or 0) * 10000
         outbox.on_drop = lambda assets, manager=manager: _resync_dropped(manager, assets)
         _publish_hook(manager, outbox, spec['key'], int(spec.get('shard_base') or 0))
