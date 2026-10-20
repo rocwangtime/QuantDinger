@@ -2056,6 +2056,23 @@ class MarketConnections:
         ends = self._end_by_asset
         return {a for a in assets if (at := ends.get(str(a))) is not None and at <= now}
 
+    def _rest_watermarks(self, index, state, assets):
+        """asset -> (latest WS exchange time, WS book hash when that book is the latest change)."""
+        merge = self.merges.get(index)
+        latest = merge.latest if merge is not None else {}
+        marks = state.get('book_marks') or {}
+        rows = {}
+        for asset in assets:
+            key = str(asset)
+            at = latest.get(key, latest.get(asset))
+            mark = marks.get(key) or marks.get(asset)
+            mark_at = mark[0] if mark else None
+            if mark_at is not None and (at is None or mark_at >= at):
+                rows[key] = (mark_at, mark[1] if len(mark) > 1 else None)
+            elif at is not None:
+                rows[key] = (at, None)
+        return rows
+
     def request_snapshot(self, index, state, assets, pressure=False):
         ended = self.ended_assets(assets)
         if ended:
@@ -2110,6 +2127,8 @@ class MarketConnections:
                         # the timer covers a push that never arrives.
                         self._resubscribe_books(index, state)
                         self._arm_book_fallback(index, state)
+        state['_rest_watermarks'] = self._rest_watermarks(index, state, assets)
+        state['_rest_hot'] = bool(self.hot_shard(index))
         if pressure:
             accepted = self.snapshot_recovery.request(state, assets, publish, pressure=True)
         else:

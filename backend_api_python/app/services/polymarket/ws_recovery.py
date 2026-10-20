@@ -11,13 +11,24 @@ from .client import CLOB
 from . import recording
 
 _LOG = logging.getLogger(__name__)
-# A /books answer whose book timestamp is this far from local time is stale.
+# /books `timestamp` is the book's last-change time, not the serve time: a
+# quiet (cold) book is legitimately minutes old while current (2026-10-20:
+# REST ts == last WS book ts, 108.8s old). Freshness is therefore checked
+# against the WS watermark (latest exchange time seen for that asset):
+# - older than the watermark: rejected (`behind_ws`), never rolls WS back;
+# - more than FUTURE_SKEW_SECONDS ahead of local time: rejected (`future`);
+# - hot assets additionally keep the wall-clock limit (`stale`, STALE_SECONDS);
+# - cold assets with no watermark accept up to COLD_UNMARKED_MAX_SECONDS.
 STALE_SECONDS = 2
+FUTURE_SKEW_SECONDS = 2
+COLD_UNMARKED_MAX_SECONDS = 600
 # Retry delay after stale answers. The server keeps serving the same cached
 # book for a while (1.6-4.4s seen on 2026-10-20), so 0.5s retries only fail.
-# The first stale answer of a streak waits 1s (a live book is rarely stale
-# twice), the next ones 5s. A completed repair ends the streak.
+# The first stale answer of a streak keeps the normal request-start retry
+# (0.5s); from the second consecutive one, wait STALE_RETRY_SECONDS. A
+# completed repair ends the streak.
 STALE_RETRY_SECONDS = 5
+BACKOFF_REASONS = frozenset({'stale', 'behind_ws'})
 FAILURE_LOG_SECONDS = 30
 
 
@@ -28,6 +39,26 @@ class SnapshotRejected(ValueError):
         super().__init__(message)
         self.reason = reason
         self.age_s = age_s
+
+
+def check_freshness(at, age, digest, watermark, hot):
+    """Raise SnapshotRejected unless this /books row may replace the WS book.
+
+    `watermark` is (latest exchange time seen for the asset, last WS book
+    hash if that book is the latest change) or None. Hot rules are the old
+    wall-clock rule plus the watermark, never looser.
+    """
+    if age < -FUTURE_SKEW_SECONDS:
+        raise SnapshotRejected('future', 'public snapshot from the future', age)
+    mark_at, mark_hash = watermark if watermark else (None, None)
+    same_book = bool(digest and mark_hash and digest == mark_hash)
+    if mark_at is not None and at < mark_at and not same_book:
+        raise SnapshotRejected('behind_ws', 'public snapshot older than the WS watermark', age)
+    if hot:
+        if age > STALE_SECONDS:
+            raise SnapshotRejected('stale', 'stale public snapshot', age)
+    elif mark_at is None and age > COLD_UNMARKED_MAX_SECONDS:
+        raise SnapshotRejected('stale', 'stale public snapshot', age)
 
 
 def failure_reason(exc):
@@ -147,6 +178,10 @@ class SnapshotRecovery:
                     state[retry_key] = max(state[retry_key], self.background_starts[0] + 3600)
                 return False
             self.active.add(identity)
+            # Watermarks as of the request. A newer WS write meanwhile is still
+            # protected by FeedMerge, which drops any book older than it.
+            watermarks = dict(state.get('_rest_watermarks') or {})
+            hot = bool(state.get('_rest_hot', True))
             remaining = [len(groups)]
             state[retry_key] = now + (60 if warm else 30 if pressure else .5)
             jobs = [(group, self.slots.pop()) for group in groups]
@@ -186,8 +221,7 @@ class SnapshotRecovery:
                     if asset not in group or asset in seen or at is None:
                         raise SnapshotRejected('identity', 'invalid public snapshot identity/time')
                     age = (datetime.now(timezone.utc) - at).total_seconds()
-                    if abs(age) > STALE_SECONDS:
-                        raise SnapshotRejected('stale', 'stale public snapshot', age)
+                    check_freshness(at, age, row.get('hash'), watermarks.get(asset), hot)
                     seen.add(asset)
                     for side in ('bids', 'asks'):
                         if not isinstance(row.get(side), list) or any(
@@ -246,7 +280,7 @@ class SnapshotRecovery:
             self.count(kind, "failures", now)
             self.failure_reasons[kind][reason] += 1
             self.last_failure = detail
-            if reason == 'stale':
+            if reason in BACKOFF_REASONS:
                 # Same cached book for seconds: do not burn the 10s budget.
                 streak = state['_rest_stale_streak'] = state.get('_rest_stale_streak', 0) + 1
                 if streak > 1:
