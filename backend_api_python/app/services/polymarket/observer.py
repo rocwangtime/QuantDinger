@@ -371,10 +371,37 @@ def _prior_group_rates():
         return {}
 
 
+class DiscoveryHealth:
+    """Keep only unexpired hot catalogue rows on a failed series refresh."""
+    def __init__(self):
+        self.previous = []
+        self.all_rejected_at = None
+
+    def update(self, markets, rejected, now=None, monotonic=None):
+        now = now or datetime.now(timezone.utc)
+        monotonic = time.monotonic() if monotonic is None else monotonic
+        failed = {key for key in HOT_SERIES if any(
+            row.get('series') == updown.series_slug(*key.split(':')[1:]) for row in rejected)}
+        known = {m['id'] for m in markets}
+        retained = [m for m in live_markets(self.previous, now)
+                    if balance_key(m) in failed and m['id'] not in known]
+        self.previous = list(markets) + retained
+        if failed == HOT_SERIES:
+            if self.all_rejected_at is None:
+                self.all_rejected_at = monotonic
+        else:
+            self.all_rejected_at = None
+        elapsed = monotonic - self.all_rejected_at if self.all_rejected_at is not None else 0
+        return self.previous, dict(rejected_hot_groups=sorted(failed), retained_markets=len(retained),
+            all_hot_rejected_seconds=elapsed, level1_alert=elapsed > 120,
+            alert='all_hot_discovery_rejected' if elapsed > 120 else None)
+
+
 def _market_loop():
     global _REFERENCE, _WS
     client = PublicClient()
     series_cache = {}
+    discovery_health = DiscoveryHealth()
     yes_markets = []
     yes_refresh = 0
     if updown.enabled():
@@ -402,10 +429,12 @@ def _market_loop():
                     if updown.enabled():
                         warm_markets = []
                         crypto, rejected = updown.discover(client, series_cache, prewarm=warm_markets)
+                        crypto, discovery_status = discovery_health.update(crypto, rejected)
                         markets.extend(crypto)
                         with _LOCK:
                             STATUS['updown_subscriptions'] = [{k: m[k] for k in ('id', 'asset', 'interval', 'endDate')} for m in crypto[:20]]
                             STATUS['updown_rejections'] = rejected[:20]
+                            STATUS['discovery_health'] = dict(discovery_status, last_http_error=getattr(client, 'last_error', None))
                     if _STOP.is_set():
                         break
                     markets = live_markets(markets)

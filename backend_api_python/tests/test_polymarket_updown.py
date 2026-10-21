@@ -109,7 +109,9 @@ def test_discovery_requests_published_series_slugs_for_every_cell(monkeypatch):
             requested.append(kwargs['params']['slug'])
             return []
 
-    assert updown.discover(Client(), {}, now=NOW) == ([], [])
+    markets, rejected = updown.discover(Client(), {}, now=NOW)
+    assert markets == []
+    assert all(row['reason'] == 'polymarket.seriesUnavailable' for row in rejected)
     assert len(requested) == 20
     # Gamma publishes SOL hourly/daily as "solana-"; every other series uses the ticker.
     assert {'solana-up-or-down-hourly', 'solana-up-or-down-daily', 'sol-up-or-down-5m', 'sol-up-or-down-15m',
