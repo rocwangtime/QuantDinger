@@ -1,6 +1,8 @@
 """Bounded public HTTP reads. No wallet, signing, order, or funding endpoints."""
 
 import time
+import logging
+from urllib.parse import urlsplit, urlunsplit
 
 import requests
 
@@ -11,23 +13,56 @@ CLOB = "https://clob.polymarket.com"
 
 
 class PublicClient:
-    def __init__(self, session=None):
-        self.session = session or requests.Session()
+    def __init__(self, session=None, *, session_factory=None, max_session_age=300, failure_limit=2):
+        self.session_factory = session_factory or requests.Session
+        self.session = session if session is not None else self.session_factory()
+        self.session_started = time.monotonic()
+        self.max_session_age = max_session_age
+        self.failure_limit = failure_limit
+        self.failures = 0
+        self.last_error = None
 
     def close(self):
         self.session.close()
 
+    def _renew(self):
+        self.session.close()
+        self.session = self.session_factory()
+        self.session_started = time.monotonic()
+        self.failures = 0
+
     def _json(self, method, url, **kwargs):
+        if time.monotonic() - self.session_started >= self.max_session_age:
+            self._renew()
+        response = None
         try:
             response = self.session.request(method, url, timeout=(3, 8), allow_redirects=False, **kwargs)
+            if 300 <= getattr(response, 'status_code', 200) < 400:
+                raise requests.HTTPError('redirect response')
             response.raise_for_status()
             if len(response.content) > 8 * 1024 * 1024:
                 raise ValueError("polymarket.responseTooLarge")
-            return response.json()
-        except requests.RequestException:
-            raise ValueError("polymarket.publicApiUnavailable") from None
-        except (TypeError, requests.exceptions.JSONDecodeError):
-            raise ValueError("polymarket.invalidApiResponse") from None
+            content_type = getattr(response, 'headers', {}).get('Content-Type', '').split(';')[0].lower()
+            if content_type and content_type != 'application/json' and not content_type.endswith('+json'):
+                raise ValueError('polymarket.nonJsonResponse')
+            result = response.json()
+        except (requests.RequestException, ValueError, TypeError) as exc:
+            # Public diagnostics only: no response body, URL query, userinfo, or headers.
+            location = urlsplit(getattr(response, 'headers', {}).get('Location', '')) if response is not None else None
+            self.last_error = dict(exception_class=type(exc).__name__,
+                http_status=getattr(response, 'status_code', 200) if response is not None else None,
+                host=urlsplit(url).hostname,
+                location=urlunsplit((location.scheme, location.hostname or '', location.path, '', '')) if location else None)
+            logging.getLogger(__name__).warning('Polymarket public HTTP failure %s', self.last_error)
+            self.failures += 1
+            if self.failures >= self.failure_limit:
+                self._renew()
+            error = ('polymarket.invalidApiResponse' if isinstance(exc, (TypeError, requests.exceptions.JSONDecodeError))
+                     or isinstance(exc, ValueError) and not isinstance(exc, requests.RequestException)
+                     else 'polymarket.publicApiUnavailable')
+            raise ValueError(error) from None
+        self.failures = 0
+        return result
 
     def market(self, market_id):
         identity = str(market_id)

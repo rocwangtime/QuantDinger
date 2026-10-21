@@ -26,7 +26,7 @@ from .ws_rotation import DataHealth, ShadowBooks, reconnect_delay
 from .ws_subscriptions import SubscriptionPacer
 from .ws_recovery import SnapshotRecovery
 from .ws_payloads import ParsedFrames, materialized_book, book_bytes
-from .ws_redundancy import DoubleKicks, FeedMerge, FeedContinuity, HotBackupCoverage
+from .ws_redundancy import DoubleKicks, FeedMerge, FeedContinuity, HotBackupCoverage, DisconnectClusters
 from .ws_balance import setting as ws_setting
 from .observer_db import metrics as database_metrics
 
@@ -371,10 +371,37 @@ def _prior_group_rates():
         return {}
 
 
+class DiscoveryHealth:
+    """Keep only unexpired hot catalogue rows on a failed series refresh."""
+    def __init__(self):
+        self.previous = []
+        self.all_rejected_at = None
+
+    def update(self, markets, rejected, now=None, monotonic=None):
+        now = now or datetime.now(timezone.utc)
+        monotonic = time.monotonic() if monotonic is None else monotonic
+        failed = {key for key in HOT_SERIES if any(
+            row.get('series') == updown.series_slug(*key.split(':')[1:]) for row in rejected)}
+        known = {m['id'] for m in markets}
+        retained = [m for m in live_markets(self.previous, now)
+                    if balance_key(m) in failed and m['id'] not in known]
+        self.previous = list(markets) + retained
+        if failed == HOT_SERIES:
+            if self.all_rejected_at is None:
+                self.all_rejected_at = monotonic
+        else:
+            self.all_rejected_at = None
+        elapsed = monotonic - self.all_rejected_at if self.all_rejected_at is not None else 0
+        return self.previous, dict(rejected_hot_groups=sorted(failed), retained_markets=len(retained),
+            all_hot_rejected_seconds=elapsed, level1_alert=elapsed > 120,
+            alert='all_hot_discovery_rejected' if elapsed > 120 else None)
+
+
 def _market_loop():
     global _REFERENCE, _WS
     client = PublicClient()
     series_cache = {}
+    discovery_health = DiscoveryHealth()
     yes_markets = []
     yes_refresh = 0
     if updown.enabled():
@@ -402,10 +429,12 @@ def _market_loop():
                     if updown.enabled():
                         warm_markets = []
                         crypto, rejected = updown.discover(client, series_cache, prewarm=warm_markets)
+                        crypto, discovery_status = discovery_health.update(crypto, rejected)
                         markets.extend(crypto)
                         with _LOCK:
                             STATUS['updown_subscriptions'] = [{k: m[k] for k in ('id', 'asset', 'interval', 'endDate')} for m in crypto[:20]]
                             STATUS['updown_rejections'] = rejected[:20]
+                            STATUS['discovery_health'] = dict(discovery_status, last_http_error=getattr(client, 'last_error', None))
                     if _STOP.is_set():
                         break
                     markets = live_markets(markets)
@@ -1098,6 +1127,9 @@ class ReceiveQueue:
             self.queue.queue = deque()
             self.queue.charged_bytes = 0
             count = len(discarded)
+            self.queue.unfinished_tasks -= count
+            if not self.queue.unfinished_tasks:
+                self.queue.all_tasks_done.notify_all()
             self.queue.not_full.notify_all()
             self.dropped += count
             self.drop_reasons[reason] += count
@@ -1313,6 +1345,8 @@ class MarketConnections:
         self.parsed_frames = ParsedFrames()
         self.primary_failures = {}
         self.double_kicks = DoubleKicks()
+        self.remote_closes = deque(maxlen=128)
+        self.disconnect_clusters = DisconnectClusters()
         self.cache_maintenance_at = 0
         self.sampler = None
         self.backup_next_connect_at = 0
@@ -1329,7 +1363,7 @@ class MarketConnections:
         self.backup_promotions = 0
         self.rotation_last_failure = None
         self.retiring = []
-        self.rotations = self.rotation_failures = 0
+        self.rotations = self.rotation_failures = self.backup_wire_failures = 0
         self.standby_slow_consumers = 0
         self.supervisor_stop = Event()
         self.supervisor = None
@@ -1363,7 +1397,52 @@ class MarketConnections:
         self.stage_cpu = dict(primary_parse=0.0, primary_apply=0.0, backup_parse=0.0, backup_apply=0.0)
 
     def backup_items(self):
-        return list(self.backups.items()) + list(self.reserves.items())
+        return list(self.backups.items()) + [(key[0] if isinstance(key, tuple) else key, row)
+                                           for key, row in self.reserves.items()]
+
+    def remove_backup(self, index, state):
+        for holder in (self.backups, self.reserves):
+            for key, row in list(holder.items()):
+                if row is state:
+                    holder.pop(key, None)
+        if index not in self.backups:
+            for key, row in list(self.reserves.items()):
+                shard = key[0] if isinstance(key, tuple) else key
+                if shard == index:
+                    self.backups[index] = self.reserves.pop(key)
+                    break
+
+    def backup_pong_fresh(self, state, now=None):
+        now = time.monotonic() if now is None else now
+        age = self._liveness_pong_age(state, now)
+        # First PING is sent within 10s. Fresh envelopes permit bootstrap only.
+        if age is None:
+            return now - state.get('opened_at', state.get('created_at', -float('inf'))) <= 10
+        return age <= 15
+
+    def best_backup(self, index):
+        candidates = [c for i, c in self.backup_items() if i == index and (self.backup_ready(c)
+            or self.states.get(index, {}).get('pong_dead') and self.promotable_backup(c) and self.backup_pong_fresh(c))]
+        return min(candidates, key=lambda c: (c['inbox'].pending_wait_seconds(),
+            -c.get('opened_at', 0)), default=None)
+
+    def primary_pressure(self, index, now):
+        old = self.states.get(index)
+        if not old or not old.get('connected') or old.get('data_suspect'):
+            return False
+        candidate = self.best_backup(index)
+        inbox = old.get('inbox')
+        lag = inbox.pending_wait_seconds() if inbox else 0
+        if (not candidate or lag < .5 or lag - candidate['inbox'].pending_wait_seconds() < .25
+                or now - old.get('last_pressure_promotion', -float('inf')) < 30):
+            old.pop('pressure_since', None)
+            return False
+        since = old.setdefault('pressure_since', now)
+        if now - since < 1:
+            return False
+        old.update(data_suspect=True, failure_reason='ingress_pressure', failed_at=now)
+        self.record_primary_failure(index, old, None)
+        return True
 
     def _primary_blocks_backup(self, index, state):
         """Pause this backup worker while its primary queue is actually old.
@@ -1488,7 +1567,7 @@ class MarketConnections:
         hashes = state.get('liveness_hash') or {}
         if any(asset in hashes and not hashes[asset] for asset in required):
             return False
-        return self._liveness_link_fresh(state)
+        return self._liveness_link_fresh(state) and self.backup_pong_fresh(state)
 
     def liveness_receive(self, index, state, raw, received_at, inbox):
         """Backup path that does not rebuild a book. Failover resyncs from a snapshot."""
@@ -1512,8 +1591,27 @@ class MarketConnections:
             state['ready'] = healthy
             self.update_hot_coverage(now)
         if healthy:
+            state['ever_ready'] = True
             self._liveness_byte_silence(index, state, now)
         self._promote_liveness_backup(index, state)
+
+    def silence_reason(self, state):
+        pending = socket_pending_bytes(state.get('socket'))
+        inbox = state.get('inbox')
+        lag = inbox.pending_wait_seconds() if inbox else 0
+        reason = 'ingress_pressure' if (pending or 0) > 0 or lag >= 4 else 'byte_silence'
+        state['silence_evidence'] = dict(reason=reason, tcp_pending_bytes=pending,
+            queue_wait_seconds=lag, remote_silence_confirmed=pending == 0 and lag < 4)
+        return reason
+
+    def transfer_outage(self, index, old, new):
+        # Every promotion gets an event; final gap is closed by publication.
+        if not old.get('failure_recorded'):
+            old.setdefault('failure_reason', 'planned_rotation')
+            self.record_primary_failure(index, old, None)
+        if 'outage_at' in old:
+            new.update(outage_at=old.pop('outage_at'), outage_wall=old['outage_wall'],
+                       outage_events=old.pop('outage_events', []))
 
     def _liveness_byte_silence(self, index, state, now=None):
         """Mark a silent primary suspect while this spare still receives.
@@ -1557,7 +1655,8 @@ class MarketConnections:
             return False
         row.update(promotions=row['promotions'] + 1, last_at=datetime.now(timezone.utc).isoformat(),
                    last_silence_s=silence, _last_monotonic=now)
-        old.update(data_suspect=True, failure_reason='byte_silence')
+        old.update(data_suspect=True, failure_reason=self.silence_reason(old))
+        row.update(old['silence_evidence'])
         old.setdefault('failed_at', now)
         _LOG.warning('Polymarket WS primary byte silence group=%s shard=%s silence_s=%s spare=%s',
                      key, index, silence, state.get('source'))
@@ -1712,8 +1811,8 @@ class MarketConnections:
         def fire():
             delay = first
             while True:
-                if delay > 0:
-                    time.sleep(delay)
+                if delay > 0 and self.supervisor_stop.wait(delay):
+                    return
                 with self.lifecycle_lock:
                     if state.get('book_fallback_token') != token or not state.get('need_book'):
                         return
@@ -1729,7 +1828,7 @@ class MarketConnections:
         if threading.current_thread() is not state.get('worker'):
             return False
         old = self.states.get(index)
-        if old is None or old is state or not state.get('ready') or not state.get('connected'):
+        if old is None or old is state or not self.backup_ready(state) or self.best_backup(index) is not state:
             return False
         if old.get('connected') and not old.get('inbox').invalid.is_set() and not old.get('data_suspect') and not old.get('pong_dead'):
             return False
@@ -1739,6 +1838,8 @@ class MarketConnections:
                 return False
             inbox = old.get('inbox')
             if old.get('connected') and inbox is not None and not inbox.invalid.is_set() and not old.get('data_suspect') and not old.get('pong_dead'):
+                return False
+            if self.best_backup(index) is not state:
                 return False
             required = list(old.get('assets') or [])
             preserved = bool(_PIPELINE and set(required) <= set(getattr(_PIPELINE, 'books', {})))
@@ -1753,16 +1854,14 @@ class MarketConnections:
                        if str(asset) in required_ids}
             if carried:
                 state['book_marks'] = {**dict(state.get('book_marks') or {}), **carried}
+            self.transfer_outage(index, old, state)
             state.update(standby=False, redundant=False,
                          promoted_at=datetime.now(timezone.utc).isoformat(),
                          rotate_failures=0, rotate_retry_at=0, backup_started=True,
-                         backup_failures=0, backup_retry_at=0)
+                         backup_failures=0, backup_retry_at=0, last_pressure_promotion=time.monotonic())
             state['unsubscribe_pending'] = extra
             self.states[index] = state
-            holder = self.backups if self.backups.get(index) is state else self.reserves
-            holder.pop(index, None)
-            if index in self.reserves and index not in self.backups:
-                self.backups[index] = self.reserves.pop(index)
+            self.remove_backup(index, state)
             self.backup_promotions += 1
             self.rotations += 1
             self.failover_ms = max(0, (time.monotonic() - old.get('failed_at', time.monotonic())) * 1000)
@@ -1810,7 +1909,8 @@ class MarketConnections:
                     and not inbox.delivery_gap and inbox.pending_wait_seconds() <= self.backup_queue_limit(candidate)
                     and not required.intersection(candidate.get('subscribe_pending', []))
                     and not required.intersection(candidate.get('recover_assets', []))
-                    and self.backup_caught_up(candidate.get('primary_index'), candidate))
+                    and self.backup_caught_up(candidate.get('primary_index'), candidate)
+                    and self.backup_pong_fresh(candidate))
 
     def readiness_blockers(self, state):
         """Explain publication readiness separately from adding subscriptions."""
@@ -1826,10 +1926,13 @@ class MarketConnections:
                 ('current_subscription', bool(state.get('subscribe_initial')
                     or required.intersection(state.get('subscribe_pending') or []))),
                 ('missing_envelope', not required <= seen),
-                ('stale_envelope', not self._liveness_link_fresh(state))) if blocked]
+                ('stale_envelope', not self._liveness_link_fresh(state)),
+                ('stale_pong', not self.backup_pong_fresh(state)),
+) if blocked]
         shadow = state['shadow']
         return [name for name, blocked in (
             ('disconnected', not state.get('connected')),
+            ('stale_pong', not self.backup_pong_fresh(state)),
             ('invalid', inbox.invalid.is_set()), ('resync', inbox.resync.is_set()),
             ('delivery_gap', inbox.delivery_gap), ('queue_wait', inbox.pending_wait_seconds() > self.backup_queue_limit(state)),
             ('current_subscription', bool(required.intersection(state.get('subscribe_pending', [])))),
@@ -1844,6 +1947,8 @@ class MarketConnections:
         state['remote_failure_at'] = time.monotonic()
         state['remote_failure_wall'] = datetime.now(timezone.utc).timestamp()
         state['role_at_failure'] = 'backup' if state.get('standby') else 'primary'
+        self.remote_closes.append(dict(at=state['remote_failure_wall'], source=state.get('source'), code=code,
+            groups=sorted({self.balancer.groups.get(a, '') for a in state['assets']} - {''})))
         with self.lifecycle_lock:
             groups = {self.balancer.groups.get(a, '').split(':outcome:')[0] for a in state['assets']} & HOT_SERIES
             for group in groups:
@@ -1851,7 +1956,7 @@ class MarketConnections:
                     state['role_at_failure'], code, state['remote_failure_at'], state['remote_failure_wall'])
                 if paired is not None:
                     paired['_assets'] = set(state['assets'])
-                    paired['_previous'] = {a: dict(self.continuity.published.get(a, {})) for a in state['assets']}
+                    self.continuity.watch_gap(paired, set(state['assets']))
                     paired['supply_interrupted'] = not any(i == index and c is not state
                         and c.get('connected') and c.get('remote_failure_at') is None
                         and not c.get('inbox').invalid.is_set()
@@ -1873,7 +1978,12 @@ class MarketConnections:
             state['outage_wall'] = datetime.now(timezone.utc)
             ready = sum(self.backup_ready(c) for i, c in self.backup_items() if i == index)
             use_rest = not ready and not (state.get('failure_reason') == 'pong_timeout' and any(
-                i == index and self.promotable_backup(c) for i, c in self.backup_items()))
+                i == index and self.promotable_backup(c) and self.backup_pong_fresh(c) for i, c in self.backup_items()))
+            groups = {self.balancer.groups.get(a, '').split(':outcome:')[0] for a in state['assets']} & HOT_SERIES
+            gap_events = {key: dict(code=code, ready_backup_at_kick=bool(ready), ready_backups=ready,
+                         takeover_gap_ms=None, receipt_gap_ms=None, recovery=None, gap_final=False) for key in groups}
+            for event in gap_events.values():
+                self.continuity.watch_gap(event, set(state['assets']))
             if use_rest:
                 self.request_snapshot(index, state, set(state['assets']))
             with (_PIPELINE.lock if _PIPELINE else RLock()):
@@ -1885,18 +1995,13 @@ class MarketConnections:
                 row = self.primary_failures.setdefault(key, dict(total=0, without_ready_backup=0, events=deque(maxlen=64)))
                 row['total'] += 1
                 row['without_ready_backup'] += not ready
-                event = dict(code=code, ready_backup_at_kick=bool(ready), ready_backups=ready,
-                             takeover_gap_ms=None, receipt_gap_ms=None, recovery=None, gap_final=False)
+                event = gap_events[key]
                 source_receipts = [self.continuity.latest.get(a, {}).get(state.get('source'), (None, None, None))[2]
                                    for a in state['assets']]
                 source_receipts = [at for at in source_receipts if at is not None]
                 event['_last_receipt'] = min(source_receipts or receipts, default=state['outage_wall'])
                 event['source_silence_ms'] = max(0, (state['outage_wall'] - event['_last_receipt']).total_seconds() * 1000)
                 event['merged_receipt_gap_ms'] = max(0, (state['outage_wall'] - min(receipts, default=state['outage_wall'])).total_seconds() * 1000)
-                event['merged_gap_ms'] = event['merged_receipt_gap_ms']
-                event['merged_gap_final'] = False
-                event['_merged_previous'] = {a: v[1] for a, v in (_PIPELINE.recording.metadata.items() if _PIPELINE else [])
-                                             if a in state['assets']}
                 event['reason'] = state.get('failure_reason', 'transport')
                 row['events'].append(event)
                 _LOG.warning('Polymarket WS hot primary failure group=%s shard=%s code=%s ready_backups=%s',
@@ -1938,18 +2043,9 @@ class MarketConnections:
         state.pop('outage_at', None)
 
     def update_merged_gap(self, state):
-        wall = state.get('outage_wall')
-        if wall is None:
-            return
-        owned = set(state['assets'])
-        for event in state.get('outage_events', []):
-            previous = event.get('_merged_previous', {})
-            for asset, last in list(previous.items()):
-                current = self.continuity.published.get(asset)
-                if current and current['received'] > last:
-                    event['merged_gap_ms'] = max(event['merged_gap_ms'], current['receipt_gap_ms'])
-                    previous[asset] = current['received']
-            event['merged_gap_final'] = bool(owned) and all(previous.get(a, wall) > wall for a in owned)
+        # Finalized only by FeedContinuity.publication; control ticks must not
+        # move event anchors or inflate a completed gap with later traffic.
+        return None
 
     @staticmethod
     def promotable_backup(state):
@@ -1961,7 +2057,7 @@ class MarketConnections:
                     and not inbox.delivery_gap)
 
     def backup_protects(self, index, primary):
-        return any(i == index and (self.backup_ready(c) or primary.get('pong_dead') and self.promotable_backup(c))
+        return any(i == index and (self.backup_ready(c) or primary.get('pong_dead') and self.promotable_backup(c) and self.backup_pong_fresh(c))
                    for i, c in self.backup_items())
 
     def pong_timeout_tick(self, now):
@@ -1976,15 +2072,16 @@ class MarketConnections:
             if (not state.get('connected') or not inbox or not isinstance(transport, TransportDiagnostics)
                     or not transport.pong_timed_out(now, inbox.last_byte_at)):
                 continue
-            state.update(connected=False, failure_reason='pong_timeout', failed_at=now, retry_at=now)
+            state.update(connected=False, failure_reason='pong_timeout', failed_at=now,
+                         retry_at=now + self.retry_delay(index, state, state.get('attempts', 1)))
             if state.get('redundant'):
                 inbox.invalid.set()
-                (self.backups if self.backups.get(index) is state else self.reserves).pop(index, None)
+                self.remove_backup(index, state)
                 self.retire(state)
                 continue
             self.record_primary_failure(index, state, None)
             state['pong_dead'] = True
-            if not any(i == index and self.promotable_backup(c) for i, c in self.backup_items()):
+            if not any(i == index and self.promotable_backup(c) and self.backup_pong_fresh(c) for i, c in self.backup_items()):
                 inbox.invalid.set()
             wake_reader(state.get('socket'))
             _LOG.warning('Polymarket WS PONG timeout shard=%s timeout_seconds=22', index)
@@ -2013,7 +2110,7 @@ class MarketConnections:
         with self.continuity.lock:
             continuity = (1536 * sum(map(len, self.continuity.history.values()))
                           + 1024 * sum(map(len, self.continuity.latest.values()))
-                          + 256 * len(self.continuity.merged_gaps))
+                          + 1024 * len(self.continuity.cadence_seconds))
         queues = processing = 0
         for state in states:
             inbox = state.get('inbox')
@@ -2164,7 +2261,7 @@ class MarketConnections:
                 *(self.ingress_rate(c) for i, c in self.backup_items() if i == index)]) >= self.balancer.max_bytes:
             state['prewarm_blocked_assets'] = frozenset(assets)
         if state.get('prewarm_blocked_assets') == frozenset(assets):
-            return assets  # Do not add next-window traffic to a saturated pair.
+            return assets  # Stable per-window safety latch avoids subscription churn.
         groups = {self.balancer.groups.get(a) for a in assets}
         nearest = {}
         for market in live_markets(self.prewarm_markets, now):
@@ -2188,7 +2285,7 @@ class MarketConnections:
             # but never count its expired books as a ready backup.
             assets = []
         else:
-            (self.backups if self.backups.get(index) is candidate else self.reserves).pop(index)
+            self.remove_backup(index, candidate)
             self.retire(candidate)
             return
         if assets == candidate['assets'] and required == set(candidate.get('required_assets', required)):
@@ -2233,6 +2330,8 @@ class MarketConnections:
                                   (('yes', m['yesAssetId']), ('no', m['noAssetId']))},
                                  time.monotonic())
         self.balancer.forced_hot = {k for k in self.balancer.groups.values() if k.split(':outcome:')[0] in HOT_SERIES}
+        self.continuity.hot_assets = {a for a, key in self.balancer.groups.items()
+                                      if key.split(':outcome:')[0] in HOT_SERIES}
         self.continuity.prune(set(subscription_assets(markets)))
         if set(subscription_assets(markets)) == set(self.balancer.assignment):
             self.tick()
@@ -2244,19 +2343,8 @@ class MarketConnections:
         self.tick()
 
     def update_double_kicks(self):
-        for event in self.double_kicks.events:
-            if event['merged_gap_final'] or '_previous' not in event:
-                continue
-            gaps = []
-            for asset in event['_assets']:
-                before = event['_previous'].get(asset, {})
-                after = self.continuity.published.get(asset, {})
-                if not before or not after or after['received'] <= before['received']:
-                    break
-                gaps.append(max(0, (after['received']-before['received']).total_seconds()*1000))
-            else:
-                event.update(merged_gap_ms=max(gaps, default=None), merged_gap_final=True,
-                             business_gap=event.get('supply_interrupted', False))
+        # The exact same publication callback closes primary and paired events.
+        return None
 
     def sample_fast(self, now, deadline):
         # No Pipeline/lifecycle lock, JSON parsing, TCP_INFO or DB work here.
@@ -2620,13 +2708,24 @@ class MarketConnections:
             if reason not in {'shutdown', 'assignment_changed'} and not candidate.get('normal_shutdown'):
                 self.rotation_failed(index, active, candidate, reason)
 
+    def retry_delay(self, index, state, attempts):
+        groups = {self.balancer.groups.get(a, '').split(':outcome:')[0] for a in state.get('assets', [])}
+        hot = sorted(groups & HOT_SERIES)
+        lane = sorted(HOT_SERIES).index(hot[0]) if hot else index % 8
+        role = 'backup' if state.get('redundant') else 'primary' if hot else 'cold'
+        return reconnect_delay(attempts, role, lane)
+
     def rotation_failed(self, index, active, candidate, reason):
         prefix = 'backup' if candidate.get('redundant') else 'rotate'
         failures = active.get(f'{prefix}_failures', 0) + 1 if active else 1
-        delay = min(2, reconnect_delay(failures)) if candidate.get('redundant') else min(480, 60 * 2 ** min(3, failures - 1))
+        delay = self.retry_delay(index, candidate, failures) if candidate.get('redundant') else min(480, 60 * 2 ** min(3, failures - 1))
         if active:
             active.update({f'{prefix}_failures': failures, f'{prefix}_retry_at': time.monotonic() + delay})
-        self.rotation_failures += 1
+        established = candidate.get('redundant') and candidate.get('ever_ready')
+        if established:
+            self.backup_wire_failures += 1
+        else:
+            self.rotation_failures += 1
         self.rotation_last_failure = dict(shard=index, reason=reason, stage=self.prepare_stage(candidate),
                                           retry_seconds=delay, consecutive_failures=failures)
         _LOG.info('Polymarket WS rotation aborted details=%s', json.dumps(self.rotation_last_failure))
@@ -2665,9 +2764,8 @@ class MarketConnections:
 
     @staticmethod
     def backup_target():
-        # One full spare cuts hot stream copies from three to two. Keep an
-        # explicit two-spare option for measured A/B comparisons.
-        return min(2, int(ws_setting('HOT_BACKUP_COUNT', 1, 1)))
+        # Market-channel IP limit is unpublished. Bound the explicit budget.
+        return min(5, int(ws_setting('HOT_BACKUP_COUNT', 2, 1)))
 
     def pair_load(self, index, state):
         peers = {id(s): s for i, s in [(index, self.states.get(index, {})), *self.backup_items()]
@@ -2799,26 +2897,24 @@ class MarketConnections:
                       or not candidate['thread'].is_alive() or not candidate['worker'].is_alive()
                       or candidate.get('initial_sent_at') is None and now - candidate['created_at'] >= 15)
             if not old or failed:
-                (self.backups if self.backups.get(index) is candidate else self.reserves).pop(index)
+                self.remove_backup(index, candidate)
                 if not candidate.get('normal_shutdown'):
                     self.rotation_failed(index, old, candidate, 'backup_wire_failure')
                 elif old:
-                    old['backup_retry_at'] = now + reconnect_delay(1)
+                    old['backup_retry_at'] = now + self.retry_delay(index, candidate, 1)
                 self.retire(candidate)
             elif candidate.get('initial_sent_at') is not None and not candidate.get('admission_observed'):
                 self.backup_next_connect_at = max(self.backup_next_connect_at,
                     candidate['initial_sent_at'] + candidate['admission_seconds'])
                 candidate['admission_observed'] = True
-        for index in list(self.reserves):
-            if index not in self.backups:
-                self.backups[index] = self.reserves.pop(index)
         self.update_hot_coverage(now)
         dialing = any(s.get('initial_sent_at') is None for _, s in self.backup_items())
         # Uncovered groups go first. Extra redundancy is staggered, never at
         # the expense of the only backup or by adding load to another group.
-        for index, old in sorted(self.states.items(), key=lambda item: (item[0] in self.backups, item[0])):
+        for index, old in sorted(self.states.items(), key=lambda item: (sum(i == item[0] for i, _ in self.backup_items()), item[0])):
             if not self.hot_shard(index):
                 continue
+            self.primary_pressure(index, now)
             health = old.get('data_health')
             transport = getattr(getattr(old.get('socket'), 'transport', None), 'last', {})
             if health and health.sample(now, transport):
@@ -2836,7 +2932,8 @@ class MarketConnections:
                     if not (self.liveness_backup and candidate.get('redundant')):
                         candidate.setdefault('recover_assets', set()).update(candidate['assets'])
             first = self.backups.get(index)
-            if (dialing or index in self.reserves or first and self.backup_target() < 2
+            copies = [c for i, c in self.backup_items() if i == index]
+            if (dialing or len(copies) >= self.backup_target()
                     or not old['connected'] or not old['assets']
                     or old.get('subscribe_initial', True) or not old.get('inbox') or old['inbox'].invalid.is_set()
                     or now < old.get('backup_retry_at', 0) or now < self.backup_next_connect_at):
@@ -2847,7 +2944,7 @@ class MarketConnections:
             if not old.get('backup_started') and now < old.get('opened_at', now) + old.setdefault(
                     'backup_phase_seconds', random.uniform(stagger, stagger + 4) if stagger else 0):
                 continue
-            if first and now < first.get('initial_sent_at', now) + first.setdefault('reserve_delay', random.uniform(10, 15)):
+            if copies and now < max(c.get('initial_sent_at', now) for c in copies) + 10:
                 continue
             pipeline_lock = _PIPELINE.lock if _PIPELINE else RLock()
             with pipeline_lock:
@@ -2861,7 +2958,10 @@ class MarketConnections:
                 busy=True, source=f'backup-{self.backup_serial}',
                 shadow=_LivenessShadow(owned_assets) if self.liveness_backup else ShadowBooks(owned_assets),
                 created_at=now)
-            (self.reserves if first else self.backups)[index] = candidate
+            if first:
+                self.reserves[index if index not in self.reserves else (index, self.backup_serial)] = candidate
+            else:
+                self.backups[index] = candidate
             old['backup_started'] = True
             initial = max(int(ws_setting('SUBSCRIBE_BATCH_ASSETS', 2, 1)),
                           int(ws_setting('SUBSCRIBE_INITIAL_ASSETS', 12, 1)))
@@ -2991,7 +3091,7 @@ class MarketConnections:
                         or shadow.recorder.metadata.get(a, (None,))[0] is not None
                         and shadow.recorder.metadata[a][0] >= self.merges[index].latest[a]
                         for a in required - _PIPELINE.books.keys())
-                force = bool(old.get('pong_dead') and self.promotable_backup(state))
+                force = bool(old.get('pong_dead') and self.promotable_backup(state) and self.backup_pong_fresh(state))
                 if not ready and not force:
                     if inbox.queue_wait_seconds <= 1 and inbox.queue.empty():
                         inbox.delivery_gap = False
@@ -3003,6 +3103,7 @@ class MarketConnections:
                 old['backup_failures'] = 0
                 if ready and not state.get('ready'):
                     state['ready'] = True
+                    state['ever_ready'] = True
                     self.update_hot_coverage(time.monotonic())
                 # A prewarmed window can activate while its market is quiet;
                 # publish its assembled books without waiting for another trade.
@@ -3025,7 +3126,7 @@ class MarketConnections:
                         and inbox.last_data_at is not None and inbox.last_data_at > last_byte
                         and now - inbox.last_data_at <= 1
                         and self.backup_ready(state)):
-                    old.update(data_suspect=True, failure_reason='byte_silence')
+                    old.update(data_suspect=True, failure_reason=self.silence_reason(old))
                     old.setdefault('failed_at', now)
                     self.record_primary_failure(index, old, None)
                 maximum = ws_setting('HOT_ROTATE_SECONDS', 0, 0)
@@ -3034,7 +3135,7 @@ class MarketConnections:
                     return
                 # REST/supervisor may refresh books/readiness, but only this
                 # socket's worker can promote: it may already hold a popped delta.
-                if threading.current_thread() is not state.get('worker'):
+                if threading.current_thread() is not state.get('worker') or self.best_backup(index) is not state:
                     return
                 extra = set(state['assets']) - required - set(state.get('subscribe_pending', []))
                 state['assets'] = list(old['assets'])
@@ -3043,9 +3144,8 @@ class MarketConnections:
                 self.subscriptions.forget(state)
                 self.check_continuity(index, old, state, 'failover' if not old['connected'] else 'data_collapse' if old.get('data_suspect') else 'hot_age')
                 self.failover_ms = max(0, (time.monotonic() - old.get('failed_at', time.monotonic())) * 1000)
-                if 'outage_at' in old:
-                    state.update(outage_at=old.pop('outage_at'), outage_wall=old['outage_wall'],
-                                 outage_events=old.pop('outage_events', []))
+                self.transfer_outage(index, old, state)
+                if 'outage_at' in state:
                     for event in state['outage_events']:
                         last = event['_last_receipt']
                         receipt_gap = max(0, (datetime.now(timezone.utc) - last).total_seconds() * 1000)
@@ -3053,13 +3153,12 @@ class MarketConnections:
                                      recovery='backup', receipt_gap_ms=receipt_gap)
                     self.complete_recovery(index, state, 'backup')
                 state.update(standby=False, redundant=False, promoted_at=datetime.now(timezone.utc).isoformat(), rotate_failures=0, rotate_retry_at=0,
-                             backup_started=True, backup_failures=0, backup_retry_at=0)
+                             backup_started=True, backup_failures=0, backup_retry_at=0, last_pressure_promotion=time.monotonic())
                 state['unsubscribe_pending'] = extra
                 state.pop('shadow')
                 self.states[index] = state
-                (self.backups if self.backups.get(index) is state else self.reserves).pop(index)
-                if index in self.reserves and index not in self.backups:
-                    self.backups[index] = self.reserves.pop(index)
+                self.remove_backup(index, state)
+
                 self.update_hot_coverage(time.monotonic())
                 self.backup_promotions += 1
                 self.rotations += 1
@@ -3226,7 +3325,7 @@ class MarketConnections:
         state['inbox'] = inbox
         inbox.activated = {a: datetime.max.replace(tzinfo=timezone.utc) for a in state['assets']}
         state['queue_logged'] = False
-        state['retry_at'] = time.monotonic() + reconnect_delay(state['attempts'])
+        state['retry_at'] = time.monotonic() + self.retry_delay(index, state, state['attempts'])
         state['data_health'] = DataHealth(time.monotonic())
 
         def opened(sock):
@@ -3397,6 +3496,7 @@ class MarketConnections:
                 except (ValueError, TypeError, AttributeError):
                     continue
                 finally:
+                    inbox.queue.task_done()
                     inbox.process_max_seconds = max(inbox.process_max_seconds, time.monotonic() - parsing_at)
                     inbox.processing_received_at = None
                     inbox.processing_charged_bytes = 0
@@ -3575,7 +3675,7 @@ class MarketConnections:
                 state['attempts'] = 1
             if code == 1001:
                 state['attempts'] = 1
-            state['retry_at'] = time.monotonic() + (0 if state.get('pong_dead') else reconnect_delay(state['attempts']))
+            state['retry_at'] = time.monotonic() + self.retry_delay(index, state, state['attempts'])
 
         sock = read_ahead_app(websocket.WebSocketApp)(os.getenv('POLYMARKET_OBSERVER_WS_URL', MARKET_WS_URL),
                                      on_open=opened, on_message=received, on_error=failed, on_close=closed)
@@ -3788,7 +3888,7 @@ class MarketConnections:
                 wake_reader(state.get('socket'))
             if not state['connected'] and state.get('failed_at') is not None:
                 if now >= state['retry_at']:
-                    if any(i == index and (self.backup_ready(c) or state.get('pong_dead') and self.promotable_backup(c))
+                    if any(i == index and (self.backup_ready(c) or state.get('pong_dead') and self.promotable_backup(c) and self.backup_pong_fresh(c))
                            for i, c in self.backup_items()):
                         continue
                     # Fresh state fences late callbacks and avoids join/close
@@ -3869,6 +3969,15 @@ class MarketConnections:
                           ws_retiring_connections=len(self.retiring), ws_parsed_frames=self.parsed_frames.metrics(),
                           ws_gil_switch_ms=sys.getswitchinterval() * 1000,
                           ws_tick_gap_seconds=tick_gap, ws_tick_gap_max_seconds=self.tick_gap_max)
+            STATUS['ws_remote_closes'] = list(self.remote_closes)
+            STATUS['ws_server_disconnects'] = self.disconnect_clusters.update(self.remote_closes)
+            STATUS['ws_rollover_preparation'] = {i: dict(
+                prewarm_pressure_blocked=s.get('prewarm_blocked_assets') == frozenset(s.get('assets', [])),
+                spares=[dict(source=c.get('source'),
+                    future_assets=sorted(set(c['assets']) - set(s['assets'])),
+                    seen_future_assets=sorted(set(c.get('liveness_assets', [])) - set(s['assets'])),
+                    current_subscription_pending=sorted(set(s['assets']) & set(c.get('subscribe_pending', []))))
+                    for shard, c in self.backup_items() if shard == i]) for i, s in self.states.items() if self.hot_shard(i)}
             STATUS['ws_last_transport_failures'] = {i: s['last_transport_failure']
                 for i, s in self.states.items() if 'last_transport_failure' in s}
             STATUS['ws_shard_assets'] = [len(self.states.get(i, {}).get('assets', [])) for i in range(self.count)]
@@ -3904,16 +4013,18 @@ class MarketConnections:
                               events=[{field: value for field, value in e.items() if not field.startswith('_')}
                                   for e in v['events']]) for k, v in self.primary_failures.items()},
                           ws_takeover_gap_scope='failed_source_receipt_to_recovery; detection_to_takeover_ms_is_control_time',
-                          ws_acceptance_gap_scope='merged_gap_ms; physical_source_silence_and_historical_trades_are_alert_only',
+                          ws_acceptance_gap_scope='ws_hot_primary_failures.<group>.events[].merged_gap_ms with merged_gap_final=true <=1500; ws_double_kicks.business_gaps_current_hour <=1; physical_source_silence>20s and historical_trade_loss alert_only; cold delivery latency',
                           ws_pong_timeout_seconds=22,
                           ws_backup_max_lag_seconds=ws_setting('BACKUP_MAX_LAG_SECONDS', 2, 1),
                           ws_rest_recovery=self.snapshot_recovery.metrics(),
-                          ws_reserves={i: self.backup_metrics(i, c, now) for i, c in self.reserves.items()},
+                          ws_reserves={(f'{key[0]}:{key[1]}' if isinstance(key, tuple) else str(key)): self.backup_metrics(key[0] if isinstance(key, tuple) else key, c, now)
+                                       for key, c in self.reserves.items()},
                           ws_required_hot_groups=sorted(HOT_SERIES),
                           ws_split_byte_series=[],
                           ws_migration=self.migration_metrics(now),
                           ws_primary_1013_by_shard=self.primary_1013_metrics(now),
                           ws_rotation_count=self.rotations, ws_rotation_failures=self.rotation_failures,
+                          ws_backup_wire_failures=self.backup_wire_failures,
                           ws_rotation_last_failure=self.rotation_last_failure,
                           ws_hot_rotate_seconds=ws_setting('HOT_ROTATE_SECONDS', 0, 0),
                           ws_hot_byte_silence_seconds=min(5, ws_setting('HOT_BYTE_SILENCE_SECONDS', 4, 3)),

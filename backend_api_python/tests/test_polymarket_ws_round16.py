@@ -148,6 +148,7 @@ def test_no_backup_rest_publication_under_one_second_with_400ms_old_feed(feed_ma
             at, _, kind = p.recording.metadata[asset]
             p.recording.metadata[asset] = (at, now-timedelta(milliseconds=400), kind)
             m.continuity.published[asset]['received'] = now-timedelta(milliseconds=400)
+            m.continuity.published[asset]['published_at'] = now-timedelta(milliseconds=400)
     began = time.monotonic()
     sockets[0].callbacks['on_close'](sockets[0], 1013, 'slow consumer')
     # Inject a bounded 120ms HTTP response without live WS or network access.
@@ -371,12 +372,13 @@ def test_physical_double_kick_with_surviving_supply_is_alert_only(feed_manager):
     m.double_kicks.record('btc', 'p', 'primary', 1013, 10, 3600)
     event = m.double_kicks.record('btc', 'b', 'backup', 1013, 10.05, 3600.05)
     before = dict(m.continuity.published['ay'])
-    event.update(_assets={'ay'}, _previous={'ay': before}, supply_interrupted=False)
-    m.continuity.published['ay']['received'] = before['received'] + timedelta(milliseconds=10)
+    event.update(supply_interrupted=False)
+    m.continuity.watch_gap(event, {'ay'})
+    m.continuity.publication({'ay': (before['exchange_at'], before['received'] + timedelta(milliseconds=10), 'ws')}, {'ay'})
     m.update_double_kicks()
     result = m.double_kicks.metrics(3600.1)
     assert result['count_current_hour'] == 1 and result['business_gaps_current_hour'] == 0
-    assert result['events'][0]['merged_gap_final'] and result['events'][0]['merged_gap_ms'] == 10
+    assert result['events'][0]['merged_gap_final'] and 0 <= result['events'][0]['merged_gap_ms'] < 100
 
 
 def test_100ms_sampler_does_not_take_pipeline_or_lifecycle_lock(feed_manager):

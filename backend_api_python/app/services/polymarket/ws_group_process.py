@@ -64,14 +64,14 @@ PARENT_OWNED = frozenset({
 SHARD_DICTS = frozenset({
     'ws_receive_queues', 'ws_backups', 'ws_reserves', 'ws_merge_metrics',
     'ws_connection_ages_seconds', 'ws_subscription_pending',
-    'ws_last_transport_failures', 'ws_primary_1013_by_shard',
+    'ws_last_transport_failures', 'ws_primary_1013_by_shard', 'ws_rollover_preparation',
 })
 SHARD_LISTS = frozenset({
     'ws_shard_assets', 'ws_shard_loads', 'ws_shard_byte_loads', 'ws_capacity_by_shard',
 })
 SUM_KEYS = frozenset({
     'ws_process_cpu_cores', 'ws_process_rss_bytes', 'ws_retiring_connections',
-    'ws_rotation_count', 'ws_rotation_failures', 'ws_backup_promotions',
+    'ws_rotation_count', 'ws_rotation_failures', 'ws_backup_promotions', 'ws_backup_wire_failures',
     'ws_standby_slow_consumer_count', 'ws_connected', 'ws_connections',
     'reconnect_count', 'slow_consumer_count', 'rebalance_count', 'ws_unmeasured_groups',
 })
@@ -260,7 +260,12 @@ def _remap_shard_dict(value, base):
     merged = {}
     for key, row in (value or {}).items():
         shard = _as_int_key(key)
-        merged[shard + base if isinstance(shard, int) else shard] = row
+        if isinstance(shard, int):
+            shard += base
+        elif isinstance(shard, str) and ':' in shard and shard.split(':', 1)[0].isdigit():
+            first, rest = shard.split(':', 1)
+            shard = f'{int(first)+base}:{rest}'
+        merged[shard] = row
     return merged
 
 
@@ -301,6 +306,15 @@ def merge_feed_status(parts):
                     if isinstance(row, dict) and 'shard' in row and isinstance(row.get('shard'), int):
                         row = dict(row, shard=row['shard'] + base)
                     rows.append(row)
+            elif key == 'ws_hot_backup_by_group' and isinstance(value, dict):
+                bucket = merged.setdefault(key, {})
+                for group, row in value.items():
+                    if part.get('key') == group or group not in bucket:
+                        copied = copy.deepcopy(row)
+                        for field in ('required_shards', 'ready_shards'):
+                            if field in copied:
+                                copied[field] = [i+base if isinstance(i, int) else i for i in copied[field]]
+                        bucket[group] = copied
             elif key == 'ws_child_ready' and isinstance(value, dict):
                 # Copy each child's spare probe. Do not add ready_count: other
                 # children publish nothing for this group, and a sum would hide
@@ -343,6 +357,8 @@ def merge_feed_status(parts):
                 merged[key] = bool(value) and merged.get(key, True)
             elif key == 'ws_shards' and isinstance(value, int):
                 merged[key] = merged.get(key, 0) + value
+            elif key == 'ws_remote_closes' and isinstance(value, list):
+                merged.setdefault(key, []).extend(dict(row, feed=part.get('key')) for row in value)
             elif key == 'ws_connections_by_source' and isinstance(value, list):
                 rows = merged.setdefault(key, [])
                 for row in value:
@@ -427,12 +443,15 @@ def _merge_continuity(left, right):
     merged = dict(left)
     for key in ('checks', 'unverified', 'snapshot_restored', 'history_assets', 'history_entries', 'history_evictions'):
         merged[key] = (left.get(key) or 0) + (right.get(key) or 0)
-    gaps = [row.get('merged_gap_ms') or {} for row in (left, right)]
-    merged['merged_gap_ms'] = dict(
-        samples=sum((row.get('samples') or 0) for row in gaps),
-        p50=max((row.get('p50') for row in gaps if row.get('p50') is not None), default=None),
-        p95=max((row.get('p95') for row in gaps if row.get('p95') is not None), default=None),
-        max=max((row.get('max') for row in gaps if row.get('max') is not None), default=None))
+    from .ws_redundancy import histogram_metrics, CADENCE_BOUNDS_MS
+    cadence = {}
+    for group in ('hot', 'cold'):
+        rows = [(part.get('receive_cadence_ms') or {}).get(group) or {} for part in (left, right)]
+        counts = [sum((row.get('histogram') or [0]*len(CADENCE_BOUNDS_MS))[i] for row in rows)
+                  for i in range(len(CADENCE_BOUNDS_MS))]
+        maximum = max((r['maximum'] for r in rows if r.get('maximum')), key=lambda r:r['ms'], default=None)
+        cadence[group] = histogram_metrics(counts, maximum)
+    merged['receive_cadence_ms'] = cadence
     published = dict(left.get('published') or {})
     published.update(right.get('published') or {})
     merged['published'] = published
@@ -563,8 +582,15 @@ class ReplaySocket:
         return time.monotonic() < self.stalled_until
 
     def run_forever(self, **kwargs):
+        # Model the real transport's independent text heartbeat for spares too.
+        self.text_heartbeat_active = True
         self.callbacks['on_open'](self)
-        self.stopped.wait()
+        delay = getattr(self, 'heartbeat_phase', 10)
+        while not self.stopped.wait(delay):
+            if self.assets:
+                self.transport.ping()
+                self.send('PING')
+            delay = 10
 
     def send(self, raw):
         if raw == 'PING':
@@ -893,6 +919,9 @@ def _drive(manager, spec):
         delay = start + offset - time.monotonic()
         if delay > 0 and _STOP_CHILD.wait(delay):
             return
+        delay_per_frame = float(os.getenv('QD_REPLAY_PRODUCER_DELAY', '0'))
+        if delay_per_frame > 0:
+            time.sleep(delay_per_frame)
         sock = _socket_for(manager, role)
         if sock is None or not hasattr(sock, 'emit'):
             continue
@@ -985,6 +1014,23 @@ def _sample_loop(manager, outbox):
             outbox.add(dict(op='sample', rows=rows))
 
 
+def replay_drain(manager, drive_thread, timeout=60):
+    """Wait for production of the schedule AND all active FIFO work to finish."""
+    deadline = time.monotonic()+timeout
+    if drive_thread is not None:
+        drive_thread.join(max(0, deadline-time.monotonic()))
+        if drive_thread.is_alive():
+            return False
+    while time.monotonic() < deadline:
+        with manager.lifecycle_lock:
+            states = list(manager.states.values()) + [c for _, c in manager.backup_items()]
+            if all(not s.get('inbox') or (s['inbox'].queue.unfinished_tasks == 0
+                    and not s.get('need_book') and not s.get('held_changes')) for s in states):
+                return True
+        time.sleep(.01)
+    return False
+
+
 def _control_loop(manager, outbox, control, replay):
     drive_thread = None
     while not _STOP_CHILD.is_set():
@@ -1023,6 +1069,11 @@ def _control_loop(manager, outbox, control, replay):
         elif op == 'drive' and replay:
             drive_thread = threading.Thread(target=_drive, args=(manager, message), name='polymarket-replay-drive', daemon=True)
             drive_thread.start()
+        elif op == 'drain' and replay:
+            done = replay_drain(manager, drive_thread, float(message.get('timeout') or 60))
+            with outbox.cv:
+                seq = outbox.seq
+            outbox.add(dict(op='drained', token=message.get('token'), seq=seq, complete=done))
         elif op == 'status':
             try:
                 manager.publish_status()
@@ -1188,6 +1239,9 @@ class _Feed:
         self.pickle_s = 0.0
         self.apply_s = 0.0
         self.dead = False
+        self.applied_seq = 0
+        self.drain_target = None
+        self.drain_ready = threading.Event()
 
     def send(self, message):
         conn = self.control
@@ -1236,8 +1290,17 @@ class _Feed:
         elif op == 'dropped':
             self.dropped = message.get('total') or self.dropped
             self.feeds.note_drop(self.spec['key'], message.get('assets') or [], self.dropped)
+        elif op == 'drained' and message.get('token') == getattr(self, 'drain_token', None):
+            self.drain_target = message.get('seq')
+            self.drain_complete = bool(message.get('complete'))
+            if self.applied_seq >= self.drain_target:
+                self.drain_ready.set()
         elif op == 'pub':
-            self._apply(message.get('items') or [])
+            items = message.get('items') or []
+            self._apply(items)
+            self.applied_seq = max([self.applied_seq, *(item.get('seq', 0) for item in items)])
+            if self.drain_target is not None and self.applied_seq >= self.drain_target:
+                self.drain_ready.set()
         elif op == 'bye':
             self.cpu_s = message.get('cpu_s')
             self.rss = message.get('rss') or self.rss
@@ -1448,6 +1511,18 @@ class GroupFeeds:
             child.send(message)
         return start
 
+    def drain_replay(self, timeout=60):
+        token = time.monotonic_ns()
+        children = [self.children[key] for key in self.order if key in self.children and self.children[key].spec.get('hot')]
+        for child in children:
+            child.drain_token, child.drain_target = token, None
+            child.drain_complete = False
+            child.drain_ready.clear()
+            child.send(dict(op='drain', token=token, timeout=timeout))
+        deadline = time.monotonic()+timeout+1
+        return all(child.drain_ready.wait(max(0, deadline-time.monotonic())) and child.drain_complete
+                   for child in children)
+
     def emit(self, key, role, raw):
         child = self.children.get(key)
         if child is not None:
@@ -1506,6 +1581,10 @@ class GroupFeeds:
                 group_cpu[key] = _finite((child.latest.get('status') or {}).get('ws_process_cpu_cores')) or 0
             base += count
         merged = merge_feed_status(parts)
+        from .ws_redundancy import DisconnectClusters
+        if not hasattr(self, 'disconnect_clusters'):
+            self.disconnect_clusters = DisconnectClusters()
+        merged['ws_server_disconnects'] = self.disconnect_clusters.update(merged.get('ws_remote_closes', []))
         child_cpu = sum(group_cpu.values())
         merged['ws_process_cpu_cores'] = child_cpu + parent_cpu
         merged['ws_parent_cpu_cores'] = parent_cpu

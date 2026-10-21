@@ -126,4 +126,5 @@ def test_status_reports_silence_counters_without_private_fields():
     primary['inbox'].last_byte_at = time.monotonic() - 5
     _feed(manager, backup)
     shown = {k: {f: v for f, v in row.items() if not f.startswith('_')} for k, row in manager.liveness_silence.items()}
-    assert set(shown['up_down:BTC:5m']) == {'promotions', 'suppressed', 'last_at', 'last_silence_s'}
+    assert set(shown['up_down:BTC:5m']) == {'promotions', 'suppressed', 'last_at', 'last_silence_s',
+        'reason', 'tcp_pending_bytes', 'queue_wait_seconds', 'remote_silence_confirmed'}

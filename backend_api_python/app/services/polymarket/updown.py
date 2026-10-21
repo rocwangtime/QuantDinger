@@ -124,7 +124,8 @@ def discover(client, series_cache, *, now=None, prewarm=None):
                     series_cache[slug] = next((str(s['id']) for s in series if s.get('slug') == slug), None)
                 series_id = series_cache[slug]
                 if not series_id:
-                    continue
+                    series_cache.pop(slug, None)
+                    raise ValueError('polymarket.seriesUnavailable')
                 events = client._json('GET', 'https://gamma-api.polymarket.com/events', params={
                     'series_id': series_id, 'active': 'true', 'closed': 'false', 'limit': min(100, per_pair + 5),
                     'order': 'endDate', 'ascending': 'true', 'end_date_min': now.isoformat(),

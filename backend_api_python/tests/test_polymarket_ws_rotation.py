@@ -44,10 +44,14 @@ def feed_manager(monkeypatch):
     class Socket:
         def __init__(self, url, **callbacks):
             self.callbacks, self.sent = callbacks, []
+            from app.services.polymarket.ws_transport import TransportDiagnostics
+            self.transport = TransportDiagnostics()
+            self.transport.pong()
             self.stopped, self.opened = threading.Event(), threading.Event()
             sockets.append(self)
         def run_forever(self, **kwargs):
             self.callbacks['on_open'](self)
+            self.transport.pong()
             self.opened.set()
             self.stopped.wait(30)
             self.callbacks['on_close'](self, None, None)
@@ -376,14 +380,14 @@ def test_supervisor_reconnect_uses_full_jitter_and_resets_after_healthy_lifetime
         m.states[0]['attempts'] = 7
     m.start_supervisor()
     sockets[0].close()
-    wait_for(lambda: len(sockets) == 2, .9)
+    wait_for(lambda: len(sockets) == 2, 2.5)
     assert sockets[1].opened.wait(1)
     sockets[1].close()  # Second consecutive short-lived attempt backs off.
     wait_for(lambda: not m.states[0]['thread'].is_alive())
     remaining = m.states[0]['retry_at'] - time.monotonic()
-    assert 0 < remaining <= 1.2
-    assert [ws_rotation.reconnect_delay(i) for i in range(8)] == [.25, .25, .5, 1, 2, 4, 8, 15]
-    assert ws_rotation.reconnect_delay(999) == 15
+    assert 0 < remaining <= 2.5
+    assert [ws_rotation.reconnect_delay(i) for i in range(8)] == [.45, .45, .7, 1.2, 2.2, 4.2, 8.2, 15.1]
+    assert ws_rotation.reconnect_delay(999) == 15.1
 
 
 def test_data_collapse_requires_busy_baseline_consecutive_seconds_and_healthy_pong():

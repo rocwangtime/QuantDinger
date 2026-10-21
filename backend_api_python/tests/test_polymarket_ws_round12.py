@@ -63,9 +63,11 @@ def test_actual_ingress_cannot_be_hidden_by_slow_worker_rates():
     assert not b.ingress_byte_rates
 
 
-def test_default_one_spare_and_explicit_two_spare_option(feed_manager, monkeypatch):
+def test_default_two_spares_and_explicit_one_spare_option(feed_manager, monkeypatch):
     m, _, sockets = feed_manager
     monkeypatch.delenv('POLYMARKET_OBSERVER_WS_HOT_BACKUP_COUNT')
+    assert m.backup_target() == 2
+    monkeypatch.setenv('POLYMARKET_OBSERVER_WS_HOT_BACKUP_COUNT', '1')
     first = ready_backup(m, sockets)
     first['initial_sent_at'] -= 60
     m.backup_next_connect_at = 0
