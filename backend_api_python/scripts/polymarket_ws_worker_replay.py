@@ -538,15 +538,10 @@ def _run_processes_inner(seconds, rate, levels, cold_pairs, market_loop, weighte
                         pipeline.paper_account.history.record(event, epoch)
                 next_cold += 1
             time.sleep(0.05)
-        # Drain the 300 ms backup skew plus one batch.
-        time.sleep(0.6)
-        if os.environ.get('QD_REPLAY_FULL_DRAIN') == '1':
-            last, still = pipeline.messages, time.monotonic()
-            hard = time.monotonic() + 20
-            while time.monotonic() < hard and time.monotonic() - still < 1.5:
-                time.sleep(0.1)
-                if pipeline.messages != last:
-                    last, still = pipeline.messages, time.monotonic()
+        # A fixed sleep can hash an unfinished producer under CPU contention.
+        # Completion is fenced by the child's final outbox sequence, consumed
+        # by the parent even if the urgent acknowledgement arrives first.
+        drain_complete = feeds.drain_replay(timeout=60)
         parent_cpu = time.process_time() - cpu
         elapsed = time.monotonic() - began
         stages_after = _snapshot_stages(feeds)
@@ -641,8 +636,11 @@ def _run_processes_inner(seconds, rate, levels, cold_pairs, market_loop, weighte
                       rss_bytes=dict(began=rss_began, drained=observer.process_rss_bytes(),
                                      status=status.get('ws_process_rss_bytes')),
                       snapshot_errors=snapshot_errors[:3],
+                      drain_complete=drain_complete,
+                      mismatch_assets=sorted(a for a in pipeline.books.keys() | expected.keys()
+                                             if pipeline.books.get(a) != expected.get(a)),
                       final_book_sha256=final, expected_book_sha256=expect,
-                      valid=(final == expect and not snapshot_errors
+                      valid=(drain_complete and final == expect and not snapshot_errors
                              and codes_1008 == 0 and not feeds.restarts and status.get('mode') == 'ws'
                              and ready_ratio is not None and ready_ratio >= 0.95
                              and ready_live_drops == 0

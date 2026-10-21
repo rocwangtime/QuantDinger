@@ -1127,6 +1127,9 @@ class ReceiveQueue:
             self.queue.queue = deque()
             self.queue.charged_bytes = 0
             count = len(discarded)
+            self.queue.unfinished_tasks -= count
+            if not self.queue.unfinished_tasks:
+                self.queue.all_tasks_done.notify_all()
             self.queue.not_full.notify_all()
             self.dropped += count
             self.drop_reasons[reason] += count
@@ -3493,6 +3496,7 @@ class MarketConnections:
                 except (ValueError, TypeError, AttributeError):
                     continue
                 finally:
+                    inbox.queue.task_done()
                     inbox.process_max_seconds = max(inbox.process_max_seconds, time.monotonic() - parsing_at)
                     inbox.processing_received_at = None
                     inbox.processing_charged_bytes = 0

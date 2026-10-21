@@ -919,6 +919,9 @@ def _drive(manager, spec):
         delay = start + offset - time.monotonic()
         if delay > 0 and _STOP_CHILD.wait(delay):
             return
+        delay_per_frame = float(os.getenv('QD_REPLAY_PRODUCER_DELAY', '0'))
+        if delay_per_frame > 0:
+            time.sleep(delay_per_frame)
         sock = _socket_for(manager, role)
         if sock is None or not hasattr(sock, 'emit'):
             continue
@@ -1011,6 +1014,23 @@ def _sample_loop(manager, outbox):
             outbox.add(dict(op='sample', rows=rows))
 
 
+def replay_drain(manager, drive_thread, timeout=60):
+    """Wait for production of the schedule AND all active FIFO work to finish."""
+    deadline = time.monotonic()+timeout
+    if drive_thread is not None:
+        drive_thread.join(max(0, deadline-time.monotonic()))
+        if drive_thread.is_alive():
+            return False
+    while time.monotonic() < deadline:
+        with manager.lifecycle_lock:
+            states = list(manager.states.values()) + [c for _, c in manager.backup_items()]
+            if all(not s.get('inbox') or (s['inbox'].queue.unfinished_tasks == 0
+                    and not s.get('need_book') and not s.get('held_changes')) for s in states):
+                return True
+        time.sleep(.01)
+    return False
+
+
 def _control_loop(manager, outbox, control, replay):
     drive_thread = None
     while not _STOP_CHILD.is_set():
@@ -1049,6 +1069,11 @@ def _control_loop(manager, outbox, control, replay):
         elif op == 'drive' and replay:
             drive_thread = threading.Thread(target=_drive, args=(manager, message), name='polymarket-replay-drive', daemon=True)
             drive_thread.start()
+        elif op == 'drain' and replay:
+            done = replay_drain(manager, drive_thread, float(message.get('timeout') or 60))
+            with outbox.cv:
+                seq = outbox.seq
+            outbox.add(dict(op='drained', token=message.get('token'), seq=seq, complete=done))
         elif op == 'status':
             try:
                 manager.publish_status()
@@ -1214,6 +1239,9 @@ class _Feed:
         self.pickle_s = 0.0
         self.apply_s = 0.0
         self.dead = False
+        self.applied_seq = 0
+        self.drain_target = None
+        self.drain_ready = threading.Event()
 
     def send(self, message):
         conn = self.control
@@ -1262,8 +1290,17 @@ class _Feed:
         elif op == 'dropped':
             self.dropped = message.get('total') or self.dropped
             self.feeds.note_drop(self.spec['key'], message.get('assets') or [], self.dropped)
+        elif op == 'drained' and message.get('token') == getattr(self, 'drain_token', None):
+            self.drain_target = message.get('seq')
+            self.drain_complete = bool(message.get('complete'))
+            if self.applied_seq >= self.drain_target:
+                self.drain_ready.set()
         elif op == 'pub':
-            self._apply(message.get('items') or [])
+            items = message.get('items') or []
+            self._apply(items)
+            self.applied_seq = max([self.applied_seq, *(item.get('seq', 0) for item in items)])
+            if self.drain_target is not None and self.applied_seq >= self.drain_target:
+                self.drain_ready.set()
         elif op == 'bye':
             self.cpu_s = message.get('cpu_s')
             self.rss = message.get('rss') or self.rss
@@ -1473,6 +1510,18 @@ class GroupFeeds:
                            weights=weights, key=child.spec['key'])
             child.send(message)
         return start
+
+    def drain_replay(self, timeout=60):
+        token = time.monotonic_ns()
+        children = [self.children[key] for key in self.order if key in self.children and self.children[key].spec.get('hot')]
+        for child in children:
+            child.drain_token, child.drain_target = token, None
+            child.drain_complete = False
+            child.drain_ready.clear()
+            child.send(dict(op='drain', token=token, timeout=timeout))
+        deadline = time.monotonic()+timeout+1
+        return all(child.drain_ready.wait(max(0, deadline-time.monotonic())) and child.drain_complete
+                   for child in children)
 
     def emit(self, key, role, raw):
         child = self.children.get(key)
