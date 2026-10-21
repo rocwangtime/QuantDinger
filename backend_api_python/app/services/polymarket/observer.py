@@ -1589,6 +1589,24 @@ class MarketConnections:
             self._liveness_byte_silence(index, state, now)
         self._promote_liveness_backup(index, state)
 
+    def silence_reason(self, state):
+        pending = socket_pending_bytes(state.get('socket'))
+        inbox = state.get('inbox')
+        lag = inbox.pending_wait_seconds() if inbox else 0
+        reason = 'ingress_pressure' if (pending or 0) > 0 or lag >= 4 else 'byte_silence'
+        state['silence_evidence'] = dict(reason=reason, tcp_pending_bytes=pending,
+            queue_wait_seconds=lag, remote_silence_confirmed=pending == 0 and lag < 4)
+        return reason
+
+    def transfer_outage(self, index, old, new):
+        # Every promotion gets an event; final gap is closed by publication.
+        if not old.get('failure_recorded'):
+            old.setdefault('failure_reason', 'planned_rotation')
+            self.record_primary_failure(index, old, None)
+        if 'outage_at' in old:
+            new.update(outage_at=old.pop('outage_at'), outage_wall=old['outage_wall'],
+                       outage_events=old.pop('outage_events', []))
+
     def _liveness_byte_silence(self, index, state, now=None):
         """Mark a silent primary suspect while this spare still receives.
 
@@ -1631,7 +1649,8 @@ class MarketConnections:
             return False
         row.update(promotions=row['promotions'] + 1, last_at=datetime.now(timezone.utc).isoformat(),
                    last_silence_s=silence, _last_monotonic=now)
-        old.update(data_suspect=True, failure_reason='byte_silence')
+        old.update(data_suspect=True, failure_reason=self.silence_reason(old))
+        row.update(old['silence_evidence'])
         old.setdefault('failed_at', now)
         _LOG.warning('Polymarket WS primary byte silence group=%s shard=%s silence_s=%s spare=%s',
                      key, index, silence, state.get('source'))
@@ -1786,8 +1805,8 @@ class MarketConnections:
         def fire():
             delay = first
             while True:
-                if delay > 0:
-                    time.sleep(delay)
+                if delay > 0 and self.supervisor_stop.wait(delay):
+                    return
                 with self.lifecycle_lock:
                     if state.get('book_fallback_token') != token or not state.get('need_book'):
                         return
@@ -1829,6 +1848,7 @@ class MarketConnections:
                        if str(asset) in required_ids}
             if carried:
                 state['book_marks'] = {**dict(state.get('book_marks') or {}), **carried}
+            self.transfer_outage(index, old, state)
             state.update(standby=False, redundant=False,
                          promoted_at=datetime.now(timezone.utc).isoformat(),
                          rotate_failures=0, rotate_retry_at=0, backup_started=True,
@@ -3103,7 +3123,7 @@ class MarketConnections:
                         and inbox.last_data_at is not None and inbox.last_data_at > last_byte
                         and now - inbox.last_data_at <= 1
                         and self.backup_ready(state)):
-                    old.update(data_suspect=True, failure_reason='byte_silence')
+                    old.update(data_suspect=True, failure_reason=self.silence_reason(old))
                     old.setdefault('failed_at', now)
                     self.record_primary_failure(index, old, None)
                 maximum = ws_setting('HOT_ROTATE_SECONDS', 0, 0)
@@ -3121,9 +3141,8 @@ class MarketConnections:
                 self.subscriptions.forget(state)
                 self.check_continuity(index, old, state, 'failover' if not old['connected'] else 'data_collapse' if old.get('data_suspect') else 'hot_age')
                 self.failover_ms = max(0, (time.monotonic() - old.get('failed_at', time.monotonic())) * 1000)
-                if 'outage_at' in old:
-                    state.update(outage_at=old.pop('outage_at'), outage_wall=old['outage_wall'],
-                                 outage_events=old.pop('outage_events', []))
+                self.transfer_outage(index, old, state)
+                if 'outage_at' in state:
                     for event in state['outage_events']:
                         last = event['_last_receipt']
                         receipt_gap = max(0, (datetime.now(timezone.utc) - last).total_seconds() * 1000)
