@@ -267,6 +267,10 @@ def test_liveness_backup_promotes_and_holds_until_a_book():
                   worker=threading.current_thread(), inbox=inbox, source='backup',
                   subscribe_pending=[], recover_assets=[])
     primary = dict(connected=True, assets=['ay', 'an'], inbox=_Inbox(), source='primary')
+    from app.services.polymarket.ws_transport import TransportDiagnostics
+    if not backup.get('socket'):
+        backup['socket'] = type('Socket', (), {'transport': TransportDiagnostics()})()
+        backup['socket'].transport.pong()
     manager.states[0] = primary
     manager.backups[0] = backup
     raw = json.dumps([dict(event_type='book', asset_id=asset, timestamp=5, hash=f'h{asset}',
@@ -311,6 +315,10 @@ def _liveness_manager():
                   recover_assets={'ay', 'an'}, primary_index=0, shadow=shadow, lock=threading.RLock(),
                   initial_sent_at=now, created_at=now, snapshot_retry_at=0, required_assets={'ay', 'an'},
                   admission_observed=True)
+    from app.services.polymarket.ws_transport import TransportDiagnostics
+    if not backup.get('socket'):
+        backup['socket'] = type('Socket', (), {'transport': TransportDiagnostics()})()
+        backup['socket'].transport.pong()
     manager.states[0] = primary
     manager.backups[0] = backup
     return manager, primary, backup, shadow
@@ -394,6 +402,7 @@ def test_exchange_frames_keep_a_receiving_spare_ready(monkeypatch):
     clock['now'] += 20
     assert manager.backup_ready(backup) is False
     assert 'stale_envelope' in manager.readiness_blockers(backup)
+    backup['socket'].transport.pong()
     manager.liveness_receive(0, backup, raw, datetime.now(timezone.utc), backup['inbox'])
     assert backup['ready'] is True and manager.backup_ready(backup)
     assert manager.update_hot_coverage(clock['now'])['up_down:BTC:5m']['ready_backup_count'] == 1
@@ -487,6 +496,10 @@ def test_rest_snapshot_releases_price_changes_within_1_5s(monkeypatch):
                   worker=threading.current_thread(), inbox=inbox, source='backup',
                   subscribe_pending=[], recover_assets=[], lock=threading.RLock(), socket=Sock())
     primary = dict(connected=False, assets=['ay', 'an'], inbox=_Inbox(), source='primary')
+    from app.services.polymarket.ws_transport import TransportDiagnostics
+    if not backup.get('socket'):
+        backup['socket'] = type('Socket', (), {'transport': TransportDiagnostics()})()
+        backup['socket'].transport.pong()
     manager.states[0] = primary
     manager.backups[0] = backup
     manager.balancer.assignment = {'ay': 0, 'an': 0}
@@ -753,6 +766,10 @@ def test_promotion_replays_the_primary_book_within_1_5s(monkeypatch):
                        'ay': (datetime.fromtimestamp(stamp / 1000, timezone.utc), 'hay', stamp),
                        'an': (datetime.fromtimestamp(stamp / 1000, timezone.utc), 'han', stamp),
                    })
+    from app.services.polymarket.ws_transport import TransportDiagnostics
+    if not backup.get('socket'):
+        backup['socket'] = type('Socket', (), {'transport': TransportDiagnostics()})()
+        backup['socket'].transport.pong()
     manager.states[0] = primary
     manager.backups[0] = backup
     manager.balancer.assignment = {'ay': 0, 'an': 0}

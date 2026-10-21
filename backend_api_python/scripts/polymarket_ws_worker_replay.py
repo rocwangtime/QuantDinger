@@ -94,8 +94,14 @@ def run(seconds=15, rate=1896, levels=140, cold_pairs=19, stage_profile=False, l
             self.transport = TransportDiagnostics()
             sockets.append(self)
         def run_forever(self, **kwargs):
+            self.text_heartbeat_active = True
             self.callbacks['on_open'](self)
-            self.stopped.wait()
+            delay = getattr(self, 'heartbeat_phase', 10)
+            while not self.stopped.wait(delay):
+                if self.assets:
+                    self.transport.ping()
+                    self.send('PING')
+                delay = 10
         def send(self, raw):
             if raw == 'PING':
                 self.transport.pong()

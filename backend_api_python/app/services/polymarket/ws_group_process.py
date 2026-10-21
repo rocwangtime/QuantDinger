@@ -64,7 +64,7 @@ PARENT_OWNED = frozenset({
 SHARD_DICTS = frozenset({
     'ws_receive_queues', 'ws_backups', 'ws_reserves', 'ws_merge_metrics',
     'ws_connection_ages_seconds', 'ws_subscription_pending',
-    'ws_last_transport_failures', 'ws_primary_1013_by_shard',
+    'ws_last_transport_failures', 'ws_primary_1013_by_shard', 'ws_rollover_preparation',
 })
 SHARD_LISTS = frozenset({
     'ws_shard_assets', 'ws_shard_loads', 'ws_shard_byte_loads', 'ws_capacity_by_shard',
@@ -260,7 +260,12 @@ def _remap_shard_dict(value, base):
     merged = {}
     for key, row in (value or {}).items():
         shard = _as_int_key(key)
-        merged[shard + base if isinstance(shard, int) else shard] = row
+        if isinstance(shard, int):
+            shard += base
+        elif isinstance(shard, str) and ':' in shard and shard.split(':', 1)[0].isdigit():
+            first, rest = shard.split(':', 1)
+            shard = f'{int(first)+base}:{rest}'
+        merged[shard] = row
     return merged
 
 
@@ -563,8 +568,15 @@ class ReplaySocket:
         return time.monotonic() < self.stalled_until
 
     def run_forever(self, **kwargs):
+        # Model the real transport's independent text heartbeat for spares too.
+        self.text_heartbeat_active = True
         self.callbacks['on_open'](self)
-        self.stopped.wait()
+        delay = getattr(self, 'heartbeat_phase', 10)
+        while not self.stopped.wait(delay):
+            if self.assets:
+                self.transport.ping()
+                self.send('PING')
+            delay = 10
 
     def send(self, raw):
         if raw == 'PING':

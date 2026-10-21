@@ -64,7 +64,7 @@ def test_exact_copy_hint_preserves_split_rows_multiplicity_and_eviction():
     assert fast.filter(event, 'b', {'ay'})
     for i in range(10):
         fast.filter(event, f'feed-{i}', {'ay'})
-    assert all(len(counts) <= 4 for _, counts in fast.seen.values())
+    assert all(len(counts) <= 8 for _, counts in fast.seen.values())
 
 
 def test_random_fanin_matches_reference_without_shared_hints():

@@ -15,6 +15,9 @@ from . import recording
 from .ws_payloads import fingerprint, event_key, price_rows, PublicEvent
 from .ws_balance import setting
 
+# One primary + up to five spares, with two recent generations for overlap.
+SOURCE_GENERATIONS = 8
+
 
 class HotBackupCoverage:
     """Session cumulative coverage; a split series needs every shard ready.
@@ -133,7 +136,7 @@ class FeedMerge:
         _, counts = self.seen.get(key, (now, {}))
         previous = max(counts.values(), default=0)
         counts[source] = counts.get(source, 0) + 1
-        while len(counts) > 4:
+        while len(counts) > SOURCE_GENERATIONS:
             del counts[next(s for s in counts if s != source)]
         self.seen[key] = (now, counts)
         self.seen.move_to_end(key)
@@ -156,7 +159,7 @@ class FeedMerge:
             hint = payload.fanin if isinstance(payload, PublicEvent) else None
             now = time.monotonic()
             if (self.deduplicate and hint and hint[0] == id(self) and source != hint[1]
-                    and all(source not in counts and len(counts) < 4 and self.seen.get(key, (0, None))[1] is counts
+                    and all(source not in counts and len(counts) < SOURCE_GENERATIONS and self.seen.get(key, (0, None))[1] is counts
                             and self.seen[key][0] >= now - 15 for key, counts in hint[2])):
                 # First exact copy on another source. Advance the SAME row
                 # counters, preserving split-frame and repeated-source semantics.
@@ -319,7 +322,7 @@ class FeedContinuity:
                 history = self.history.setdefault(asset, OrderedDict())
                 sources = history.setdefault(key, set())
                 sources.add(source)
-                while len(sources) > 4:
+                while len(sources) > SOURCE_GENERATIONS:
                     sources.remove(next(s for s in sources if s != source))
                 history.move_to_end(key)
                 self.history_order[asset, key] = time.monotonic()
@@ -333,7 +336,7 @@ class FeedContinuity:
                 if source not in latest or at >= latest[source][0]:
                     latest[source] = (at, key, received)
                 # Only two live feeds plus a few old generations are useful.
-                while len(latest) > 4:
+                while len(latest) > SOURCE_GENERATIONS:
                     del latest[next(iter(latest))]
                 pending = self.pending.get(asset)
                 if (pending and source != pending['old'] and kind == 'book'

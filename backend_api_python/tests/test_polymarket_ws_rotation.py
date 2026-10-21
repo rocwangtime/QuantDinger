@@ -44,10 +44,14 @@ def feed_manager(monkeypatch):
     class Socket:
         def __init__(self, url, **callbacks):
             self.callbacks, self.sent = callbacks, []
+            from app.services.polymarket.ws_transport import TransportDiagnostics
+            self.transport = TransportDiagnostics()
+            self.transport.pong()
             self.stopped, self.opened = threading.Event(), threading.Event()
             sockets.append(self)
         def run_forever(self, **kwargs):
             self.callbacks['on_open'](self)
+            self.transport.pong()
             self.opened.set()
             self.stopped.wait(30)
             self.callbacks['on_close'](self, None, None)

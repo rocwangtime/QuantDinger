@@ -166,7 +166,7 @@ def test_merge_bounds_both_unique_events_and_repeated_snapshot_generations(monke
     frozen = book('ay', at=1)
     for i in range(10000):
         merge.unique(frozen, 'feed-' + str(i))
-    assert max(len(counts) for _, counts in merge.seen.values()) <= 4
+    assert max(len(counts) for _, counts in merge.seen.values()) <= 8
     assert len(merge.seen) <= merge.maximum
     # Same-source trade multiplicity survives the smaller cache.
     trade = dict(event_type='last_trade_price', timestamp=99999, price='.4', size='1')
