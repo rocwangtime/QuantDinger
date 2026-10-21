@@ -71,7 +71,7 @@ SHARD_LISTS = frozenset({
 })
 SUM_KEYS = frozenset({
     'ws_process_cpu_cores', 'ws_process_rss_bytes', 'ws_retiring_connections',
-    'ws_rotation_count', 'ws_rotation_failures', 'ws_backup_promotions',
+    'ws_rotation_count', 'ws_rotation_failures', 'ws_backup_promotions', 'ws_backup_wire_failures',
     'ws_standby_slow_consumer_count', 'ws_connected', 'ws_connections',
     'reconnect_count', 'slow_consumer_count', 'rebalance_count', 'ws_unmeasured_groups',
 })
@@ -306,6 +306,15 @@ def merge_feed_status(parts):
                     if isinstance(row, dict) and 'shard' in row and isinstance(row.get('shard'), int):
                         row = dict(row, shard=row['shard'] + base)
                     rows.append(row)
+            elif key == 'ws_hot_backup_by_group' and isinstance(value, dict):
+                bucket = merged.setdefault(key, {})
+                for group, row in value.items():
+                    if part.get('key') == group or group not in bucket:
+                        copied = copy.deepcopy(row)
+                        for field in ('required_shards', 'ready_shards'):
+                            if field in copied:
+                                copied[field] = [i+base if isinstance(i, int) else i for i in copied[field]]
+                        bucket[group] = copied
             elif key == 'ws_child_ready' and isinstance(value, dict):
                 # Copy each child's spare probe. Do not add ready_count: other
                 # children publish nothing for this group, and a sum would hide
@@ -434,12 +443,15 @@ def _merge_continuity(left, right):
     merged = dict(left)
     for key in ('checks', 'unverified', 'snapshot_restored', 'history_assets', 'history_entries', 'history_evictions'):
         merged[key] = (left.get(key) or 0) + (right.get(key) or 0)
-    gaps = [row.get('merged_gap_ms') or {} for row in (left, right)]
-    merged['merged_gap_ms'] = dict(
-        samples=sum((row.get('samples') or 0) for row in gaps),
-        p50=max((row.get('p50') for row in gaps if row.get('p50') is not None), default=None),
-        p95=max((row.get('p95') for row in gaps if row.get('p95') is not None), default=None),
-        max=max((row.get('max') for row in gaps if row.get('max') is not None), default=None))
+    from .ws_redundancy import histogram_metrics, CADENCE_BOUNDS_MS
+    cadence = {}
+    for group in ('hot', 'cold'):
+        rows = [(part.get('receive_cadence_ms') or {}).get(group) or {} for part in (left, right)]
+        counts = [sum((row.get('histogram') or [0]*len(CADENCE_BOUNDS_MS))[i] for row in rows)
+                  for i in range(len(CADENCE_BOUNDS_MS))]
+        maximum = max((r['maximum'] for r in rows if r.get('maximum')), key=lambda r:r['ms'], default=None)
+        cadence[group] = histogram_metrics(counts, maximum)
+    merged['receive_cadence_ms'] = cadence
     published = dict(left.get('published') or {})
     published.update(right.get('published') or {})
     merged['published'] = published

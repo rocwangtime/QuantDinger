@@ -5,6 +5,7 @@ and timestamp, retaining same-source multiplicity for identical trade prints.
 Older snapshots/levels cannot overwrite newer state. Trades may arrive late.
 """
 import json
+import bisect
 import time
 import threading
 from functools import wraps
@@ -92,7 +93,7 @@ class HotBackupCoverage:
                                                 if row['observed_seconds'] else None),
                         time_without_backup_seconds=row['time_without_backup_seconds'],
                         zero_ready_backup_seconds=row['zero_ready_backup_seconds'],
-                        zero_ready_backup_active=row['zero_active'],
+                        zero_ready_backup_active=row['zero_active'] and row['zero_ready'],
                         zero_ready_by_phase_seconds=dict(row['zero_ready_by_phase_seconds']),
                         current_time_without_backup_seconds=(now - row['without_since']
                                                             if row['without_since'] is not None else 0.))
@@ -222,6 +223,40 @@ def serialized(method):
     return wrapped
 
 
+CADENCE_BOUNDS_MS = (1, 5, 10, 25, 50, 100, 250, 500, 1000, 1500, 5000, 20000, 60000, 300000, float('inf'))
+BUSINESS_GAP_DEFINITION = ('Per interruption event and asset: last merged publication before interruption to first '
+    'merged publication after interruption; max across affected assets. Publication wall time, not socket receipt, '
+    'detection-to-takeover, physical silence or ordinary interarrival. Missing baseline is unmeasured, never zero.')
+
+
+def cadence_metrics(rows):
+    """Mergeable fixed histogram; quantiles are upper bucket bounds."""
+    counts = [0] * len(CADENCE_BOUNDS_MS)
+    maximum = None
+    for value, asset, at in rows:
+        for i, bound in enumerate(CADENCE_BOUNDS_MS):
+            if value <= bound:
+                counts[i] += 1
+                break
+        if maximum is None or value > maximum['ms']:
+            maximum = dict(ms=value, asset=asset, at=at)
+    return histogram_metrics(counts, maximum)
+
+
+def histogram_metrics(counts, maximum):
+    size = sum(counts)
+    def quantile(q):
+        seen = 0
+        for count, bound in zip(counts, CADENCE_BOUNDS_MS):
+            seen += count
+            if seen >= max(1, __import__('math').ceil(size*q)):
+                return bound if bound != float('inf') else (maximum or {}).get('ms')
+        return None
+    return dict(samples=size, histogram=counts, bounds_ms=list(CADENCE_BOUNDS_MS[:-1])+[None],
+                p50=quantile(.5), p95=quantile(.95), max=(maximum or {}).get('ms'),
+                maximum=maximum, quantile_method='histogram_upper_bound', window_seconds=60, window_resolution_seconds=1)
+
+
 class FeedContinuity:
     """Per-asset overlap evidence, independent of book invalidation.
 
@@ -242,12 +277,60 @@ class FeedContinuity:
         self.records = OrderedDict()
         self.published = {}
         self.gap_waiting = {}
-        self.merged_gaps = deque(maxlen=4096)
+        self.cadence_seconds = {}
+        self.hot_assets = set()
+        self.business_waiting = {}
+        self.business_events = deque(maxlen=256)
+        self.business_latest = {}
+        self.business_serial = 0
         self.serial = self.checks = self.uncertain = self.recovered = 0
 
     @serialized
+    def watch_gap(self, event, assets):
+        event.update(merged_gap_ms=None, merged_gap_final=False, gap_definition=BUSINESS_GAP_DEFINITION,
+                     interruption_at=datetime.now(timezone.utc).isoformat())
+        baselines = {a: dict(self.published[a]) for a in assets if a in self.published}
+        event['_gap_assets'] = set(assets)
+        event['_gap_baselines'] = baselines
+        event['_gap_results'] = {}
+        previous = next((self.business_latest[a] for a in assets if a in self.business_latest), None)
+        same = (previous is not None and previous.get('_gap_assets') == set(assets)
+                and previous.get('_gap_baselines') == baselines)
+        if same:
+            event['business_event_id'] = previous['business_event_id']
+        else:
+            self.business_serial += 1
+            event['business_event_id'] = self.business_serial
+        event['_watched_at'] = time.monotonic()
+        for asset in assets:
+            self.business_latest[asset] = event
+        event['unmeasured_assets'] = sorted(set(assets)-baselines.keys())
+        event['gap_measurement'] = 'unmeasured_no_baseline' if event['unmeasured_assets'] else 'pending_publication'
+        self.business_events.append(event)
+        for asset in baselines:
+            self.business_waiting.setdefault(asset, []).append(event)
+        # Bound pending references too, including permanently removed markets.
+        live = {id(e) for e in self.business_events}
+        self.business_waiting = {a: [e for e in rows if id(e) in live]
+                                 for a, rows in self.business_waiting.items() if any(id(e) in live for e in rows)}
+
+    def _business_publication(self, asset, published_at):
+        for event in self.business_waiting.pop(asset, []):
+            before = event['_gap_baselines'][asset]
+            start = before.get('published_at', before['received'])
+            gap = max(0, (published_at-start).total_seconds()*1000)
+            event['_gap_results'][asset] = dict(ms=gap, asset=asset, at=published_at.isoformat())
+            results = event['_gap_results']
+            maximum = max(results.values(), key=lambda r: r['ms'])
+            event.update(merged_gap_ms=maximum['ms'], gap_maximum=maximum,
+                gap_measurement='unmeasured_no_baseline' if event['unmeasured_assets'] else 'measured',
+                merged_gap_final=not event['unmeasured_assets'] and event['_gap_assets'] <= results.keys())
+            event['business_gap'] = bool(event.get('supply_interrupted') and event['merged_gap_final']
+                                         and event['merged_gap_ms'] > 0)
+
+    @serialized
     def prune(self, assets):
-        for cache in (self.history, self.latest, self.pending, self.published, self.gap_waiting):
+        for cache in (self.history, self.latest, self.pending, self.published, self.gap_waiting, self.business_waiting, self.business_latest):
             for asset in cache.keys() - assets:
                 del cache[asset]
         for key in list(self.history_order):
@@ -266,13 +349,26 @@ class FeedContinuity:
                 self.history.pop(asset, None)
             self.history_evictions += 1
 
+    @staticmethod
+    def _gap_alias(row):
+        peer = row.get('_business_ref')
+        if peer is not None:
+            for key in ('business_event_id', 'merged_gap_ms', 'merged_gap_final', 'gap_definition',
+                        'gap_measurement', 'gap_maximum', 'unmeasured_assets', 'interruption_at'):
+                if key in peer:
+                    row[key] = peer[key]
+
     @serialized
     def log(self, row):
         import logging
         self.serial += 1
-        row.setdefault('merged_gap_ms', self.published.get(row.get('asset'), {}).get('receipt_gap_ms'))
+        peer = self.business_latest.get(row.get('asset'))
+        if peer and (not peer.get('merged_gap_final') or time.monotonic()-peer.get('_watched_at', 0) <= 15):
+            row['_business_ref'] = peer
+            self._gap_alias(row)
+        else:
+            self.watch_gap(row, {row.get('asset')})
         row['event_id'] = self.serial
-        row['merged_gap_final'] = False
         self.gap_waiting.setdefault(row.get('asset'), {})[self.serial] = row
         row['physical_evidence_alert_only'] = True
         self.records[self.serial] = row
@@ -280,11 +376,12 @@ class FeedContinuity:
             serial, removed = self.records.popitem(last=False)
             waiting = self.gap_waiting.get(removed.get('asset'), {})
             waiting.pop(serial, None)
-        logging.getLogger(__name__).info('Polymarket WS continuity %s', json.dumps(row))
+        logging.getLogger(__name__).info('Polymarket WS continuity %s', json.dumps({k:v for k,v in row.items() if not k.startswith('_')}))
 
     @serialized
     def publication(self, metadata, assets):
         """Actual merged book receipt cadence, independent of physical sources."""
+        published_at = datetime.now(timezone.utc)
         for asset in assets:
             row = metadata.get(asset)
             if not row or row[0] is None:
@@ -293,14 +390,24 @@ class FeedContinuity:
             if previous and row[1] <= previous['received']:
                 continue
             gap = max(0, (row[1] - previous['received']).total_seconds() * 1000) if previous else 0
-            self.published[asset] = dict(received=row[1], exchange_at=row[0], receipt_gap_ms=gap,
+            self.published[asset] = dict(received=row[1], exchange_at=row[0], published_at=published_at, receipt_gap_ms=gap,
                 max_receipt_gap_ms=max(gap, previous['max_receipt_gap_ms'] if previous else 0))
             if previous:
-                self.merged_gaps.append(gap)
-            for event in self.gap_waiting.pop(asset, {}).values():
-                event.update(merged_gap_ms=gap if previous else None, merged_gap_final=bool(previous))
-                import logging
-                logging.getLogger(__name__).info('Polymarket WS business gap %s', json.dumps(event))
+                group = 'hot' if asset in self.hot_assets else 'cold'
+                natural = max(0, (row[0] - previous['exchange_at']).total_seconds()*1000)
+                value = gap if group == 'hot' else max(0, gap-natural)
+                second = int(published_at.timestamp())
+                if second not in self.cadence_seconds:
+                    self.cadence_seconds = {t:r for t,r in self.cadence_seconds.items() if t >= second-60}
+                    self.cadence_seconds[second] = {'hot': None, 'cold': None}
+                bucket = self.cadence_seconds[second]
+                hist = bucket[group]
+                if hist is None:
+                    hist = bucket[group] = dict(histogram=[0]*len(CADENCE_BOUNDS_MS), maximum=None)
+                hist['histogram'][bisect.bisect_left(CADENCE_BOUNDS_MS, value)] += 1
+                if hist['maximum'] is None or value > hist['maximum']['ms']:
+                    hist['maximum'] = dict(ms=value, asset=asset, at=published_at.isoformat())
+            self._business_publication(asset, published_at)
 
     @serialized
     def receive(self, event, source, received):
@@ -395,12 +502,26 @@ class FeedContinuity:
 
     @serialized
     def metrics(self):
-        gaps = sorted(self.merged_gaps)
+        cutoff = time.time() - 60
+        self.cadence_seconds = {second: rows for second, rows in self.cadence_seconds.items() if second >= cutoff}
+        for row in self.records.values():
+            self._gap_alias(row)
+        cadence = {}
+        for group in ('hot', 'cold'):
+            counts = [0]*len(CADENCE_BOUNDS_MS)
+            maximum = None
+            for rows in self.cadence_seconds.values():
+                row = rows[group]
+                if row:
+                    counts = [a+b for a,b in zip(counts, row['histogram'])]
+                    if maximum is None or row['maximum']['ms'] > maximum['ms']:
+                        maximum = row['maximum']
+            cadence[group] = histogram_metrics(counts, maximum)
         return dict(checks=self.checks, unverified=self.uncertain, snapshot_restored=self.recovered,
-                    merged_gap_ms=dict(samples=len(gaps), p50=gaps[len(gaps)//2] if gaps else None,
-                        p95=gaps[min(len(gaps)-1, int(len(gaps)*.95))] if gaps else None,
-                        max=max(gaps) if gaps else None),
-                    pending_assets=sorted(self.pending), events=list(self.records.values()),
+                    receive_cadence_ms=cadence,
+                    receive_cadence_definition='hot: receipt interarrival; cold: max(0, receipt interarrival - exchange interval); 60s rolling',
+                    business_gap_definition=BUSINESS_GAP_DEFINITION,
+                    pending_assets=sorted(self.pending), events=[{k:v for k,v in row.items() if not k.startswith('_')} for row in self.records.values()],
                     history_assets=len(self.history), history_entries=sum(map(len, self.history.values())),
                     history_limit=self.history_limit, history_ttl_seconds=self.history_ttl,
                     history_evictions=self.history_evictions,
@@ -422,7 +543,7 @@ class DoubleKicks:
         recent = self.recent.setdefault(group, deque(maxlen=8))
         if any(row['source'] == source for row in recent):
             return
-        peer = next((r for r in reversed(recent) if 0 <= now-r['monotonic'] <= 1 and not r['paired']), None)
+        peer = next((r for r in reversed(recent) if 0 <= now-r['monotonic'] <= 15 and not r['paired']), None)
         row = dict(source=source, role=role, code=code, monotonic=now, paired=peer is not None)
         recent.append(row)
         if peer is None:
@@ -450,7 +571,7 @@ class DoubleKicks:
                     business_gaps_current_hour=sum(e['business_gap'] for e in events if e['at'] >= hour),
                     pending_rolling_hour=sum(not e['merged_gap_final'] for e in events),
                     hourly=[dict(hour_start_utc=h, count=n) for h, n in self.hourly.items()],
-                    events=[{k: v for k, v in e.items() if not k.startswith('_')} for e in self.events], pair_window_seconds=1)
+                    events=[{k: v for k, v in e.items() if not k.startswith('_')} for e in self.events], pair_window_seconds=15)
 
 
 class DisconnectClusters:

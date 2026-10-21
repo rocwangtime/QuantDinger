@@ -881,7 +881,7 @@ def test_even_schedule_matches_the_inprocess_harness():
 def test_merge_keeps_parent_lifecycle_and_remaps_shards():
     def continuity(checks, p50):
         return dict(checks=checks, unverified=0, snapshot_restored=0, history_assets=0, history_entries=0,
-                    history_evictions=0, merged_gap_ms=dict(samples=1, p50=p50, p95=p50, max=p50),
+                    history_evictions=0, receive_cadence_ms=dict(hot=__import__('app.services.polymarket.ws_redundancy', fromlist=['cadence_metrics']).cadence_metrics([(p50, 'a', 't')])),
                     published={}, events=[], pending_assets=[])
     parts = [
         dict(shard_base=0, status=dict(
@@ -900,7 +900,7 @@ def test_merge_keeps_parent_lifecycle_and_remaps_shards():
     assert set(merged['ws_backups']) == {0, 1}
     assert merged['reconnect_count'] == 5 and merged['ws_failover_ms'] == 40 and merged['ws_shards'] == 2
     assert merged['close_reason_counts']['slow_consumer'] == 3
-    assert merged['ws_continuity']['checks'] == 5 and merged['ws_continuity']['merged_gap_ms']['p50'] == 9
+    assert merged['ws_continuity']['checks'] == 5 and merged['ws_continuity']['receive_cadence_ms']['hot']['p50'] == 5
     assert merged['ws_capacity_excess'] == (1, 2) and merged['connected'] is True
 
 

@@ -114,7 +114,7 @@ def test_failed_backup_replenishes_without_waiting_for_discovery(feed_manager, m
     if failure == '1001':
         assert m.rotation_failures == 0
     else:
-        assert m.rotation_failures == 1
+        assert m.rotation_failures + m.backup_wire_failures == 1
 
 
 def test_young_primary_replenishes_without_age_guard(feed_manager, monkeypatch):

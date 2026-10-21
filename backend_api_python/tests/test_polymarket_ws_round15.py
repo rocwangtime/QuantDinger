@@ -266,11 +266,11 @@ def test_merged_gap_keeps_physical_receipt_gap_unchanged(feed_manager):
         m.continuity.latest[a] = {state['source']: (now, 'old', now-timedelta(seconds=30))}
     m.record_primary_failure(0, state, None)
     event = state['outage_events'][0]
-    assert event['source_silence_ms'] >= 30000 and event['merged_gap_ms'] < 100
+    assert event['source_silence_ms'] >= 30000 and event['merged_gap_ms'] is None
     for a in state['assets']:
-        m.continuity.published[a] = dict(received=now+timedelta(milliseconds=30), receipt_gap_ms=50)
         p.books[a] = {'asks':{}, 'bids':{}}
         p.recording.metadata[a] = (now, now+timedelta(milliseconds=30), 'ws')
+    m.continuity.publication(p.recording.metadata, set(state['assets']))
     m.complete_recovery(0, state, 'backup')
     assert event['merged_gap_ms'] < 100 and event['merged_gap_final']
     assert event['receipt_gap_ms'] >= 30000
@@ -278,12 +278,13 @@ def test_merged_gap_keeps_physical_receipt_gap_unchanged(feed_manager):
 
 def test_merged_publication_gaps_have_summary_and_physical_events_are_alerts():
     c = FeedContinuity();now = datetime.now(timezone.utc)
+    c.hot_assets = {'a'}
     c.publication({'a': (now, now, 'ws')}, {'a'})
     c.publication({'a': (now, now+timedelta(milliseconds=7), 'ws')}, {'a'})
     c.switch('missing', None, {'a'}, 'failover')
     metrics = c.metrics()
-    assert metrics['merged_gap_ms']['max'] == 7
-    assert metrics['events'][0]['merged_gap_ms'] == 7
+    assert metrics['receive_cadence_ms']['hot']['max'] == 7
+    assert metrics['events'][0]['merged_gap_ms'] is None
     assert metrics['events'][0]['physical_evidence_alert_only']
 
 
@@ -371,12 +372,13 @@ def test_shadow_delta_before_snapshot_retains_watermark_and_requires_fresh_base(
 
 def test_business_gap_is_finalized_by_publication_while_physical_gap_stays_pending():
     c = FeedContinuity();now = datetime.now(timezone.utc)
+    c.hot_assets = {'a'}
     c.publication({'a': (now, now, 'ws')}, {'a'})
     c.switch('missing', None, {'a'}, 'failover')
     assert c.pending_assets() == {'a'}
     c.publication({'a': (now, now+timedelta(milliseconds=15), 'ws')}, {'a'})
     event = c.metrics()['events'][0]
-    assert event['merged_gap_ms'] == 15 and event['merged_gap_final']
+    assert 0 <= event['merged_gap_ms'] < 100 and event['merged_gap_final']
     assert c.pending_assets() == {'a'} and event['receipt_gap_ms'] is None
     for _ in range(200):
         c.switch('missing', None, {'quiet'}, 'reconnect')

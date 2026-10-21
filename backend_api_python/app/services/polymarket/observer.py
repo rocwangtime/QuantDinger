@@ -1360,7 +1360,7 @@ class MarketConnections:
         self.backup_promotions = 0
         self.rotation_last_failure = None
         self.retiring = []
-        self.rotations = self.rotation_failures = 0
+        self.rotations = self.rotation_failures = self.backup_wire_failures = 0
         self.standby_slow_consumers = 0
         self.supervisor_stop = Event()
         self.supervisor = None
@@ -1588,6 +1588,7 @@ class MarketConnections:
             state['ready'] = healthy
             self.update_hot_coverage(now)
         if healthy:
+            state['ever_ready'] = True
             self._liveness_byte_silence(index, state, now)
         self._promote_liveness_backup(index, state)
 
@@ -1952,7 +1953,7 @@ class MarketConnections:
                     state['role_at_failure'], code, state['remote_failure_at'], state['remote_failure_wall'])
                 if paired is not None:
                     paired['_assets'] = set(state['assets'])
-                    paired['_previous'] = {a: dict(self.continuity.published.get(a, {})) for a in state['assets']}
+                    self.continuity.watch_gap(paired, set(state['assets']))
                     paired['supply_interrupted'] = not any(i == index and c is not state
                         and c.get('connected') and c.get('remote_failure_at') is None
                         and not c.get('inbox').invalid.is_set()
@@ -1975,6 +1976,11 @@ class MarketConnections:
             ready = sum(self.backup_ready(c) for i, c in self.backup_items() if i == index)
             use_rest = not ready and not (state.get('failure_reason') == 'pong_timeout' and any(
                 i == index and self.promotable_backup(c) and self.backup_pong_fresh(c) for i, c in self.backup_items()))
+            groups = {self.balancer.groups.get(a, '').split(':outcome:')[0] for a in state['assets']} & HOT_SERIES
+            gap_events = {key: dict(code=code, ready_backup_at_kick=bool(ready), ready_backups=ready,
+                         takeover_gap_ms=None, receipt_gap_ms=None, recovery=None, gap_final=False) for key in groups}
+            for event in gap_events.values():
+                self.continuity.watch_gap(event, set(state['assets']))
             if use_rest:
                 self.request_snapshot(index, state, set(state['assets']))
             with (_PIPELINE.lock if _PIPELINE else RLock()):
@@ -1986,18 +1992,13 @@ class MarketConnections:
                 row = self.primary_failures.setdefault(key, dict(total=0, without_ready_backup=0, events=deque(maxlen=64)))
                 row['total'] += 1
                 row['without_ready_backup'] += not ready
-                event = dict(code=code, ready_backup_at_kick=bool(ready), ready_backups=ready,
-                             takeover_gap_ms=None, receipt_gap_ms=None, recovery=None, gap_final=False)
+                event = gap_events[key]
                 source_receipts = [self.continuity.latest.get(a, {}).get(state.get('source'), (None, None, None))[2]
                                    for a in state['assets']]
                 source_receipts = [at for at in source_receipts if at is not None]
                 event['_last_receipt'] = min(source_receipts or receipts, default=state['outage_wall'])
                 event['source_silence_ms'] = max(0, (state['outage_wall'] - event['_last_receipt']).total_seconds() * 1000)
                 event['merged_receipt_gap_ms'] = max(0, (state['outage_wall'] - min(receipts, default=state['outage_wall'])).total_seconds() * 1000)
-                event['merged_gap_ms'] = event['merged_receipt_gap_ms']
-                event['merged_gap_final'] = False
-                event['_merged_previous'] = {a: v[1] for a, v in (_PIPELINE.recording.metadata.items() if _PIPELINE else [])
-                                             if a in state['assets']}
                 event['reason'] = state.get('failure_reason', 'transport')
                 row['events'].append(event)
                 _LOG.warning('Polymarket WS hot primary failure group=%s shard=%s code=%s ready_backups=%s',
@@ -2039,18 +2040,9 @@ class MarketConnections:
         state.pop('outage_at', None)
 
     def update_merged_gap(self, state):
-        wall = state.get('outage_wall')
-        if wall is None:
-            return
-        owned = set(state['assets'])
-        for event in state.get('outage_events', []):
-            previous = event.get('_merged_previous', {})
-            for asset, last in list(previous.items()):
-                current = self.continuity.published.get(asset)
-                if current and current['received'] > last:
-                    event['merged_gap_ms'] = max(event['merged_gap_ms'], current['receipt_gap_ms'])
-                    previous[asset] = current['received']
-            event['merged_gap_final'] = bool(owned) and all(previous.get(a, wall) > wall for a in owned)
+        # Finalized only by FeedContinuity.publication; control ticks must not
+        # move event anchors or inflate a completed gap with later traffic.
+        return None
 
     @staticmethod
     def promotable_backup(state):
@@ -2115,7 +2107,7 @@ class MarketConnections:
         with self.continuity.lock:
             continuity = (1536 * sum(map(len, self.continuity.history.values()))
                           + 1024 * sum(map(len, self.continuity.latest.values()))
-                          + 256 * len(self.continuity.merged_gaps))
+                          + 1024 * len(self.continuity.cadence_seconds))
         queues = processing = 0
         for state in states:
             inbox = state.get('inbox')
@@ -2335,6 +2327,8 @@ class MarketConnections:
                                   (('yes', m['yesAssetId']), ('no', m['noAssetId']))},
                                  time.monotonic())
         self.balancer.forced_hot = {k for k in self.balancer.groups.values() if k.split(':outcome:')[0] in HOT_SERIES}
+        self.continuity.hot_assets = {a for a, key in self.balancer.groups.items()
+                                      if key.split(':outcome:')[0] in HOT_SERIES}
         self.continuity.prune(set(subscription_assets(markets)))
         if set(subscription_assets(markets)) == set(self.balancer.assignment):
             self.tick()
@@ -2346,19 +2340,8 @@ class MarketConnections:
         self.tick()
 
     def update_double_kicks(self):
-        for event in self.double_kicks.events:
-            if event['merged_gap_final'] or '_previous' not in event:
-                continue
-            gaps = []
-            for asset in event['_assets']:
-                before = event['_previous'].get(asset, {})
-                after = self.continuity.published.get(asset, {})
-                if not before or not after or after['received'] <= before['received']:
-                    break
-                gaps.append(max(0, (after['received']-before['received']).total_seconds()*1000))
-            else:
-                event.update(merged_gap_ms=max(gaps, default=None), merged_gap_final=True,
-                             business_gap=event.get('supply_interrupted', False))
+        # The exact same publication callback closes primary and paired events.
+        return None
 
     def sample_fast(self, now, deadline):
         # No Pipeline/lifecycle lock, JSON parsing, TCP_INFO or DB work here.
@@ -2735,7 +2718,11 @@ class MarketConnections:
         delay = self.retry_delay(index, candidate, failures) if candidate.get('redundant') else min(480, 60 * 2 ** min(3, failures - 1))
         if active:
             active.update({f'{prefix}_failures': failures, f'{prefix}_retry_at': time.monotonic() + delay})
-        self.rotation_failures += 1
+        established = candidate.get('redundant') and candidate.get('ever_ready')
+        if established:
+            self.backup_wire_failures += 1
+        else:
+            self.rotation_failures += 1
         self.rotation_last_failure = dict(shard=index, reason=reason, stage=self.prepare_stage(candidate),
                                           retry_seconds=delay, consecutive_failures=failures)
         _LOG.info('Polymarket WS rotation aborted details=%s', json.dumps(self.rotation_last_failure))
@@ -3113,6 +3100,7 @@ class MarketConnections:
                 old['backup_failures'] = 0
                 if ready and not state.get('ready'):
                     state['ready'] = True
+                    state['ever_ready'] = True
                     self.update_hot_coverage(time.monotonic())
                 # A prewarmed window can activate while its market is quiet;
                 # publish its assembled books without waiting for another trade.
@@ -4021,7 +4009,7 @@ class MarketConnections:
                               events=[{field: value for field, value in e.items() if not field.startswith('_')}
                                   for e in v['events']]) for k, v in self.primary_failures.items()},
                           ws_takeover_gap_scope='failed_source_receipt_to_recovery; detection_to_takeover_ms_is_control_time',
-                          ws_acceptance_gap_scope='merged_gap_ms; physical_source_silence_and_historical_trades_are_alert_only',
+                          ws_acceptance_gap_scope='ws_hot_primary_failures.<group>.events[].merged_gap_ms with merged_gap_final=true <=1500; ws_double_kicks.business_gaps_current_hour <=1; physical_source_silence>20s and historical_trade_loss alert_only; cold delivery latency',
                           ws_pong_timeout_seconds=22,
                           ws_backup_max_lag_seconds=ws_setting('BACKUP_MAX_LAG_SECONDS', 2, 1),
                           ws_rest_recovery=self.snapshot_recovery.metrics(),
@@ -4032,6 +4020,7 @@ class MarketConnections:
                           ws_migration=self.migration_metrics(now),
                           ws_primary_1013_by_shard=self.primary_1013_metrics(now),
                           ws_rotation_count=self.rotations, ws_rotation_failures=self.rotation_failures,
+                          ws_backup_wire_failures=self.backup_wire_failures,
                           ws_rotation_last_failure=self.rotation_last_failure,
                           ws_hot_rotate_seconds=ws_setting('HOT_ROTATE_SECONDS', 0, 0),
                           ws_hot_byte_silence_seconds=min(5, ws_setting('HOT_BYTE_SILENCE_SECONDS', 4, 3)),
