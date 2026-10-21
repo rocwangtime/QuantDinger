@@ -111,8 +111,8 @@ def test_repeated_hot_backup_failures_never_use_minutes_of_backoff(feed_manager,
     monkeypatch.setattr(observer.random, 'uniform', lambda low, high: high)
     for _ in range(12):
         m.rotation_failed(0, m.states[0], candidate, 'wire_failure')
-        assert m.rotation_last_failure['retry_seconds'] <= 2
-    assert m.rotation_last_failure['retry_seconds'] == 2
+        assert m.rotation_last_failure['retry_seconds'] <= 30
+    assert m.rotation_last_failure['retry_seconds'] == 30
 
 
 def test_uncertain_switch_repairs_without_unsubscribe_and_records_snapshot_gap(feed_manager):

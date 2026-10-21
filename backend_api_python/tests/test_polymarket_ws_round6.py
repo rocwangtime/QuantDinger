@@ -113,7 +113,7 @@ def test_ready_backup_merges_duplicates_preserves_trade_multiplicity_and_fails_o
     assert p.messages == before + 1
     live_book = p.books['ay']
     sockets[0].callbacks['on_close'](sockets[0], 1013, 'slow consumer: send buffer full')
-    wait_for(lambda: m.states[0] is candidate)
+    wait_for(lambda: m.states[0] is candidate and old.get('retired'))
     assert p.books['ay'] is live_book and m.backup_promotions == 1
     assert not m.backups and old['retired']
     m.tick()
@@ -189,10 +189,10 @@ def test_backup_failure_keeps_primary_and_backoff_records_stage(feed_manager, mo
     m.tick()
     assert not m.backups and old['connected'] and len(p.books) == 2
     assert m.rotation_failures == 1
-    assert 0 <= m.rotation_last_failure['retry_seconds'] <= .5
+    assert 0 <= m.rotation_last_failure['retry_seconds'] <= 3.3
     for delay in (1, 2, 4, 8):
         m.rotation_failed(0, old, candidate, 'test')
-        assert 0 <= m.rotation_last_failure['retry_seconds'] <= delay
+        assert 0 <= m.rotation_last_failure['retry_seconds'] <= 3 + delay
     assert m.rotation_last_failure['stage']
 
 
@@ -207,7 +207,7 @@ def test_normal_1001_counted_once_without_error_or_rotation_failure(feed_manager
     assert observer.STATUS['close_reason_counts'] == {'server_shutdown': 1}
     assert not errors and not m.rotation_failures
     remaining = m.states[0]['retry_at'] - observer.time.monotonic()
-    assert -.01 <= remaining <= .5
+    assert -.01 <= remaining <= 2.5
 
 
 def test_invalid_subscription_has_own_category(feed_manager):

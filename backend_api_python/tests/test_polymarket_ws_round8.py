@@ -100,11 +100,11 @@ def test_failed_backup_replenishes_without_waiting_for_discovery(feed_manager, m
         candidate['created_at'] -= 16
     m.tick()
     assert candidate['retired'] and not m.backups
-    assert 0 < old['backup_retry_at'] - time.monotonic() <= .5
+    assert 0 < old['backup_retry_at'] - time.monotonic() <= 3.3
     assert old['connected'] and p.books == books
     # Production supervisor polls at 200ms; no discovery/sync call is needed.
     m.start_supervisor()
-    wait_for(lambda: len(sockets) == 3, 1.5)
+    wait_for(lambda: len(sockets) == 3, 4)
     assert sockets[2].opened.wait(1)
     replacement = m.backups[0]
     assert replacement['opened_at'] - old['opened_at'] >= 90
@@ -162,21 +162,21 @@ def test_backup_never_opened_is_retired_and_retried(feed_manager, monkeypatch, f
     assert old['backup_failures'] == 1
     monkeypatch.setattr(app_class, 'run_forever', original_run)
     m.start_supervisor()
-    wait_for(lambda: len(sockets) == 3, 1.5)
+    wait_for(lambda: len(sockets) == 3, 4)
     assert sockets[2].opened.wait(1)
 
 
-def test_hot_repair_jitter_caps_at_two_seconds_and_allows_zero(feed_manager, monkeypatch):
+def test_hot_repair_jitter_staggers_backups_and_caps_at_thirty_seconds(feed_manager, monkeypatch):
     m, _, sockets = feed_manager
     candidate = ready_backup(m, sockets)
     old = m.states[0]
     monkeypatch.setattr(observer.random, 'uniform', lambda low, high: high)
-    for expected in (.5, 1, 2, 2, 2, 2, 2, 2):
+    for expected in (2.7, 3.2, 4.2, 6.2, 10.2, 18.2, 30, 30):
         m.rotation_failed(0, old, candidate, 'connect_failure')
         assert m.rotation_last_failure['retry_seconds'] == expected
     monkeypatch.setattr(observer.random, 'uniform', lambda low, high: low)
     m.rotation_failed(0, old, candidate, 'connect_failure')
-    assert m.rotation_last_failure['retry_seconds'] == 0
+    assert m.rotation_last_failure['retry_seconds'] == 2.2
 
 
 def test_coverage_accounts_duration_split_groups_rollover_and_inactive_periods():
@@ -232,7 +232,7 @@ def test_backup_unsubscribe_failure_does_not_break_rollover_or_main(feed_manager
     assert candidate['retired'] and old['connected'] and not m.backups
     assert m.rotation_last_failure['reason'] == 'backup_wire_failure'
     m.start_supervisor()
-    wait_for(lambda: len(sockets) == 3, 1.5)
+    wait_for(lambda: len(sockets) == 3, 4)
     assert sockets[2].opened.wait(1)
     assert set(m.backups[0]['assets']) == {'by', 'bn'}
 

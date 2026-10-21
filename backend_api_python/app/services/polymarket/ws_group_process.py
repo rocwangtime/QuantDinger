@@ -348,6 +348,8 @@ def merge_feed_status(parts):
                 merged[key] = bool(value) and merged.get(key, True)
             elif key == 'ws_shards' and isinstance(value, int):
                 merged[key] = merged.get(key, 0) + value
+            elif key == 'ws_remote_closes' and isinstance(value, list):
+                merged.setdefault(key, []).extend(dict(row, feed=part.get('key')) for row in value)
             elif key == 'ws_connections_by_source' and isinstance(value, list):
                 rows = merged.setdefault(key, [])
                 for row in value:
@@ -1518,6 +1520,10 @@ class GroupFeeds:
                 group_cpu[key] = _finite((child.latest.get('status') or {}).get('ws_process_cpu_cores')) or 0
             base += count
         merged = merge_feed_status(parts)
+        from .ws_redundancy import DisconnectClusters
+        if not hasattr(self, 'disconnect_clusters'):
+            self.disconnect_clusters = DisconnectClusters()
+        merged['ws_server_disconnects'] = self.disconnect_clusters.update(merged.get('ws_remote_closes', []))
         child_cpu = sum(group_cpu.values())
         merged['ws_process_cpu_cores'] = child_cpu + parent_cpu
         merged['ws_parent_cpu_cores'] = parent_cpu

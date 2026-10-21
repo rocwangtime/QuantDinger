@@ -451,3 +451,30 @@ class DoubleKicks:
                     pending_rolling_hour=sum(not e['merged_gap_final'] for e in events),
                     hourly=[dict(hour_start_utc=h, count=n) for h, n in self.hourly.items()],
                     events=[{k: v for k, v in e.items() if not k.startswith('_')} for e in self.events], pair_window_seconds=1)
+
+
+class DisconnectClusters:
+    """A multi-group remote-close cluster is evidence, not a proven server cause."""
+    def __init__(self):
+        self.rows = {}
+        self.events = deque(maxlen=128)
+
+    def update(self, rows, wall=None):
+        wall = time.time() if wall is None else wall
+        for row in rows:
+            if row.get('code') is None and row.get('at') is not None:
+                self.rows[(row.get('feed'), row['source'], row['at'])] = row
+        self.rows = {k: v for k, v in self.rows.items() if v['at'] >= wall - 60}
+        ordered = sorted(self.rows.values(), key=lambda r: r['at'])
+        for row in ordered:
+            cluster = [r for r in ordered if row['at'] <= r['at'] <= row['at'] + 1]
+            groups = {g for r in cluster for g in r.get('groups', [])}
+            if len(cluster) < 4 or len(groups) < 2:
+                continue
+            if any(abs(e['at'] - row['at']) <= 1 for e in self.events):
+                continue
+            self.events.append(dict(at=row['at'], connections=len(cluster), groups=sorted(groups),
+                                    classification='server_wide_disconnect_suspected'))
+        return dict(count_rolling_hour=sum(e['at'] >= wall - 3600 for e in self.events),
+                    events=list(self.events), window_seconds=1, minimum_connections=4,
+                    cause_confirmed=False)

@@ -159,6 +159,10 @@ def test_pong_timeout_without_backup_reconnects_and_requests_rest(feed_manager, 
     monkeypatch.setattr(m, 'request_snapshot', lambda *args: requests.append(args))
     expire_primary(m, sockets[0])
     m.tick()
+    assert old['retry_at'] > time.monotonic()
+    old['thread'].join(1)
+    old['retry_at'] = 0  # Advance the scheduled retry without sleeping through it.
+    m.tick()
     wait_for(lambda: m.states[0] is not old)
     assert requests and m.states[0]['socket'] is not sockets[0]
     assert old['inbox'].invalid.is_set()

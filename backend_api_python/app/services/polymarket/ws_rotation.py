@@ -10,9 +10,10 @@ from .ws_balance import setting
 from .ws_redundancy import FeedMerge
 
 
-def reconnect_delay(attempts):
+def reconnect_delay(attempts, role='primary', lane=0):
     # Full jitter, including the first retry; no synchronized immediate retries.
-    return random.uniform(0, min(30, .5 * 2 ** min(6, max(0, attempts - 1))))
+    floor = {'primary': .2, 'cold': 1.2, 'backup': 2.0}[role] + .2 * lane
+    return floor + random.uniform(0, min(30 - floor, .5 * 2 ** min(6, max(0, attempts - 1))))
 
 
 class DataHealth:
