@@ -1598,7 +1598,7 @@ class MarketConnections:
 
     def liveness_receive(self, index, state, raw, received_at, inbox, epoch=None):
         """Track link health and independently maintain a bounded warm ladder."""
-        from .ws_payloads import cheap_envelope, decoded_envelope, loads
+        from .ws_payloads import cheap_envelope, feed_envelope, loads
         epoch = inbox.epoch if epoch is None else epoch
         activated = dict(getattr(inbox, 'activated', {}))
         if inbox.invalid.is_set() or inbox.resync.is_set() or epoch != inbox.epoch or state.get('retired'):
@@ -1608,7 +1608,7 @@ class MarketConnections:
         if isinstance(shadow, WarmBook):
             parse_at = thread_time()
             event = loads(raw) if isinstance(raw, (str, bytes, bytearray)) else raw
-            tips = decoded_envelope(event)
+            tips = feed_envelope(event)
             self._feed_freshness(state, tips, received_at)
             self._charge('backup_parse', parse_at, state)
             apply_at = thread_time()
