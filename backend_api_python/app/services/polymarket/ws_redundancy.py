@@ -395,10 +395,10 @@ class FeedContinuity:
             row = metadata.get(asset)
             if not row or row[0] is None:
                 continue
-            self.rollover.publication(asset, published_at)
             previous = self.published.get(asset)
             if previous and row[1] <= previous['received']:
                 continue
+            self.rollover.publication(asset, published_at)
             gap = max(0, (row[1] - previous['received']).total_seconds() * 1000) if previous else 0
             self.published[asset] = dict(received=row[1], exchange_at=row[0], published_at=published_at, receipt_gap_ms=gap,
                 max_receipt_gap_ms=max(gap, previous['max_receipt_gap_ms'] if previous else 0))
