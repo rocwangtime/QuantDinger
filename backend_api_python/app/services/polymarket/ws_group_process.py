@@ -712,14 +712,14 @@ class _Outbox:
                 closed = self.closed
             try:
                 for message in urgent:
-                    started = time.process_time()
+                    started = time.thread_time()
                     _send(self.conn, message)
-                    self.pickle_s += time.process_time() - started
+                    self.pickle_s += time.thread_time() - started
                 if pubs:
-                    started = time.process_time()
+                    started = time.thread_time()
                     items = [dict(e=event, o=owned, t=stamp, seq=seq) for event, owned, stamp, seq in pubs]
                     _send(self.conn, dict(op='pub', items=items))
-                    self.pickle_s += time.process_time() - started
+                    self.pickle_s += time.thread_time() - started
                     self.batches += 1
                 if closed and not pubs:
                     return
@@ -1326,9 +1326,9 @@ class _Feed:
             received = datetime.fromtimestamp((item.get('t') or 0) / 1000, timezone.utc)
             owned = None if item.get('o') is None else frozenset(item['o'])
             try:
-                started = time.process_time()
+                started = time.thread_time()
                 pipeline.receive(event, owned, received)
-                self.apply_s += time.process_time() - started
+                self.apply_s += time.thread_time() - started
             except Exception:
                 _LOG.exception('parent apply failed key=%s', self.spec['key'])
             self.feeds.published += 1
