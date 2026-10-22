@@ -86,3 +86,18 @@ def test_supply_keeps_per_level_watermarks_and_does_not_invent_publications(monk
     m.liveness_receive(0, spare, '[]', datetime.now(timezone.utc), spare['inbox'])
     assert m.continuity.published['ay'] == previous
     assert m.states[0] is primary
+
+
+def test_subscription_change_during_detached_parse_cannot_publish(monkeypatch):
+    m, primary, spare, pipeline, *_ = setup_supply(monkeypatch)
+    primary['inbox'].last_data_at = time.monotonic()-.3
+    shadow = spare['shadow']
+    receive = shadow.receive
+    def crossed(event, at):
+        receive(event, at)
+        spare['inbox'].epoch += 1
+    monkeypatch.setattr(shadow, 'receive', crossed)
+    emit(m, spare)
+    assert spare['inbox'].resync.is_set()
+    assert pipeline.books['ay']['bids']['.4'] == '2'
+    assert m.states[0] is primary
