@@ -214,7 +214,7 @@ def test_double_kick_survives_mutable_roles_and_deduplicates_callbacks():
     json.dumps(kicks.metrics(3602))
 
 
-def test_promoted_backup_second_kick_counted_with_final_business_gap(feed_manager, monkeypatch):
+def test_promoted_backup_second_kick_counts_pair_with_short_business_gap(feed_manager, monkeypatch):
     m, _, sockets = feed_manager;c = ready_backup(m, sockets)
     callbacks = []
     monkeypatch.setattr(m.snapshot_recovery, 'request', lambda *args: callbacks.append(args[2]))
@@ -226,7 +226,8 @@ def test_promoted_backup_second_kick_counted_with_final_business_gap(feed_manage
     callbacks[0]([book('ay'), book('an')], datetime.now(timezone.utc))
     m.update_double_kicks()
     report = m.double_kicks.metrics(time.time())
-    assert report['events'][0]['merged_gap_final'] and report['business_gaps_rolling_hour'] == 1
+    assert report['events'][0]['merged_gap_final'] and report['business_gaps_rolling_hour'] == 0
+    assert report['events'][0]['merged_gap_ms'] <= 1500
     json.dumps(report)
     m.tick()
     assert observer.STATUS['ws_double_kicks']['total'] == 1

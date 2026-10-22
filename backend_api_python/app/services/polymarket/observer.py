@@ -2168,6 +2168,8 @@ class MarketConnections:
                 source_receipts = [at for at in source_receipts if at is not None]
                 event['_last_receipt'] = min(source_receipts or receipts, default=state['outage_wall'])
                 event['source_silence_ms'] = max(0, (state['outage_wall'] - event['_last_receipt']).total_seconds() * 1000)
+                event['physical_source_silence_alert'] = event['source_silence_ms'] > 20000
+                event['physical_source_silence_alert_only'] = True
                 event['merged_receipt_gap_ms'] = max(0, (state['outage_wall'] - min(receipts, default=state['outage_wall'])).total_seconds() * 1000)
                 event['reason'] = state.get('failure_reason', 'transport')
                 row['events'].append(event)
