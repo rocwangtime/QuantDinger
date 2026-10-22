@@ -1,0 +1,34 @@
+{"frames": 20000, "results": [{"cpu_seconds": 1.22112607, "parse_cpu_seconds": 0.5343000700000189, "apply_cpu_seconds": 0.6714170150000085, "sha256": "8add8dd2318a14cb5cf24365cdfbca107012bc84a8361d6b1bddbb887e051ca9"}, {"cpu_seconds": 1.2534794089999997, "parse_cpu_seconds": 0.5486254799999548, "apply_cpu_seconds": 0.6892981079999698, "sha256": "8add8dd2318a14cb5cf24365cdfbca107012bc84a8361d6b1bddbb887e051ca9"}, {"cpu_seconds": 1.3022040169999998, "parse_cpu_seconds": 0.5721708489999586, "apply_cpu_seconds": 0.7138239909999644, "sha256": "8add8dd2318a14cb5cf24365cdfbca107012bc84a8361d6b1bddbb887e051ca9"}]}
+         8659884 function calls (7459884 primitive calls) in 4.752 seconds
+
+   Ordered by: cumulative time
+   List reduced from 73 to 25 due to restriction <25>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+        1    0.089    0.089    4.752    4.752 polymarket_ws_warm_profile.py:14(run)
+    20000    0.063    0.000    2.843    0.000 ws_warm_book.py:56(receive)
+    40000    0.053    0.000    2.712    0.000 ws_rotation.py:55(wrapped)
+    20000    0.549    0.000    2.239    0.000 ws_rotation.py:73(receive)
+    20000    0.375    0.000    1.567    0.000 ws_payloads.py:337(decoded_envelope)
+    16000    0.278    0.000    0.989    0.000 ws_payloads.py:83(price_rows)
+1136000/16000    0.819    0.000    0.949    0.000 ws_payloads.py:307(_has_envelope_key)
+   128000    0.271    0.000    0.530    0.000 ws_payloads.py:99(fingerprint)
+    20000    0.235    0.000    0.411    0.000 ws_warm_book.py:17(receive)
+     8000    0.267    0.000    0.359    0.000 ws_payloads.py:33(materialized_book)
+  2008000    0.310    0.000    0.310    0.000 {method 'get' of 'dict' objects}
+    20000    0.008    0.000    0.210    0.000 ws_payloads.py:15(loads)
+    20000    0.202    0.000    0.202    0.000 {orjson.loads}
+   352000    0.117    0.000    0.182    0.000 ws_payloads.py:297(_scalar)
+  1168000    0.139    0.000    0.139    0.000 {method 'values' of 'dict' objects}
+180000/132000    0.088    0.000    0.133    0.000 recording.py:59(events)
+   956007    0.124    0.000    0.124    0.000 {built-in method builtins.isinstance}
+   128000    0.036    0.000    0.093    0.000 ws_payloads.py:19(canonical)
+   256000    0.092    0.000    0.092    0.000 {method 'digest' of '_blake2.blake2b' objects}
+     8000    0.008    0.000    0.086    0.000 ws_payloads.py:47(book_bytes)
+    56000    0.050    0.000    0.083    0.000 recording.py:34(exchange_time)
+40000/8000    0.047    0.000    0.077    0.000 {built-in method builtins.sum}
+    24000    0.026    0.000    0.070    0.000 ws_payloads.py:48(<genexpr>)
+   304000    0.065    0.000    0.065    0.000 {method 'search' of 're.Pattern' objects}
+   128000    0.058    0.000    0.058    0.000 {orjson.dumps}
+
+

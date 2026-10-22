@@ -1,0 +1,18 @@
+[fix/pm-ws-r22 c9f6c5f] fix(pm-ws): fail over busy lagging primaries using verified freshness
+ 6 files changed, 486 insertions(+), 12 deletions(-)
+ create mode 100644 backend_api_python/scripts/polymarket_ws_lag_replay.py
+ create mode 100644 backend_api_python/tests/test_polymarket_ws_r22_freshness.py
+ create mode 100644 deploy/r22/R1-evidence.md
+[fix/pm-ws-r22 e0ed6fd] fix(pm-ws): attribute stale drops and unify rolling outage metrics
+ 7 files changed, 174 insertions(+), 15 deletions(-)
+ create mode 100644 backend_api_python/tests/test_polymarket_ws_r22_metrics.py
+ create mode 100644 deploy/r22/R2-evidence.md
+[fix/pm-ws-r22 c7d8ab1] perf(pm-ws): remove redundant warm-book envelope and fingerprint work
+ 5 files changed, 87 insertions(+), 4 deletions(-)
+ create mode 100644 backend_api_python/scripts/polymarket_ws_warm_profile.py
+ create mode 100644 backend_api_python/tests/test_polymarket_ws_r22_warm.py
+ create mode 100644 deploy/r22/R3-evidence.md
+[fix/pm-ws-r22 1d8c42e] fix(pm-paper): accept bounded numeric CLOB server time responses
+ 5 files changed, 72 insertions(+), 10 deletions(-)
+ create mode 100644 backend_api_python/tests/test_polymarket_server_time.py
+ create mode 100644 deploy/r22/R4-evidence.md

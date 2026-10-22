@@ -1,0 +1,2762 @@
+.........................EEEEEEE......................................EE [  9%]
+EE...................................................................... [ 18%]
+..E...............................................................ssssss [ 28%]
+sssssss................................................................. [ 37%]
+........................................................................ [ 47%]
+..............................................................EEEEF..... [ 56%]
+....................................E................................... [ 66%]
+........................................................................ [ 75%]
+....................ssssss.............................................. [ 85%]
+.......................EEEEEEEEEE....................................... [ 94%]
+.......................................                                  [100%]
+==================================== ERRORS ====================================
+__ ERROR at setup of test_submit_returns_billing_receipt_and_uses_token_owner __
+
+    def current_process_role() -> ProcessRole:
+        raw = os.getenv("QD_PROCESS_ROLE", ProcessRole.LEGACY.value).strip().lower()
+        try:
+>           return ProcessRole(raw)
+                   ^^^^^^^^^^^^^^^^
+
+app/runtime/roles.py:21: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/enum.py:751: in __call__
+    return cls.__new__(cls, value)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+cls = <enum 'ProcessRole'>, value = 'migration'
+
+    def __new__(cls, value):
+        # all enum instances are actually created during class construction
+        # without calling this method; this method is called by the metaclass'
+        # __call__ (i.e. Color(3) ), and by pickle
+        if type(value) is cls:
+            # For lookups like Color(Color.RED)
+            return value
+        # by-value search for a matching enum member
+        # see if it's in the reverse mapping (for hashable values)
+        try:
+            return cls._value2member_map_[value]
+        except KeyError:
+            # Not found, no need to do long O(n) search
+            pass
+        except TypeError:
+            # not there, now do long search -- O(n) behavior
+            for member in cls._member_map_.values():
+                if member._value_ == value:
+                    return member
+        # still not found -- verify that members exist, in-case somebody got here mistakenly
+        # (such as via super when trying to override __new__)
+        if not cls._member_map_:
+            raise TypeError("%r has no members defined" % cls)
+        #
+        # still not found -- try _missing_ hook
+        try:
+            exc = None
+            result = cls._missing_(value)
+        except Exception as e:
+            exc = e
+            result = None
+        try:
+            if isinstance(result, cls):
+                return result
+            elif (
+                    Flag is not None and issubclass(cls, Flag)
+                    and cls._boundary_ is EJECT and isinstance(result, int)
+                ):
+                return result
+            else:
+                ve_exc = ValueError("%r is not a valid %s" % (value, cls.__qualname__))
+                if result is None and exc is None:
+>                   raise ve_exc
+E                   ValueError: 'migration' is not a valid ProcessRole
+
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/enum.py:1170: ValueError
+
+The above exception was the direct cause of the following exception:
+
+    @pytest.fixture(scope="session")
+    def app():
+        """Create application for testing."""
+>       application = create_app("testing")
+                      ^^^^^^^^^^^^^^^^^^^^^
+
+tests/conftest.py:32: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+app/__init__.py:141: in create_app
+    init_http_observability(app)
+app/observability/__init__.py:5: in init_http_observability
+    from app.observability.http import init_http_observability as initialize
+app/observability/http.py:12: in <module>
+    from app.observability.metrics import HTTP_DURATION, HTTP_IN_PROGRESS, HTTP_REQUESTS
+app/observability/metrics.py:69: in <module>
+    BUILD_INFO.labels(version=APP_VERSION, role=current_process_role().value).set(1)
+                                                ^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def current_process_role() -> ProcessRole:
+        raw = os.getenv("QD_PROCESS_ROLE", ProcessRole.LEGACY.value).strip().lower()
+        try:
+            return ProcessRole(raw)
+        except ValueError as exc:
+            allowed = ", ".join(role.value for role in ProcessRole)
+>           raise RuntimeError(f"Invalid QD_PROCESS_ROLE={raw!r}; expected one of: {allowed}") from exc
+E           RuntimeError: Invalid QD_PROCESS_ROLE='migration'; expected one of: legacy, api, trading, scheduler, polymarket-observer, celery
+
+app/runtime/roles.py:24: RuntimeError
+____ ERROR at setup of test_insufficient_balance_returns_402_with_shortage _____
+
+    def current_process_role() -> ProcessRole:
+        raw = os.getenv("QD_PROCESS_ROLE", ProcessRole.LEGACY.value).strip().lower()
+        try:
+>           return ProcessRole(raw)
+                   ^^^^^^^^^^^^^^^^
+
+app/runtime/roles.py:21: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/enum.py:751: in __call__
+    return cls.__new__(cls, value)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+cls = <enum 'ProcessRole'>, value = 'migration'
+
+    def __new__(cls, value):
+        # all enum instances are actually created during class construction
+        # without calling this method; this method is called by the metaclass'
+        # __call__ (i.e. Color(3) ), and by pickle
+        if type(value) is cls:
+            # For lookups like Color(Color.RED)
+            return value
+        # by-value search for a matching enum member
+        # see if it's in the reverse mapping (for hashable values)
+        try:
+            return cls._value2member_map_[value]
+        except KeyError:
+            # Not found, no need to do long O(n) search
+            pass
+        except TypeError:
+            # not there, now do long search -- O(n) behavior
+            for member in cls._member_map_.values():
+                if member._value_ == value:
+                    return member
+        # still not found -- verify that members exist, in-case somebody got here mistakenly
+        # (such as via super when trying to override __new__)
+        if not cls._member_map_:
+            raise TypeError("%r has no members defined" % cls)
+        #
+        # still not found -- try _missing_ hook
+        try:
+            exc = None
+            result = cls._missing_(value)
+        except Exception as e:
+            exc = e
+            result = None
+        try:
+            if isinstance(result, cls):
+                return result
+            elif (
+                    Flag is not None and issubclass(cls, Flag)
+                    and cls._boundary_ is EJECT and isinstance(result, int)
+                ):
+                return result
+            else:
+                ve_exc = ValueError("%r is not a valid %s" % (value, cls.__qualname__))
+                if result is None and exc is None:
+>                   raise ve_exc
+E                   ValueError: 'migration' is not a valid ProcessRole
+
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/enum.py:1170: ValueError
+
+The above exception was the direct cause of the following exception:
+
+    @pytest.fixture(scope="session")
+    def app():
+        """Create application for testing."""
+>       application = create_app("testing")
+                      ^^^^^^^^^^^^^^^^^^^^^
+
+tests/conftest.py:32: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+app/__init__.py:141: in create_app
+    init_http_observability(app)
+app/observability/__init__.py:5: in init_http_observability
+    from app.observability.http import init_http_observability as initialize
+app/observability/http.py:12: in <module>
+    from app.observability.metrics import HTTP_DURATION, HTTP_IN_PROGRESS, HTTP_REQUESTS
+app/observability/metrics.py:69: in <module>
+    BUILD_INFO.labels(version=APP_VERSION, role=current_process_role().value).set(1)
+                                                ^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def current_process_role() -> ProcessRole:
+        raw = os.getenv("QD_PROCESS_ROLE", ProcessRole.LEGACY.value).strip().lower()
+        try:
+            return ProcessRole(raw)
+        except ValueError as exc:
+            allowed = ", ".join(role.value for role in ProcessRole)
+>           raise RuntimeError(f"Invalid QD_PROCESS_ROLE={raw!r}; expected one of: {allowed}") from exc
+E           RuntimeError: Invalid QD_PROCESS_ROLE='migration'; expected one of: legacy, api, trading, scheduler, polymarket-observer, celery
+
+app/runtime/roles.py:24: RuntimeError
+____ ERROR at setup of test_database_failure_is_not_accepted_as_a_free_job _____
+
+    def current_process_role() -> ProcessRole:
+        raw = os.getenv("QD_PROCESS_ROLE", ProcessRole.LEGACY.value).strip().lower()
+        try:
+>           return ProcessRole(raw)
+                   ^^^^^^^^^^^^^^^^
+
+app/runtime/roles.py:21: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/enum.py:751: in __call__
+    return cls.__new__(cls, value)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+cls = <enum 'ProcessRole'>, value = 'migration'
+
+    def __new__(cls, value):
+        # all enum instances are actually created during class construction
+        # without calling this method; this method is called by the metaclass'
+        # __call__ (i.e. Color(3) ), and by pickle
+        if type(value) is cls:
+            # For lookups like Color(Color.RED)
+            return value
+        # by-value search for a matching enum member
+        # see if it's in the reverse mapping (for hashable values)
+        try:
+            return cls._value2member_map_[value]
+        except KeyError:
+            # Not found, no need to do long O(n) search
+            pass
+        except TypeError:
+            # not there, now do long search -- O(n) behavior
+            for member in cls._member_map_.values():
+                if member._value_ == value:
+                    return member
+        # still not found -- verify that members exist, in-case somebody got here mistakenly
+        # (such as via super when trying to override __new__)
+        if not cls._member_map_:
+            raise TypeError("%r has no members defined" % cls)
+        #
+        # still not found -- try _missing_ hook
+        try:
+            exc = None
+            result = cls._missing_(value)
+        except Exception as e:
+            exc = e
+            result = None
+        try:
+            if isinstance(result, cls):
+                return result
+            elif (
+                    Flag is not None and issubclass(cls, Flag)
+                    and cls._boundary_ is EJECT and isinstance(result, int)
+                ):
+                return result
+            else:
+                ve_exc = ValueError("%r is not a valid %s" % (value, cls.__qualname__))
+                if result is None and exc is None:
+>                   raise ve_exc
+E                   ValueError: 'migration' is not a valid ProcessRole
+
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/enum.py:1170: ValueError
+
+The above exception was the direct cause of the following exception:
+
+    @pytest.fixture(scope="session")
+    def app():
+        """Create application for testing."""
+>       application = create_app("testing")
+                      ^^^^^^^^^^^^^^^^^^^^^
+
+tests/conftest.py:32: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+app/__init__.py:141: in create_app
+    init_http_observability(app)
+app/observability/__init__.py:5: in init_http_observability
+    from app.observability.http import init_http_observability as initialize
+app/observability/http.py:12: in <module>
+    from app.observability.metrics import HTTP_DURATION, HTTP_IN_PROGRESS, HTTP_REQUESTS
+app/observability/metrics.py:69: in <module>
+    BUILD_INFO.labels(version=APP_VERSION, role=current_process_role().value).set(1)
+                                                ^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def current_process_role() -> ProcessRole:
+        raw = os.getenv("QD_PROCESS_ROLE", ProcessRole.LEGACY.value).strip().lower()
+        try:
+            return ProcessRole(raw)
+        except ValueError as exc:
+            allowed = ", ".join(role.value for role in ProcessRole)
+>           raise RuntimeError(f"Invalid QD_PROCESS_ROLE={raw!r}; expected one of: {allowed}") from exc
+E           RuntimeError: Invalid QD_PROCESS_ROLE='migration'; expected one of: legacy, api, trading, scheduler, polymarket-observer, celery
+
+app/runtime/roles.py:24: RuntimeError
+________ ERROR at setup of test_dispatch_failure_returns_refund_receipt ________
+
+    def current_process_role() -> ProcessRole:
+        raw = os.getenv("QD_PROCESS_ROLE", ProcessRole.LEGACY.value).strip().lower()
+        try:
+>           return ProcessRole(raw)
+                   ^^^^^^^^^^^^^^^^
+
+app/runtime/roles.py:21: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/enum.py:751: in __call__
+    return cls.__new__(cls, value)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+cls = <enum 'ProcessRole'>, value = 'migration'
+
+    def __new__(cls, value):
+        # all enum instances are actually created during class construction
+        # without calling this method; this method is called by the metaclass'
+        # __call__ (i.e. Color(3) ), and by pickle
+        if type(value) is cls:
+            # For lookups like Color(Color.RED)
+            return value
+        # by-value search for a matching enum member
+        # see if it's in the reverse mapping (for hashable values)
+        try:
+            return cls._value2member_map_[value]
+        except KeyError:
+            # Not found, no need to do long O(n) search
+            pass
+        except TypeError:
+            # not there, now do long search -- O(n) behavior
+            for member in cls._member_map_.values():
+                if member._value_ == value:
+                    return member
+        # still not found -- verify that members exist, in-case somebody got here mistakenly
+        # (such as via super when trying to override __new__)
+        if not cls._member_map_:
+            raise TypeError("%r has no members defined" % cls)
+        #
+        # still not found -- try _missing_ hook
+        try:
+            exc = None
+            result = cls._missing_(value)
+        except Exception as e:
+            exc = e
+            result = None
+        try:
+            if isinstance(result, cls):
+                return result
+            elif (
+                    Flag is not None and issubclass(cls, Flag)
+                    and cls._boundary_ is EJECT and isinstance(result, int)
+                ):
+                return result
+            else:
+                ve_exc = ValueError("%r is not a valid %s" % (value, cls.__qualname__))
+                if result is None and exc is None:
+>                   raise ve_exc
+E                   ValueError: 'migration' is not a valid ProcessRole
+
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/enum.py:1170: ValueError
+
+The above exception was the direct cause of the following exception:
+
+    @pytest.fixture(scope="session")
+    def app():
+        """Create application for testing."""
+>       application = create_app("testing")
+                      ^^^^^^^^^^^^^^^^^^^^^
+
+tests/conftest.py:32: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+app/__init__.py:141: in create_app
+    init_http_observability(app)
+app/observability/__init__.py:5: in init_http_observability
+    from app.observability.http import init_http_observability as initialize
+app/observability/http.py:12: in <module>
+    from app.observability.metrics import HTTP_DURATION, HTTP_IN_PROGRESS, HTTP_REQUESTS
+app/observability/metrics.py:69: in <module>
+    BUILD_INFO.labels(version=APP_VERSION, role=current_process_role().value).set(1)
+                                                ^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def current_process_role() -> ProcessRole:
+        raw = os.getenv("QD_PROCESS_ROLE", ProcessRole.LEGACY.value).strip().lower()
+        try:
+            return ProcessRole(raw)
+        except ValueError as exc:
+            allowed = ", ".join(role.value for role in ProcessRole)
+>           raise RuntimeError(f"Invalid QD_PROCESS_ROLE={raw!r}; expected one of: {allowed}") from exc
+E           RuntimeError: Invalid QD_PROCESS_ROLE='migration'; expected one of: legacy, api, trading, scheduler, polymarket-observer, celery
+
+app/runtime/roles.py:24: RuntimeError
+____________ ERROR at setup of test_invalid_request_is_not_charged _____________
+
+    def current_process_role() -> ProcessRole:
+        raw = os.getenv("QD_PROCESS_ROLE", ProcessRole.LEGACY.value).strip().lower()
+        try:
+>           return ProcessRole(raw)
+                   ^^^^^^^^^^^^^^^^
+
+app/runtime/roles.py:21: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/enum.py:751: in __call__
+    return cls.__new__(cls, value)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+cls = <enum 'ProcessRole'>, value = 'migration'
+
+    def __new__(cls, value):
+        # all enum instances are actually created during class construction
+        # without calling this method; this method is called by the metaclass'
+        # __call__ (i.e. Color(3) ), and by pickle
+        if type(value) is cls:
+            # For lookups like Color(Color.RED)
+            return value
+        # by-value search for a matching enum member
+        # see if it's in the reverse mapping (for hashable values)
+        try:
+            return cls._value2member_map_[value]
+        except KeyError:
+            # Not found, no need to do long O(n) search
+            pass
+        except TypeError:
+            # not there, now do long search -- O(n) behavior
+            for member in cls._member_map_.values():
+                if member._value_ == value:
+                    return member
+        # still not found -- verify that members exist, in-case somebody got here mistakenly
+        # (such as via super when trying to override __new__)
+        if not cls._member_map_:
+            raise TypeError("%r has no members defined" % cls)
+        #
+        # still not found -- try _missing_ hook
+        try:
+            exc = None
+            result = cls._missing_(value)
+        except Exception as e:
+            exc = e
+            result = None
+        try:
+            if isinstance(result, cls):
+                return result
+            elif (
+                    Flag is not None and issubclass(cls, Flag)
+                    and cls._boundary_ is EJECT and isinstance(result, int)
+                ):
+                return result
+            else:
+                ve_exc = ValueError("%r is not a valid %s" % (value, cls.__qualname__))
+                if result is None and exc is None:
+>                   raise ve_exc
+E                   ValueError: 'migration' is not a valid ProcessRole
+
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/enum.py:1170: ValueError
+
+The above exception was the direct cause of the following exception:
+
+    @pytest.fixture(scope="session")
+    def app():
+        """Create application for testing."""
+>       application = create_app("testing")
+                      ^^^^^^^^^^^^^^^^^^^^^
+
+tests/conftest.py:32: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+app/__init__.py:141: in create_app
+    init_http_observability(app)
+app/observability/__init__.py:5: in init_http_observability
+    from app.observability.http import init_http_observability as initialize
+app/observability/http.py:12: in <module>
+    from app.observability.metrics import HTTP_DURATION, HTTP_IN_PROGRESS, HTTP_REQUESTS
+app/observability/metrics.py:69: in <module>
+    BUILD_INFO.labels(version=APP_VERSION, role=current_process_role().value).set(1)
+                                                ^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def current_process_role() -> ProcessRole:
+        raw = os.getenv("QD_PROCESS_ROLE", ProcessRole.LEGACY.value).strip().lower()
+        try:
+            return ProcessRole(raw)
+        except ValueError as exc:
+            allowed = ", ".join(role.value for role in ProcessRole)
+>           raise RuntimeError(f"Invalid QD_PROCESS_ROLE={raw!r}; expected one of: {allowed}") from exc
+E           RuntimeError: Invalid QD_PROCESS_ROLE='migration'; expected one of: legacy, api, trading, scheduler, polymarket-observer, celery
+
+app/runtime/roles.py:24: RuntimeError
+_______ ERROR at setup of test_replay_receipt_precedes_concurrency_limit _______
+
+    def current_process_role() -> ProcessRole:
+        raw = os.getenv("QD_PROCESS_ROLE", ProcessRole.LEGACY.value).strip().lower()
+        try:
+>           return ProcessRole(raw)
+                   ^^^^^^^^^^^^^^^^
+
+app/runtime/roles.py:21: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/enum.py:751: in __call__
+    return cls.__new__(cls, value)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+cls = <enum 'ProcessRole'>, value = 'migration'
+
+    def __new__(cls, value):
+        # all enum instances are actually created during class construction
+        # without calling this method; this method is called by the metaclass'
+        # __call__ (i.e. Color(3) ), and by pickle
+        if type(value) is cls:
+            # For lookups like Color(Color.RED)
+            return value
+        # by-value search for a matching enum member
+        # see if it's in the reverse mapping (for hashable values)
+        try:
+            return cls._value2member_map_[value]
+        except KeyError:
+            # Not found, no need to do long O(n) search
+            pass
+        except TypeError:
+            # not there, now do long search -- O(n) behavior
+            for member in cls._member_map_.values():
+                if member._value_ == value:
+                    return member
+        # still not found -- verify that members exist, in-case somebody got here mistakenly
+        # (such as via super when trying to override __new__)
+        if not cls._member_map_:
+            raise TypeError("%r has no members defined" % cls)
+        #
+        # still not found -- try _missing_ hook
+        try:
+            exc = None
+            result = cls._missing_(value)
+        except Exception as e:
+            exc = e
+            result = None
+        try:
+            if isinstance(result, cls):
+                return result
+            elif (
+                    Flag is not None and issubclass(cls, Flag)
+                    and cls._boundary_ is EJECT and isinstance(result, int)
+                ):
+                return result
+            else:
+                ve_exc = ValueError("%r is not a valid %s" % (value, cls.__qualname__))
+                if result is None and exc is None:
+>                   raise ve_exc
+E                   ValueError: 'migration' is not a valid ProcessRole
+
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/enum.py:1170: ValueError
+
+The above exception was the direct cause of the following exception:
+
+    @pytest.fixture(scope="session")
+    def app():
+        """Create application for testing."""
+>       application = create_app("testing")
+                      ^^^^^^^^^^^^^^^^^^^^^
+
+tests/conftest.py:32: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+app/__init__.py:141: in create_app
+    init_http_observability(app)
+app/observability/__init__.py:5: in init_http_observability
+    from app.observability.http import init_http_observability as initialize
+app/observability/http.py:12: in <module>
+    from app.observability.metrics import HTTP_DURATION, HTTP_IN_PROGRESS, HTTP_REQUESTS
+app/observability/metrics.py:69: in <module>
+    BUILD_INFO.labels(version=APP_VERSION, role=current_process_role().value).set(1)
+                                                ^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def current_process_role() -> ProcessRole:
+        raw = os.getenv("QD_PROCESS_ROLE", ProcessRole.LEGACY.value).strip().lower()
+        try:
+            return ProcessRole(raw)
+        except ValueError as exc:
+            allowed = ", ".join(role.value for role in ProcessRole)
+>           raise RuntimeError(f"Invalid QD_PROCESS_ROLE={raw!r}; expected one of: {allowed}") from exc
+E           RuntimeError: Invalid QD_PROCESS_ROLE='migration'; expected one of: legacy, api, trading, scheduler, polymarket-observer, celery
+
+app/runtime/roles.py:24: RuntimeError
+_________ ERROR at setup of test_client_cannot_inject_billing_receipt __________
+
+    def current_process_role() -> ProcessRole:
+        raw = os.getenv("QD_PROCESS_ROLE", ProcessRole.LEGACY.value).strip().lower()
+        try:
+>           return ProcessRole(raw)
+                   ^^^^^^^^^^^^^^^^
+
+app/runtime/roles.py:21: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/enum.py:751: in __call__
+    return cls.__new__(cls, value)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+cls = <enum 'ProcessRole'>, value = 'migration'
+
+    def __new__(cls, value):
+        # all enum instances are actually created during class construction
+        # without calling this method; this method is called by the metaclass'
+        # __call__ (i.e. Color(3) ), and by pickle
+        if type(value) is cls:
+            # For lookups like Color(Color.RED)
+            return value
+        # by-value search for a matching enum member
+        # see if it's in the reverse mapping (for hashable values)
+        try:
+            return cls._value2member_map_[value]
+        except KeyError:
+            # Not found, no need to do long O(n) search
+            pass
+        except TypeError:
+            # not there, now do long search -- O(n) behavior
+            for member in cls._member_map_.values():
+                if member._value_ == value:
+                    return member
+        # still not found -- verify that members exist, in-case somebody got here mistakenly
+        # (such as via super when trying to override __new__)
+        if not cls._member_map_:
+            raise TypeError("%r has no members defined" % cls)
+        #
+        # still not found -- try _missing_ hook
+        try:
+            exc = None
+            result = cls._missing_(value)
+        except Exception as e:
+            exc = e
+            result = None
+        try:
+            if isinstance(result, cls):
+                return result
+            elif (
+                    Flag is not None and issubclass(cls, Flag)
+                    and cls._boundary_ is EJECT and isinstance(result, int)
+                ):
+                return result
+            else:
+                ve_exc = ValueError("%r is not a valid %s" % (value, cls.__qualname__))
+                if result is None and exc is None:
+>                   raise ve_exc
+E                   ValueError: 'migration' is not a valid ProcessRole
+
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/enum.py:1170: ValueError
+
+The above exception was the direct cause of the following exception:
+
+    @pytest.fixture(scope="session")
+    def app():
+        """Create application for testing."""
+>       application = create_app("testing")
+                      ^^^^^^^^^^^^^^^^^^^^^
+
+tests/conftest.py:32: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+app/__init__.py:141: in create_app
+    init_http_observability(app)
+app/observability/__init__.py:5: in init_http_observability
+    from app.observability.http import init_http_observability as initialize
+app/observability/http.py:12: in <module>
+    from app.observability.metrics import HTTP_DURATION, HTTP_IN_PROGRESS, HTTP_REQUESTS
+app/observability/metrics.py:69: in <module>
+    BUILD_INFO.labels(version=APP_VERSION, role=current_process_role().value).set(1)
+                                                ^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def current_process_role() -> ProcessRole:
+        raw = os.getenv("QD_PROCESS_ROLE", ProcessRole.LEGACY.value).strip().lower()
+        try:
+            return ProcessRole(raw)
+        except ValueError as exc:
+            allowed = ", ".join(role.value for role in ProcessRole)
+>           raise RuntimeError(f"Invalid QD_PROCESS_ROLE={raw!r}; expected one of: {allowed}") from exc
+E           RuntimeError: Invalid QD_PROCESS_ROLE='migration'; expected one of: legacy, api, trading, scheduler, polymarket-observer, celery
+
+app/runtime/roles.py:24: RuntimeError
+_________ ERROR at setup of test_saved_prompt_is_scoped_and_normalized _________
+
+    def current_process_role() -> ProcessRole:
+        raw = os.getenv("QD_PROCESS_ROLE", ProcessRole.LEGACY.value).strip().lower()
+        try:
+>           return ProcessRole(raw)
+                   ^^^^^^^^^^^^^^^^
+
+app/runtime/roles.py:21: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/enum.py:751: in __call__
+    return cls.__new__(cls, value)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+cls = <enum 'ProcessRole'>, value = 'migration'
+
+    def __new__(cls, value):
+        # all enum instances are actually created during class construction
+        # without calling this method; this method is called by the metaclass'
+        # __call__ (i.e. Color(3) ), and by pickle
+        if type(value) is cls:
+            # For lookups like Color(Color.RED)
+            return value
+        # by-value search for a matching enum member
+        # see if it's in the reverse mapping (for hashable values)
+        try:
+            return cls._value2member_map_[value]
+        except KeyError:
+            # Not found, no need to do long O(n) search
+            pass
+        except TypeError:
+            # not there, now do long search -- O(n) behavior
+            for member in cls._member_map_.values():
+                if member._value_ == value:
+                    return member
+        # still not found -- verify that members exist, in-case somebody got here mistakenly
+        # (such as via super when trying to override __new__)
+        if not cls._member_map_:
+            raise TypeError("%r has no members defined" % cls)
+        #
+        # still not found -- try _missing_ hook
+        try:
+            exc = None
+            result = cls._missing_(value)
+        except Exception as e:
+            exc = e
+            result = None
+        try:
+            if isinstance(result, cls):
+                return result
+            elif (
+                    Flag is not None and issubclass(cls, Flag)
+                    and cls._boundary_ is EJECT and isinstance(result, int)
+                ):
+                return result
+            else:
+                ve_exc = ValueError("%r is not a valid %s" % (value, cls.__qualname__))
+                if result is None and exc is None:
+>                   raise ve_exc
+E                   ValueError: 'migration' is not a valid ProcessRole
+
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/enum.py:1170: ValueError
+
+The above exception was the direct cause of the following exception:
+
+    @pytest.fixture(scope="session")
+    def app():
+        """Create application for testing."""
+>       application = create_app("testing")
+                      ^^^^^^^^^^^^^^^^^^^^^
+
+tests/conftest.py:32: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+app/__init__.py:141: in create_app
+    init_http_observability(app)
+app/observability/__init__.py:5: in init_http_observability
+    from app.observability.http import init_http_observability as initialize
+app/observability/http.py:12: in <module>
+    from app.observability.metrics import HTTP_DURATION, HTTP_IN_PROGRESS, HTTP_REQUESTS
+app/observability/metrics.py:69: in <module>
+    BUILD_INFO.labels(version=APP_VERSION, role=current_process_role().value).set(1)
+                                                ^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def current_process_role() -> ProcessRole:
+        raw = os.getenv("QD_PROCESS_ROLE", ProcessRole.LEGACY.value).strip().lower()
+        try:
+            return ProcessRole(raw)
+        except ValueError as exc:
+            allowed = ", ".join(role.value for role in ProcessRole)
+>           raise RuntimeError(f"Invalid QD_PROCESS_ROLE={raw!r}; expected one of: {allowed}") from exc
+E           RuntimeError: Invalid QD_PROCESS_ROLE='migration'; expected one of: legacy, api, trading, scheduler, polymarket-observer, celery
+
+app/runtime/roles.py:24: RuntimeError
+_ ERROR at setup of test_event_tracking_discards_prompt_text_and_unknown_metadata _
+
+    def current_process_role() -> ProcessRole:
+        raw = os.getenv("QD_PROCESS_ROLE", ProcessRole.LEGACY.value).strip().lower()
+        try:
+>           return ProcessRole(raw)
+                   ^^^^^^^^^^^^^^^^
+
+app/runtime/roles.py:21: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/enum.py:751: in __call__
+    return cls.__new__(cls, value)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+cls = <enum 'ProcessRole'>, value = 'migration'
+
+    def __new__(cls, value):
+        # all enum instances are actually created during class construction
+        # without calling this method; this method is called by the metaclass'
+        # __call__ (i.e. Color(3) ), and by pickle
+        if type(value) is cls:
+            # For lookups like Color(Color.RED)
+            return value
+        # by-value search for a matching enum member
+        # see if it's in the reverse mapping (for hashable values)
+        try:
+            return cls._value2member_map_[value]
+        except KeyError:
+            # Not found, no need to do long O(n) search
+            pass
+        except TypeError:
+            # not there, now do long search -- O(n) behavior
+            for member in cls._member_map_.values():
+                if member._value_ == value:
+                    return member
+        # still not found -- verify that members exist, in-case somebody got here mistakenly
+        # (such as via super when trying to override __new__)
+        if not cls._member_map_:
+            raise TypeError("%r has no members defined" % cls)
+        #
+        # still not found -- try _missing_ hook
+        try:
+            exc = None
+            result = cls._missing_(value)
+        except Exception as e:
+            exc = e
+            result = None
+        try:
+            if isinstance(result, cls):
+                return result
+            elif (
+                    Flag is not None and issubclass(cls, Flag)
+                    and cls._boundary_ is EJECT and isinstance(result, int)
+                ):
+                return result
+            else:
+                ve_exc = ValueError("%r is not a valid %s" % (value, cls.__qualname__))
+                if result is None and exc is None:
+>                   raise ve_exc
+E                   ValueError: 'migration' is not a valid ProcessRole
+
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/enum.py:1170: ValueError
+
+The above exception was the direct cause of the following exception:
+
+    @pytest.fixture(scope="session")
+    def app():
+        """Create application for testing."""
+>       application = create_app("testing")
+                      ^^^^^^^^^^^^^^^^^^^^^
+
+tests/conftest.py:32: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+app/__init__.py:141: in create_app
+    init_http_observability(app)
+app/observability/__init__.py:5: in init_http_observability
+    from app.observability.http import init_http_observability as initialize
+app/observability/http.py:12: in <module>
+    from app.observability.metrics import HTTP_DURATION, HTTP_IN_PROGRESS, HTTP_REQUESTS
+app/observability/metrics.py:69: in <module>
+    BUILD_INFO.labels(version=APP_VERSION, role=current_process_role().value).set(1)
+                                                ^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def current_process_role() -> ProcessRole:
+        raw = os.getenv("QD_PROCESS_ROLE", ProcessRole.LEGACY.value).strip().lower()
+        try:
+            return ProcessRole(raw)
+        except ValueError as exc:
+            allowed = ", ".join(role.value for role in ProcessRole)
+>           raise RuntimeError(f"Invalid QD_PROCESS_ROLE={raw!r}; expected one of: {allowed}") from exc
+E           RuntimeError: Invalid QD_PROCESS_ROLE='migration'; expected one of: legacy, api, trading, scheduler, polymarket-observer, celery
+
+app/runtime/roles.py:24: RuntimeError
+____ ERROR at setup of test_event_summary_returns_personalized_task_counts _____
+
+    def current_process_role() -> ProcessRole:
+        raw = os.getenv("QD_PROCESS_ROLE", ProcessRole.LEGACY.value).strip().lower()
+        try:
+>           return ProcessRole(raw)
+                   ^^^^^^^^^^^^^^^^
+
+app/runtime/roles.py:21: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/enum.py:751: in __call__
+    return cls.__new__(cls, value)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+cls = <enum 'ProcessRole'>, value = 'migration'
+
+    def __new__(cls, value):
+        # all enum instances are actually created during class construction
+        # without calling this method; this method is called by the metaclass'
+        # __call__ (i.e. Color(3) ), and by pickle
+        if type(value) is cls:
+            # For lookups like Color(Color.RED)
+            return value
+        # by-value search for a matching enum member
+        # see if it's in the reverse mapping (for hashable values)
+        try:
+            return cls._value2member_map_[value]
+        except KeyError:
+            # Not found, no need to do long O(n) search
+            pass
+        except TypeError:
+            # not there, now do long search -- O(n) behavior
+            for member in cls._member_map_.values():
+                if member._value_ == value:
+                    return member
+        # still not found -- verify that members exist, in-case somebody got here mistakenly
+        # (such as via super when trying to override __new__)
+        if not cls._member_map_:
+            raise TypeError("%r has no members defined" % cls)
+        #
+        # still not found -- try _missing_ hook
+        try:
+            exc = None
+            result = cls._missing_(value)
+        except Exception as e:
+            exc = e
+            result = None
+        try:
+            if isinstance(result, cls):
+                return result
+            elif (
+                    Flag is not None and issubclass(cls, Flag)
+                    and cls._boundary_ is EJECT and isinstance(result, int)
+                ):
+                return result
+            else:
+                ve_exc = ValueError("%r is not a valid %s" % (value, cls.__qualname__))
+                if result is None and exc is None:
+>                   raise ve_exc
+E                   ValueError: 'migration' is not a valid ProcessRole
+
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/enum.py:1170: ValueError
+
+The above exception was the direct cause of the following exception:
+
+    @pytest.fixture(scope="session")
+    def app():
+        """Create application for testing."""
+>       application = create_app("testing")
+                      ^^^^^^^^^^^^^^^^^^^^^
+
+tests/conftest.py:32: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+app/__init__.py:141: in create_app
+    init_http_observability(app)
+app/observability/__init__.py:5: in init_http_observability
+    from app.observability.http import init_http_observability as initialize
+app/observability/http.py:12: in <module>
+    from app.observability.metrics import HTTP_DURATION, HTTP_IN_PROGRESS, HTTP_REQUESTS
+app/observability/metrics.py:69: in <module>
+    BUILD_INFO.labels(version=APP_VERSION, role=current_process_role().value).set(1)
+                                                ^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def current_process_role() -> ProcessRole:
+        raw = os.getenv("QD_PROCESS_ROLE", ProcessRole.LEGACY.value).strip().lower()
+        try:
+            return ProcessRole(raw)
+        except ValueError as exc:
+            allowed = ", ".join(role.value for role in ProcessRole)
+>           raise RuntimeError(f"Invalid QD_PROCESS_ROLE={raw!r}; expected one of: {allowed}") from exc
+E           RuntimeError: Invalid QD_PROCESS_ROLE='migration'; expected one of: legacy, api, trading, scheduler, polymarket-observer, celery
+
+app/runtime/roles.py:24: RuntimeError
+_______ ERROR at setup of test_event_tracking_rejects_unknown_event_type _______
+
+    def current_process_role() -> ProcessRole:
+        raw = os.getenv("QD_PROCESS_ROLE", ProcessRole.LEGACY.value).strip().lower()
+        try:
+>           return ProcessRole(raw)
+                   ^^^^^^^^^^^^^^^^
+
+app/runtime/roles.py:21: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/enum.py:751: in __call__
+    return cls.__new__(cls, value)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+cls = <enum 'ProcessRole'>, value = 'migration'
+
+    def __new__(cls, value):
+        # all enum instances are actually created during class construction
+        # without calling this method; this method is called by the metaclass'
+        # __call__ (i.e. Color(3) ), and by pickle
+        if type(value) is cls:
+            # For lookups like Color(Color.RED)
+            return value
+        # by-value search for a matching enum member
+        # see if it's in the reverse mapping (for hashable values)
+        try:
+            return cls._value2member_map_[value]
+        except KeyError:
+            # Not found, no need to do long O(n) search
+            pass
+        except TypeError:
+            # not there, now do long search -- O(n) behavior
+            for member in cls._member_map_.values():
+                if member._value_ == value:
+                    return member
+        # still not found -- verify that members exist, in-case somebody got here mistakenly
+        # (such as via super when trying to override __new__)
+        if not cls._member_map_:
+            raise TypeError("%r has no members defined" % cls)
+        #
+        # still not found -- try _missing_ hook
+        try:
+            exc = None
+            result = cls._missing_(value)
+        except Exception as e:
+            exc = e
+            result = None
+        try:
+            if isinstance(result, cls):
+                return result
+            elif (
+                    Flag is not None and issubclass(cls, Flag)
+                    and cls._boundary_ is EJECT and isinstance(result, int)
+                ):
+                return result
+            else:
+                ve_exc = ValueError("%r is not a valid %s" % (value, cls.__qualname__))
+                if result is None and exc is None:
+>                   raise ve_exc
+E                   ValueError: 'migration' is not a valid ProcessRole
+
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/enum.py:1170: ValueError
+
+The above exception was the direct cause of the following exception:
+
+    @pytest.fixture(scope="session")
+    def app():
+        """Create application for testing."""
+>       application = create_app("testing")
+                      ^^^^^^^^^^^^^^^^^^^^^
+
+tests/conftest.py:32: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+app/__init__.py:141: in create_app
+    init_http_observability(app)
+app/observability/__init__.py:5: in init_http_observability
+    from app.observability.http import init_http_observability as initialize
+app/observability/http.py:12: in <module>
+    from app.observability.metrics import HTTP_DURATION, HTTP_IN_PROGRESS, HTTP_REQUESTS
+app/observability/metrics.py:69: in <module>
+    BUILD_INFO.labels(version=APP_VERSION, role=current_process_role().value).set(1)
+                                                ^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def current_process_role() -> ProcessRole:
+        raw = os.getenv("QD_PROCESS_ROLE", ProcessRole.LEGACY.value).strip().lower()
+        try:
+            return ProcessRole(raw)
+        except ValueError as exc:
+            allowed = ", ".join(role.value for role in ProcessRole)
+>           raise RuntimeError(f"Invalid QD_PROCESS_ROLE={raw!r}; expected one of: {allowed}") from exc
+E           RuntimeError: Invalid QD_PROCESS_ROLE='migration'; expected one of: legacy, api, trading, scheduler, polymarket-observer, celery
+
+app/runtime/roles.py:24: RuntimeError
+_ ERROR at setup of TestPolicyEndpoint.test_get_broker_market_returns_full_snapshot _
+
+    def current_process_role() -> ProcessRole:
+        raw = os.getenv("QD_PROCESS_ROLE", ProcessRole.LEGACY.value).strip().lower()
+        try:
+>           return ProcessRole(raw)
+                   ^^^^^^^^^^^^^^^^
+
+app/runtime/roles.py:21: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/enum.py:751: in __call__
+    return cls.__new__(cls, value)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+cls = <enum 'ProcessRole'>, value = 'migration'
+
+    def __new__(cls, value):
+        # all enum instances are actually created during class construction
+        # without calling this method; this method is called by the metaclass'
+        # __call__ (i.e. Color(3) ), and by pickle
+        if type(value) is cls:
+            # For lookups like Color(Color.RED)
+            return value
+        # by-value search for a matching enum member
+        # see if it's in the reverse mapping (for hashable values)
+        try:
+            return cls._value2member_map_[value]
+        except KeyError:
+            # Not found, no need to do long O(n) search
+            pass
+        except TypeError:
+            # not there, now do long search -- O(n) behavior
+            for member in cls._member_map_.values():
+                if member._value_ == value:
+                    return member
+        # still not found -- verify that members exist, in-case somebody got here mistakenly
+        # (such as via super when trying to override __new__)
+        if not cls._member_map_:
+            raise TypeError("%r has no members defined" % cls)
+        #
+        # still not found -- try _missing_ hook
+        try:
+            exc = None
+            result = cls._missing_(value)
+        except Exception as e:
+            exc = e
+            result = None
+        try:
+            if isinstance(result, cls):
+                return result
+            elif (
+                    Flag is not None and issubclass(cls, Flag)
+                    and cls._boundary_ is EJECT and isinstance(result, int)
+                ):
+                return result
+            else:
+                ve_exc = ValueError("%r is not a valid %s" % (value, cls.__qualname__))
+                if result is None and exc is None:
+>                   raise ve_exc
+E                   ValueError: 'migration' is not a valid ProcessRole
+
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/enum.py:1170: ValueError
+
+The above exception was the direct cause of the following exception:
+
+    @pytest.fixture(scope="session")
+    def app():
+        """Create application for testing."""
+>       application = create_app("testing")
+                      ^^^^^^^^^^^^^^^^^^^^^
+
+tests/conftest.py:32: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+app/__init__.py:141: in create_app
+    init_http_observability(app)
+app/observability/__init__.py:5: in init_http_observability
+    from app.observability.http import init_http_observability as initialize
+app/observability/http.py:12: in <module>
+    from app.observability.metrics import HTTP_DURATION, HTTP_IN_PROGRESS, HTTP_REQUESTS
+app/observability/metrics.py:69: in <module>
+    BUILD_INFO.labels(version=APP_VERSION, role=current_process_role().value).set(1)
+                                                ^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def current_process_role() -> ProcessRole:
+        raw = os.getenv("QD_PROCESS_ROLE", ProcessRole.LEGACY.value).strip().lower()
+        try:
+            return ProcessRole(raw)
+        except ValueError as exc:
+            allowed = ", ".join(role.value for role in ProcessRole)
+>           raise RuntimeError(f"Invalid QD_PROCESS_ROLE={raw!r}; expected one of: {allowed}") from exc
+E           RuntimeError: Invalid QD_PROCESS_ROLE='migration'; expected one of: legacy, api, trading, scheduler, polymarket-observer, celery
+
+app/runtime/roles.py:24: RuntimeError
+______________ ERROR at setup of test_health_endpoints_still_work ______________
+
+    def current_process_role() -> ProcessRole:
+        raw = os.getenv("QD_PROCESS_ROLE", ProcessRole.LEGACY.value).strip().lower()
+        try:
+>           return ProcessRole(raw)
+                   ^^^^^^^^^^^^^^^^
+
+app/runtime/roles.py:21: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/enum.py:751: in __call__
+    return cls.__new__(cls, value)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+cls = <enum 'ProcessRole'>, value = 'migration'
+
+    def __new__(cls, value):
+        # all enum instances are actually created during class construction
+        # without calling this method; this method is called by the metaclass'
+        # __call__ (i.e. Color(3) ), and by pickle
+        if type(value) is cls:
+            # For lookups like Color(Color.RED)
+            return value
+        # by-value search for a matching enum member
+        # see if it's in the reverse mapping (for hashable values)
+        try:
+            return cls._value2member_map_[value]
+        except KeyError:
+            # Not found, no need to do long O(n) search
+            pass
+        except TypeError:
+            # not there, now do long search -- O(n) behavior
+            for member in cls._member_map_.values():
+                if member._value_ == value:
+                    return member
+        # still not found -- verify that members exist, in-case somebody got here mistakenly
+        # (such as via super when trying to override __new__)
+        if not cls._member_map_:
+            raise TypeError("%r has no members defined" % cls)
+        #
+        # still not found -- try _missing_ hook
+        try:
+            exc = None
+            result = cls._missing_(value)
+        except Exception as e:
+            exc = e
+            result = None
+        try:
+            if isinstance(result, cls):
+                return result
+            elif (
+                    Flag is not None and issubclass(cls, Flag)
+                    and cls._boundary_ is EJECT and isinstance(result, int)
+                ):
+                return result
+            else:
+                ve_exc = ValueError("%r is not a valid %s" % (value, cls.__qualname__))
+                if result is None and exc is None:
+>                   raise ve_exc
+E                   ValueError: 'migration' is not a valid ProcessRole
+
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/enum.py:1170: ValueError
+
+The above exception was the direct cause of the following exception:
+
+    @pytest.fixture(scope="session")
+    def app():
+        """Create application for testing."""
+>       application = create_app("testing")
+                      ^^^^^^^^^^^^^^^^^^^^^
+
+tests/conftest.py:32: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+app/__init__.py:141: in create_app
+    init_http_observability(app)
+app/observability/__init__.py:5: in init_http_observability
+    from app.observability.http import init_http_observability as initialize
+app/observability/http.py:12: in <module>
+    from app.observability.metrics import HTTP_DURATION, HTTP_IN_PROGRESS, HTTP_REQUESTS
+app/observability/metrics.py:69: in <module>
+    BUILD_INFO.labels(version=APP_VERSION, role=current_process_role().value).set(1)
+                                                ^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def current_process_role() -> ProcessRole:
+        raw = os.getenv("QD_PROCESS_ROLE", ProcessRole.LEGACY.value).strip().lower()
+        try:
+            return ProcessRole(raw)
+        except ValueError as exc:
+            allowed = ", ".join(role.value for role in ProcessRole)
+>           raise RuntimeError(f"Invalid QD_PROCESS_ROLE={raw!r}; expected one of: {allowed}") from exc
+E           RuntimeError: Invalid QD_PROCESS_ROLE='migration'; expected one of: legacy, api, trading, scheduler, polymarket-observer, celery
+
+app/runtime/roles.py:24: RuntimeError
+_______________________ ERROR at setup of test_api_root ________________________
+
+    def current_process_role() -> ProcessRole:
+        raw = os.getenv("QD_PROCESS_ROLE", ProcessRole.LEGACY.value).strip().lower()
+        try:
+>           return ProcessRole(raw)
+                   ^^^^^^^^^^^^^^^^
+
+app/runtime/roles.py:21: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/enum.py:751: in __call__
+    return cls.__new__(cls, value)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+cls = <enum 'ProcessRole'>, value = 'migration'
+
+    def __new__(cls, value):
+        # all enum instances are actually created during class construction
+        # without calling this method; this method is called by the metaclass'
+        # __call__ (i.e. Color(3) ), and by pickle
+        if type(value) is cls:
+            # For lookups like Color(Color.RED)
+            return value
+        # by-value search for a matching enum member
+        # see if it's in the reverse mapping (for hashable values)
+        try:
+            return cls._value2member_map_[value]
+        except KeyError:
+            # Not found, no need to do long O(n) search
+            pass
+        except TypeError:
+            # not there, now do long search -- O(n) behavior
+            for member in cls._member_map_.values():
+                if member._value_ == value:
+                    return member
+        # still not found -- verify that members exist, in-case somebody got here mistakenly
+        # (such as via super when trying to override __new__)
+        if not cls._member_map_:
+            raise TypeError("%r has no members defined" % cls)
+        #
+        # still not found -- try _missing_ hook
+        try:
+            exc = None
+            result = cls._missing_(value)
+        except Exception as e:
+            exc = e
+            result = None
+        try:
+            if isinstance(result, cls):
+                return result
+            elif (
+                    Flag is not None and issubclass(cls, Flag)
+                    and cls._boundary_ is EJECT and isinstance(result, int)
+                ):
+                return result
+            else:
+                ve_exc = ValueError("%r is not a valid %s" % (value, cls.__qualname__))
+                if result is None and exc is None:
+>                   raise ve_exc
+E                   ValueError: 'migration' is not a valid ProcessRole
+
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/enum.py:1170: ValueError
+
+The above exception was the direct cause of the following exception:
+
+    @pytest.fixture(scope="session")
+    def app():
+        """Create application for testing."""
+>       application = create_app("testing")
+                      ^^^^^^^^^^^^^^^^^^^^^
+
+tests/conftest.py:32: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+app/__init__.py:141: in create_app
+    init_http_observability(app)
+app/observability/__init__.py:5: in init_http_observability
+    from app.observability.http import init_http_observability as initialize
+app/observability/http.py:12: in <module>
+    from app.observability.metrics import HTTP_DURATION, HTTP_IN_PROGRESS, HTTP_REQUESTS
+app/observability/metrics.py:69: in <module>
+    BUILD_INFO.labels(version=APP_VERSION, role=current_process_role().value).set(1)
+                                                ^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def current_process_role() -> ProcessRole:
+        raw = os.getenv("QD_PROCESS_ROLE", ProcessRole.LEGACY.value).strip().lower()
+        try:
+            return ProcessRole(raw)
+        except ValueError as exc:
+            allowed = ", ".join(role.value for role in ProcessRole)
+>           raise RuntimeError(f"Invalid QD_PROCESS_ROLE={raw!r}; expected one of: {allowed}") from exc
+E           RuntimeError: Invalid QD_PROCESS_ROLE='migration'; expected one of: legacy, api, trading, scheduler, polymarket-observer, celery
+
+app/runtime/roles.py:24: RuntimeError
+_____________ ERROR at setup of test_openapi_spec_has_health_paths _____________
+
+    def current_process_role() -> ProcessRole:
+        raw = os.getenv("QD_PROCESS_ROLE", ProcessRole.LEGACY.value).strip().lower()
+        try:
+>           return ProcessRole(raw)
+                   ^^^^^^^^^^^^^^^^
+
+app/runtime/roles.py:21: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/enum.py:751: in __call__
+    return cls.__new__(cls, value)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+cls = <enum 'ProcessRole'>, value = 'migration'
+
+    def __new__(cls, value):
+        # all enum instances are actually created during class construction
+        # without calling this method; this method is called by the metaclass'
+        # __call__ (i.e. Color(3) ), and by pickle
+        if type(value) is cls:
+            # For lookups like Color(Color.RED)
+            return value
+        # by-value search for a matching enum member
+        # see if it's in the reverse mapping (for hashable values)
+        try:
+            return cls._value2member_map_[value]
+        except KeyError:
+            # Not found, no need to do long O(n) search
+            pass
+        except TypeError:
+            # not there, now do long search -- O(n) behavior
+            for member in cls._member_map_.values():
+                if member._value_ == value:
+                    return member
+        # still not found -- verify that members exist, in-case somebody got here mistakenly
+        # (such as via super when trying to override __new__)
+        if not cls._member_map_:
+            raise TypeError("%r has no members defined" % cls)
+        #
+        # still not found -- try _missing_ hook
+        try:
+            exc = None
+            result = cls._missing_(value)
+        except Exception as e:
+            exc = e
+            result = None
+        try:
+            if isinstance(result, cls):
+                return result
+            elif (
+                    Flag is not None and issubclass(cls, Flag)
+                    and cls._boundary_ is EJECT and isinstance(result, int)
+                ):
+                return result
+            else:
+                ve_exc = ValueError("%r is not a valid %s" % (value, cls.__qualname__))
+                if result is None and exc is None:
+>                   raise ve_exc
+E                   ValueError: 'migration' is not a valid ProcessRole
+
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/enum.py:1170: ValueError
+
+The above exception was the direct cause of the following exception:
+
+    @pytest.fixture(scope="session")
+    def app():
+        """Create application for testing."""
+>       application = create_app("testing")
+                      ^^^^^^^^^^^^^^^^^^^^^
+
+tests/conftest.py:32: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+app/__init__.py:141: in create_app
+    init_http_observability(app)
+app/observability/__init__.py:5: in init_http_observability
+    from app.observability.http import init_http_observability as initialize
+app/observability/http.py:12: in <module>
+    from app.observability.metrics import HTTP_DURATION, HTTP_IN_PROGRESS, HTTP_REQUESTS
+app/observability/metrics.py:69: in <module>
+    BUILD_INFO.labels(version=APP_VERSION, role=current_process_role().value).set(1)
+                                                ^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def current_process_role() -> ProcessRole:
+        raw = os.getenv("QD_PROCESS_ROLE", ProcessRole.LEGACY.value).strip().lower()
+        try:
+            return ProcessRole(raw)
+        except ValueError as exc:
+            allowed = ", ".join(role.value for role in ProcessRole)
+>           raise RuntimeError(f"Invalid QD_PROCESS_ROLE={raw!r}; expected one of: {allowed}") from exc
+E           RuntimeError: Invalid QD_PROCESS_ROLE='migration'; expected one of: legacy, api, trading, scheduler, polymarket-observer, celery
+
+app/runtime/roles.py:24: RuntimeError
+________________ ERROR at setup of test_openapi_shared_schemas _________________
+
+    def current_process_role() -> ProcessRole:
+        raw = os.getenv("QD_PROCESS_ROLE", ProcessRole.LEGACY.value).strip().lower()
+        try:
+>           return ProcessRole(raw)
+                   ^^^^^^^^^^^^^^^^
+
+app/runtime/roles.py:21: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/enum.py:751: in __call__
+    return cls.__new__(cls, value)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+cls = <enum 'ProcessRole'>, value = 'migration'
+
+    def __new__(cls, value):
+        # all enum instances are actually created during class construction
+        # without calling this method; this method is called by the metaclass'
+        # __call__ (i.e. Color(3) ), and by pickle
+        if type(value) is cls:
+            # For lookups like Color(Color.RED)
+            return value
+        # by-value search for a matching enum member
+        # see if it's in the reverse mapping (for hashable values)
+        try:
+            return cls._value2member_map_[value]
+        except KeyError:
+            # Not found, no need to do long O(n) search
+            pass
+        except TypeError:
+            # not there, now do long search -- O(n) behavior
+            for member in cls._member_map_.values():
+                if member._value_ == value:
+                    return member
+        # still not found -- verify that members exist, in-case somebody got here mistakenly
+        # (such as via super when trying to override __new__)
+        if not cls._member_map_:
+            raise TypeError("%r has no members defined" % cls)
+        #
+        # still not found -- try _missing_ hook
+        try:
+            exc = None
+            result = cls._missing_(value)
+        except Exception as e:
+            exc = e
+            result = None
+        try:
+            if isinstance(result, cls):
+                return result
+            elif (
+                    Flag is not None and issubclass(cls, Flag)
+                    and cls._boundary_ is EJECT and isinstance(result, int)
+                ):
+                return result
+            else:
+                ve_exc = ValueError("%r is not a valid %s" % (value, cls.__qualname__))
+                if result is None and exc is None:
+>                   raise ve_exc
+E                   ValueError: 'migration' is not a valid ProcessRole
+
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/enum.py:1170: ValueError
+
+The above exception was the direct cause of the following exception:
+
+    @pytest.fixture(scope="session")
+    def app():
+        """Create application for testing."""
+>       application = create_app("testing")
+                      ^^^^^^^^^^^^^^^^^^^^^
+
+tests/conftest.py:32: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+app/__init__.py:141: in create_app
+    init_http_observability(app)
+app/observability/__init__.py:5: in init_http_observability
+    from app.observability.http import init_http_observability as initialize
+app/observability/http.py:12: in <module>
+    from app.observability.metrics import HTTP_DURATION, HTTP_IN_PROGRESS, HTTP_REQUESTS
+app/observability/metrics.py:69: in <module>
+    BUILD_INFO.labels(version=APP_VERSION, role=current_process_role().value).set(1)
+                                                ^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def current_process_role() -> ProcessRole:
+        raw = os.getenv("QD_PROCESS_ROLE", ProcessRole.LEGACY.value).strip().lower()
+        try:
+            return ProcessRole(raw)
+        except ValueError as exc:
+            allowed = ", ".join(role.value for role in ProcessRole)
+>           raise RuntimeError(f"Invalid QD_PROCESS_ROLE={raw!r}; expected one of: {allowed}") from exc
+E           RuntimeError: Invalid QD_PROCESS_ROLE='migration'; expected one of: legacy, api, trading, scheduler, polymarket-observer, celery
+
+app/runtime/roles.py:24: RuntimeError
+________________ ERROR at setup of test_report_auth_and_openapi ________________
+
+    def current_process_role() -> ProcessRole:
+        raw = os.getenv("QD_PROCESS_ROLE", ProcessRole.LEGACY.value).strip().lower()
+        try:
+>           return ProcessRole(raw)
+                   ^^^^^^^^^^^^^^^^
+
+app/runtime/roles.py:21: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/enum.py:751: in __call__
+    return cls.__new__(cls, value)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+cls = <enum 'ProcessRole'>, value = 'migration'
+
+    def __new__(cls, value):
+        # all enum instances are actually created during class construction
+        # without calling this method; this method is called by the metaclass'
+        # __call__ (i.e. Color(3) ), and by pickle
+        if type(value) is cls:
+            # For lookups like Color(Color.RED)
+            return value
+        # by-value search for a matching enum member
+        # see if it's in the reverse mapping (for hashable values)
+        try:
+            return cls._value2member_map_[value]
+        except KeyError:
+            # Not found, no need to do long O(n) search
+            pass
+        except TypeError:
+            # not there, now do long search -- O(n) behavior
+            for member in cls._member_map_.values():
+                if member._value_ == value:
+                    return member
+        # still not found -- verify that members exist, in-case somebody got here mistakenly
+        # (such as via super when trying to override __new__)
+        if not cls._member_map_:
+            raise TypeError("%r has no members defined" % cls)
+        #
+        # still not found -- try _missing_ hook
+        try:
+            exc = None
+            result = cls._missing_(value)
+        except Exception as e:
+            exc = e
+            result = None
+        try:
+            if isinstance(result, cls):
+                return result
+            elif (
+                    Flag is not None and issubclass(cls, Flag)
+                    and cls._boundary_ is EJECT and isinstance(result, int)
+                ):
+                return result
+            else:
+                ve_exc = ValueError("%r is not a valid %s" % (value, cls.__qualname__))
+                if result is None and exc is None:
+>                   raise ve_exc
+E                   ValueError: 'migration' is not a valid ProcessRole
+
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/enum.py:1170: ValueError
+
+The above exception was the direct cause of the following exception:
+
+    @pytest.fixture(scope="session")
+    def app():
+        """Create application for testing."""
+>       application = create_app("testing")
+                      ^^^^^^^^^^^^^^^^^^^^^
+
+tests/conftest.py:32: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+app/__init__.py:141: in create_app
+    init_http_observability(app)
+app/observability/__init__.py:5: in init_http_observability
+    from app.observability.http import init_http_observability as initialize
+app/observability/http.py:12: in <module>
+    from app.observability.metrics import HTTP_DURATION, HTTP_IN_PROGRESS, HTTP_REQUESTS
+app/observability/metrics.py:69: in <module>
+    BUILD_INFO.labels(version=APP_VERSION, role=current_process_role().value).set(1)
+                                                ^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def current_process_role() -> ProcessRole:
+        raw = os.getenv("QD_PROCESS_ROLE", ProcessRole.LEGACY.value).strip().lower()
+        try:
+            return ProcessRole(raw)
+        except ValueError as exc:
+            allowed = ", ".join(role.value for role in ProcessRole)
+>           raise RuntimeError(f"Invalid QD_PROCESS_ROLE={raw!r}; expected one of: {allowed}") from exc
+E           RuntimeError: Invalid QD_PROCESS_ROLE='migration'; expected one of: legacy, api, trading, scheduler, polymarket-observer, celery
+
+app/runtime/roles.py:24: RuntimeError
+___ ERROR at setup of test_ownership_read_does_not_expose_internal_exception ___
+
+    def current_process_role() -> ProcessRole:
+        raw = os.getenv("QD_PROCESS_ROLE", ProcessRole.LEGACY.value).strip().lower()
+        try:
+>           return ProcessRole(raw)
+                   ^^^^^^^^^^^^^^^^
+
+app/runtime/roles.py:21: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/enum.py:751: in __call__
+    return cls.__new__(cls, value)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+cls = <enum 'ProcessRole'>, value = 'migration'
+
+    def __new__(cls, value):
+        # all enum instances are actually created during class construction
+        # without calling this method; this method is called by the metaclass'
+        # __call__ (i.e. Color(3) ), and by pickle
+        if type(value) is cls:
+            # For lookups like Color(Color.RED)
+            return value
+        # by-value search for a matching enum member
+        # see if it's in the reverse mapping (for hashable values)
+        try:
+            return cls._value2member_map_[value]
+        except KeyError:
+            # Not found, no need to do long O(n) search
+            pass
+        except TypeError:
+            # not there, now do long search -- O(n) behavior
+            for member in cls._member_map_.values():
+                if member._value_ == value:
+                    return member
+        # still not found -- verify that members exist, in-case somebody got here mistakenly
+        # (such as via super when trying to override __new__)
+        if not cls._member_map_:
+            raise TypeError("%r has no members defined" % cls)
+        #
+        # still not found -- try _missing_ hook
+        try:
+            exc = None
+            result = cls._missing_(value)
+        except Exception as e:
+            exc = e
+            result = None
+        try:
+            if isinstance(result, cls):
+                return result
+            elif (
+                    Flag is not None and issubclass(cls, Flag)
+                    and cls._boundary_ is EJECT and isinstance(result, int)
+                ):
+                return result
+            else:
+                ve_exc = ValueError("%r is not a valid %s" % (value, cls.__qualname__))
+                if result is None and exc is None:
+>                   raise ve_exc
+E                   ValueError: 'migration' is not a valid ProcessRole
+
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/enum.py:1170: ValueError
+
+The above exception was the direct cause of the following exception:
+
+    @pytest.fixture(scope="session")
+    def app():
+        """Create application for testing."""
+>       application = create_app("testing")
+                      ^^^^^^^^^^^^^^^^^^^^^
+
+tests/conftest.py:32: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+app/__init__.py:141: in create_app
+    init_http_observability(app)
+app/observability/__init__.py:5: in init_http_observability
+    from app.observability.http import init_http_observability as initialize
+app/observability/http.py:12: in <module>
+    from app.observability.metrics import HTTP_DURATION, HTTP_IN_PROGRESS, HTTP_REQUESTS
+app/observability/metrics.py:69: in <module>
+    BUILD_INFO.labels(version=APP_VERSION, role=current_process_role().value).set(1)
+                                                ^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def current_process_role() -> ProcessRole:
+        raw = os.getenv("QD_PROCESS_ROLE", ProcessRole.LEGACY.value).strip().lower()
+        try:
+            return ProcessRole(raw)
+        except ValueError as exc:
+            allowed = ", ".join(role.value for role in ProcessRole)
+>           raise RuntimeError(f"Invalid QD_PROCESS_ROLE={raw!r}; expected one of: {allowed}") from exc
+E           RuntimeError: Invalid QD_PROCESS_ROLE='migration'; expected one of: legacy, api, trading, scheduler, polymarket-observer, celery
+
+app/runtime/roles.py:24: RuntimeError
+__ ERROR at setup of test_ownership_repair_does_not_expose_internal_exception __
+
+    def current_process_role() -> ProcessRole:
+        raw = os.getenv("QD_PROCESS_ROLE", ProcessRole.LEGACY.value).strip().lower()
+        try:
+>           return ProcessRole(raw)
+                   ^^^^^^^^^^^^^^^^
+
+app/runtime/roles.py:21: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/enum.py:751: in __call__
+    return cls.__new__(cls, value)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+cls = <enum 'ProcessRole'>, value = 'migration'
+
+    def __new__(cls, value):
+        # all enum instances are actually created during class construction
+        # without calling this method; this method is called by the metaclass'
+        # __call__ (i.e. Color(3) ), and by pickle
+        if type(value) is cls:
+            # For lookups like Color(Color.RED)
+            return value
+        # by-value search for a matching enum member
+        # see if it's in the reverse mapping (for hashable values)
+        try:
+            return cls._value2member_map_[value]
+        except KeyError:
+            # Not found, no need to do long O(n) search
+            pass
+        except TypeError:
+            # not there, now do long search -- O(n) behavior
+            for member in cls._member_map_.values():
+                if member._value_ == value:
+                    return member
+        # still not found -- verify that members exist, in-case somebody got here mistakenly
+        # (such as via super when trying to override __new__)
+        if not cls._member_map_:
+            raise TypeError("%r has no members defined" % cls)
+        #
+        # still not found -- try _missing_ hook
+        try:
+            exc = None
+            result = cls._missing_(value)
+        except Exception as e:
+            exc = e
+            result = None
+        try:
+            if isinstance(result, cls):
+                return result
+            elif (
+                    Flag is not None and issubclass(cls, Flag)
+                    and cls._boundary_ is EJECT and isinstance(result, int)
+                ):
+                return result
+            else:
+                ve_exc = ValueError("%r is not a valid %s" % (value, cls.__qualname__))
+                if result is None and exc is None:
+>                   raise ve_exc
+E                   ValueError: 'migration' is not a valid ProcessRole
+
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/enum.py:1170: ValueError
+
+The above exception was the direct cause of the following exception:
+
+    @pytest.fixture(scope="session")
+    def app():
+        """Create application for testing."""
+>       application = create_app("testing")
+                      ^^^^^^^^^^^^^^^^^^^^^
+
+tests/conftest.py:32: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+app/__init__.py:141: in create_app
+    init_http_observability(app)
+app/observability/__init__.py:5: in init_http_observability
+    from app.observability.http import init_http_observability as initialize
+app/observability/http.py:12: in <module>
+    from app.observability.metrics import HTTP_DURATION, HTTP_IN_PROGRESS, HTTP_REQUESTS
+app/observability/metrics.py:69: in <module>
+    BUILD_INFO.labels(version=APP_VERSION, role=current_process_role().value).set(1)
+                                                ^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def current_process_role() -> ProcessRole:
+        raw = os.getenv("QD_PROCESS_ROLE", ProcessRole.LEGACY.value).strip().lower()
+        try:
+            return ProcessRole(raw)
+        except ValueError as exc:
+            allowed = ", ".join(role.value for role in ProcessRole)
+>           raise RuntimeError(f"Invalid QD_PROCESS_ROLE={raw!r}; expected one of: {allowed}") from exc
+E           RuntimeError: Invalid QD_PROCESS_ROLE='migration'; expected one of: legacy, api, trading, scheduler, polymarket-observer, celery
+
+app/runtime/roles.py:24: RuntimeError
+___ ERROR at setup of test_ownership_repair_rejects_non_numeric_strategy_id ____
+
+    def current_process_role() -> ProcessRole:
+        raw = os.getenv("QD_PROCESS_ROLE", ProcessRole.LEGACY.value).strip().lower()
+        try:
+>           return ProcessRole(raw)
+                   ^^^^^^^^^^^^^^^^
+
+app/runtime/roles.py:21: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/enum.py:751: in __call__
+    return cls.__new__(cls, value)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+cls = <enum 'ProcessRole'>, value = 'migration'
+
+    def __new__(cls, value):
+        # all enum instances are actually created during class construction
+        # without calling this method; this method is called by the metaclass'
+        # __call__ (i.e. Color(3) ), and by pickle
+        if type(value) is cls:
+            # For lookups like Color(Color.RED)
+            return value
+        # by-value search for a matching enum member
+        # see if it's in the reverse mapping (for hashable values)
+        try:
+            return cls._value2member_map_[value]
+        except KeyError:
+            # Not found, no need to do long O(n) search
+            pass
+        except TypeError:
+            # not there, now do long search -- O(n) behavior
+            for member in cls._member_map_.values():
+                if member._value_ == value:
+                    return member
+        # still not found -- verify that members exist, in-case somebody got here mistakenly
+        # (such as via super when trying to override __new__)
+        if not cls._member_map_:
+            raise TypeError("%r has no members defined" % cls)
+        #
+        # still not found -- try _missing_ hook
+        try:
+            exc = None
+            result = cls._missing_(value)
+        except Exception as e:
+            exc = e
+            result = None
+        try:
+            if isinstance(result, cls):
+                return result
+            elif (
+                    Flag is not None and issubclass(cls, Flag)
+                    and cls._boundary_ is EJECT and isinstance(result, int)
+                ):
+                return result
+            else:
+                ve_exc = ValueError("%r is not a valid %s" % (value, cls.__qualname__))
+                if result is None and exc is None:
+>                   raise ve_exc
+E                   ValueError: 'migration' is not a valid ProcessRole
+
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/enum.py:1170: ValueError
+
+The above exception was the direct cause of the following exception:
+
+    @pytest.fixture(scope="session")
+    def app():
+        """Create application for testing."""
+>       application = create_app("testing")
+                      ^^^^^^^^^^^^^^^^^^^^^
+
+tests/conftest.py:32: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+app/__init__.py:141: in create_app
+    init_http_observability(app)
+app/observability/__init__.py:5: in init_http_observability
+    from app.observability.http import init_http_observability as initialize
+app/observability/http.py:12: in <module>
+    from app.observability.metrics import HTTP_DURATION, HTTP_IN_PROGRESS, HTTP_REQUESTS
+app/observability/metrics.py:69: in <module>
+    BUILD_INFO.labels(version=APP_VERSION, role=current_process_role().value).set(1)
+                                                ^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def current_process_role() -> ProcessRole:
+        raw = os.getenv("QD_PROCESS_ROLE", ProcessRole.LEGACY.value).strip().lower()
+        try:
+            return ProcessRole(raw)
+        except ValueError as exc:
+            allowed = ", ".join(role.value for role in ProcessRole)
+>           raise RuntimeError(f"Invalid QD_PROCESS_ROLE={raw!r}; expected one of: {allowed}") from exc
+E           RuntimeError: Invalid QD_PROCESS_ROLE='migration'; expected one of: legacy, api, trading, scheduler, polymarket-observer, celery
+
+app/runtime/roles.py:24: RuntimeError
+_ ERROR at setup of test_ownership_read_reports_supported_coexistence_markets[spot-binance-True] _
+
+    def current_process_role() -> ProcessRole:
+        raw = os.getenv("QD_PROCESS_ROLE", ProcessRole.LEGACY.value).strip().lower()
+        try:
+>           return ProcessRole(raw)
+                   ^^^^^^^^^^^^^^^^
+
+app/runtime/roles.py:21: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/enum.py:751: in __call__
+    return cls.__new__(cls, value)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+cls = <enum 'ProcessRole'>, value = 'migration'
+
+    def __new__(cls, value):
+        # all enum instances are actually created during class construction
+        # without calling this method; this method is called by the metaclass'
+        # __call__ (i.e. Color(3) ), and by pickle
+        if type(value) is cls:
+            # For lookups like Color(Color.RED)
+            return value
+        # by-value search for a matching enum member
+        # see if it's in the reverse mapping (for hashable values)
+        try:
+            return cls._value2member_map_[value]
+        except KeyError:
+            # Not found, no need to do long O(n) search
+            pass
+        except TypeError:
+            # not there, now do long search -- O(n) behavior
+            for member in cls._member_map_.values():
+                if member._value_ == value:
+                    return member
+        # still not found -- verify that members exist, in-case somebody got here mistakenly
+        # (such as via super when trying to override __new__)
+        if not cls._member_map_:
+            raise TypeError("%r has no members defined" % cls)
+        #
+        # still not found -- try _missing_ hook
+        try:
+            exc = None
+            result = cls._missing_(value)
+        except Exception as e:
+            exc = e
+            result = None
+        try:
+            if isinstance(result, cls):
+                return result
+            elif (
+                    Flag is not None and issubclass(cls, Flag)
+                    and cls._boundary_ is EJECT and isinstance(result, int)
+                ):
+                return result
+            else:
+                ve_exc = ValueError("%r is not a valid %s" % (value, cls.__qualname__))
+                if result is None and exc is None:
+>                   raise ve_exc
+E                   ValueError: 'migration' is not a valid ProcessRole
+
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/enum.py:1170: ValueError
+
+The above exception was the direct cause of the following exception:
+
+    @pytest.fixture(scope="session")
+    def app():
+        """Create application for testing."""
+>       application = create_app("testing")
+                      ^^^^^^^^^^^^^^^^^^^^^
+
+tests/conftest.py:32: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+app/__init__.py:141: in create_app
+    init_http_observability(app)
+app/observability/__init__.py:5: in init_http_observability
+    from app.observability.http import init_http_observability as initialize
+app/observability/http.py:12: in <module>
+    from app.observability.metrics import HTTP_DURATION, HTTP_IN_PROGRESS, HTTP_REQUESTS
+app/observability/metrics.py:69: in <module>
+    BUILD_INFO.labels(version=APP_VERSION, role=current_process_role().value).set(1)
+                                                ^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def current_process_role() -> ProcessRole:
+        raw = os.getenv("QD_PROCESS_ROLE", ProcessRole.LEGACY.value).strip().lower()
+        try:
+            return ProcessRole(raw)
+        except ValueError as exc:
+            allowed = ", ".join(role.value for role in ProcessRole)
+>           raise RuntimeError(f"Invalid QD_PROCESS_ROLE={raw!r}; expected one of: {allowed}") from exc
+E           RuntimeError: Invalid QD_PROCESS_ROLE='migration'; expected one of: legacy, api, trading, scheduler, polymarket-observer, celery
+
+app/runtime/roles.py:24: RuntimeError
+_ ERROR at setup of test_ownership_read_reports_supported_coexistence_markets[swap-okx-True] _
+
+    def current_process_role() -> ProcessRole:
+        raw = os.getenv("QD_PROCESS_ROLE", ProcessRole.LEGACY.value).strip().lower()
+        try:
+>           return ProcessRole(raw)
+                   ^^^^^^^^^^^^^^^^
+
+app/runtime/roles.py:21: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/enum.py:751: in __call__
+    return cls.__new__(cls, value)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+cls = <enum 'ProcessRole'>, value = 'migration'
+
+    def __new__(cls, value):
+        # all enum instances are actually created during class construction
+        # without calling this method; this method is called by the metaclass'
+        # __call__ (i.e. Color(3) ), and by pickle
+        if type(value) is cls:
+            # For lookups like Color(Color.RED)
+            return value
+        # by-value search for a matching enum member
+        # see if it's in the reverse mapping (for hashable values)
+        try:
+            return cls._value2member_map_[value]
+        except KeyError:
+            # Not found, no need to do long O(n) search
+            pass
+        except TypeError:
+            # not there, now do long search -- O(n) behavior
+            for member in cls._member_map_.values():
+                if member._value_ == value:
+                    return member
+        # still not found -- verify that members exist, in-case somebody got here mistakenly
+        # (such as via super when trying to override __new__)
+        if not cls._member_map_:
+            raise TypeError("%r has no members defined" % cls)
+        #
+        # still not found -- try _missing_ hook
+        try:
+            exc = None
+            result = cls._missing_(value)
+        except Exception as e:
+            exc = e
+            result = None
+        try:
+            if isinstance(result, cls):
+                return result
+            elif (
+                    Flag is not None and issubclass(cls, Flag)
+                    and cls._boundary_ is EJECT and isinstance(result, int)
+                ):
+                return result
+            else:
+                ve_exc = ValueError("%r is not a valid %s" % (value, cls.__qualname__))
+                if result is None and exc is None:
+>                   raise ve_exc
+E                   ValueError: 'migration' is not a valid ProcessRole
+
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/enum.py:1170: ValueError
+
+The above exception was the direct cause of the following exception:
+
+    @pytest.fixture(scope="session")
+    def app():
+        """Create application for testing."""
+>       application = create_app("testing")
+                      ^^^^^^^^^^^^^^^^^^^^^
+
+tests/conftest.py:32: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+app/__init__.py:141: in create_app
+    init_http_observability(app)
+app/observability/__init__.py:5: in init_http_observability
+    from app.observability.http import init_http_observability as initialize
+app/observability/http.py:12: in <module>
+    from app.observability.metrics import HTTP_DURATION, HTTP_IN_PROGRESS, HTTP_REQUESTS
+app/observability/metrics.py:69: in <module>
+    BUILD_INFO.labels(version=APP_VERSION, role=current_process_role().value).set(1)
+                                                ^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def current_process_role() -> ProcessRole:
+        raw = os.getenv("QD_PROCESS_ROLE", ProcessRole.LEGACY.value).strip().lower()
+        try:
+            return ProcessRole(raw)
+        except ValueError as exc:
+            allowed = ", ".join(role.value for role in ProcessRole)
+>           raise RuntimeError(f"Invalid QD_PROCESS_ROLE={raw!r}; expected one of: {allowed}") from exc
+E           RuntimeError: Invalid QD_PROCESS_ROLE='migration'; expected one of: legacy, api, trading, scheduler, polymarket-observer, celery
+
+app/runtime/roles.py:24: RuntimeError
+_ ERROR at setup of test_ownership_read_reports_supported_coexistence_markets[spot-alpaca-True] _
+
+    def current_process_role() -> ProcessRole:
+        raw = os.getenv("QD_PROCESS_ROLE", ProcessRole.LEGACY.value).strip().lower()
+        try:
+>           return ProcessRole(raw)
+                   ^^^^^^^^^^^^^^^^
+
+app/runtime/roles.py:21: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/enum.py:751: in __call__
+    return cls.__new__(cls, value)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+cls = <enum 'ProcessRole'>, value = 'migration'
+
+    def __new__(cls, value):
+        # all enum instances are actually created during class construction
+        # without calling this method; this method is called by the metaclass'
+        # __call__ (i.e. Color(3) ), and by pickle
+        if type(value) is cls:
+            # For lookups like Color(Color.RED)
+            return value
+        # by-value search for a matching enum member
+        # see if it's in the reverse mapping (for hashable values)
+        try:
+            return cls._value2member_map_[value]
+        except KeyError:
+            # Not found, no need to do long O(n) search
+            pass
+        except TypeError:
+            # not there, now do long search -- O(n) behavior
+            for member in cls._member_map_.values():
+                if member._value_ == value:
+                    return member
+        # still not found -- verify that members exist, in-case somebody got here mistakenly
+        # (such as via super when trying to override __new__)
+        if not cls._member_map_:
+            raise TypeError("%r has no members defined" % cls)
+        #
+        # still not found -- try _missing_ hook
+        try:
+            exc = None
+            result = cls._missing_(value)
+        except Exception as e:
+            exc = e
+            result = None
+        try:
+            if isinstance(result, cls):
+                return result
+            elif (
+                    Flag is not None and issubclass(cls, Flag)
+                    and cls._boundary_ is EJECT and isinstance(result, int)
+                ):
+                return result
+            else:
+                ve_exc = ValueError("%r is not a valid %s" % (value, cls.__qualname__))
+                if result is None and exc is None:
+>                   raise ve_exc
+E                   ValueError: 'migration' is not a valid ProcessRole
+
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/enum.py:1170: ValueError
+
+The above exception was the direct cause of the following exception:
+
+    @pytest.fixture(scope="session")
+    def app():
+        """Create application for testing."""
+>       application = create_app("testing")
+                      ^^^^^^^^^^^^^^^^^^^^^
+
+tests/conftest.py:32: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+app/__init__.py:141: in create_app
+    init_http_observability(app)
+app/observability/__init__.py:5: in init_http_observability
+    from app.observability.http import init_http_observability as initialize
+app/observability/http.py:12: in <module>
+    from app.observability.metrics import HTTP_DURATION, HTTP_IN_PROGRESS, HTTP_REQUESTS
+app/observability/metrics.py:69: in <module>
+    BUILD_INFO.labels(version=APP_VERSION, role=current_process_role().value).set(1)
+                                                ^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def current_process_role() -> ProcessRole:
+        raw = os.getenv("QD_PROCESS_ROLE", ProcessRole.LEGACY.value).strip().lower()
+        try:
+            return ProcessRole(raw)
+        except ValueError as exc:
+            allowed = ", ".join(role.value for role in ProcessRole)
+>           raise RuntimeError(f"Invalid QD_PROCESS_ROLE={raw!r}; expected one of: {allowed}") from exc
+E           RuntimeError: Invalid QD_PROCESS_ROLE='migration'; expected one of: legacy, api, trading, scheduler, polymarket-observer, celery
+
+app/runtime/roles.py:24: RuntimeError
+_ ERROR at setup of test_ownership_read_reports_supported_coexistence_markets[USStock-alpaca-True] _
+
+    def current_process_role() -> ProcessRole:
+        raw = os.getenv("QD_PROCESS_ROLE", ProcessRole.LEGACY.value).strip().lower()
+        try:
+>           return ProcessRole(raw)
+                   ^^^^^^^^^^^^^^^^
+
+app/runtime/roles.py:21: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/enum.py:751: in __call__
+    return cls.__new__(cls, value)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+cls = <enum 'ProcessRole'>, value = 'migration'
+
+    def __new__(cls, value):
+        # all enum instances are actually created during class construction
+        # without calling this method; this method is called by the metaclass'
+        # __call__ (i.e. Color(3) ), and by pickle
+        if type(value) is cls:
+            # For lookups like Color(Color.RED)
+            return value
+        # by-value search for a matching enum member
+        # see if it's in the reverse mapping (for hashable values)
+        try:
+            return cls._value2member_map_[value]
+        except KeyError:
+            # Not found, no need to do long O(n) search
+            pass
+        except TypeError:
+            # not there, now do long search -- O(n) behavior
+            for member in cls._member_map_.values():
+                if member._value_ == value:
+                    return member
+        # still not found -- verify that members exist, in-case somebody got here mistakenly
+        # (such as via super when trying to override __new__)
+        if not cls._member_map_:
+            raise TypeError("%r has no members defined" % cls)
+        #
+        # still not found -- try _missing_ hook
+        try:
+            exc = None
+            result = cls._missing_(value)
+        except Exception as e:
+            exc = e
+            result = None
+        try:
+            if isinstance(result, cls):
+                return result
+            elif (
+                    Flag is not None and issubclass(cls, Flag)
+                    and cls._boundary_ is EJECT and isinstance(result, int)
+                ):
+                return result
+            else:
+                ve_exc = ValueError("%r is not a valid %s" % (value, cls.__qualname__))
+                if result is None and exc is None:
+>                   raise ve_exc
+E                   ValueError: 'migration' is not a valid ProcessRole
+
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/enum.py:1170: ValueError
+
+The above exception was the direct cause of the following exception:
+
+    @pytest.fixture(scope="session")
+    def app():
+        """Create application for testing."""
+>       application = create_app("testing")
+                      ^^^^^^^^^^^^^^^^^^^^^
+
+tests/conftest.py:32: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+app/__init__.py:141: in create_app
+    init_http_observability(app)
+app/observability/__init__.py:5: in init_http_observability
+    from app.observability.http import init_http_observability as initialize
+app/observability/http.py:12: in <module>
+    from app.observability.metrics import HTTP_DURATION, HTTP_IN_PROGRESS, HTTP_REQUESTS
+app/observability/metrics.py:69: in <module>
+    BUILD_INFO.labels(version=APP_VERSION, role=current_process_role().value).set(1)
+                                                ^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def current_process_role() -> ProcessRole:
+        raw = os.getenv("QD_PROCESS_ROLE", ProcessRole.LEGACY.value).strip().lower()
+        try:
+            return ProcessRole(raw)
+        except ValueError as exc:
+            allowed = ", ".join(role.value for role in ProcessRole)
+>           raise RuntimeError(f"Invalid QD_PROCESS_ROLE={raw!r}; expected one of: {allowed}") from exc
+E           RuntimeError: Invalid QD_PROCESS_ROLE='migration'; expected one of: legacy, api, trading, scheduler, polymarket-observer, celery
+
+app/runtime/roles.py:24: RuntimeError
+_ ERROR at setup of test_alpaca_repair_uses_current_owned_snapshot[NVDA-orders0-] _
+
+    def current_process_role() -> ProcessRole:
+        raw = os.getenv("QD_PROCESS_ROLE", ProcessRole.LEGACY.value).strip().lower()
+        try:
+>           return ProcessRole(raw)
+                   ^^^^^^^^^^^^^^^^
+
+app/runtime/roles.py:21: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/enum.py:751: in __call__
+    return cls.__new__(cls, value)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+cls = <enum 'ProcessRole'>, value = 'migration'
+
+    def __new__(cls, value):
+        # all enum instances are actually created during class construction
+        # without calling this method; this method is called by the metaclass'
+        # __call__ (i.e. Color(3) ), and by pickle
+        if type(value) is cls:
+            # For lookups like Color(Color.RED)
+            return value
+        # by-value search for a matching enum member
+        # see if it's in the reverse mapping (for hashable values)
+        try:
+            return cls._value2member_map_[value]
+        except KeyError:
+            # Not found, no need to do long O(n) search
+            pass
+        except TypeError:
+            # not there, now do long search -- O(n) behavior
+            for member in cls._member_map_.values():
+                if member._value_ == value:
+                    return member
+        # still not found -- verify that members exist, in-case somebody got here mistakenly
+        # (such as via super when trying to override __new__)
+        if not cls._member_map_:
+            raise TypeError("%r has no members defined" % cls)
+        #
+        # still not found -- try _missing_ hook
+        try:
+            exc = None
+            result = cls._missing_(value)
+        except Exception as e:
+            exc = e
+            result = None
+        try:
+            if isinstance(result, cls):
+                return result
+            elif (
+                    Flag is not None and issubclass(cls, Flag)
+                    and cls._boundary_ is EJECT and isinstance(result, int)
+                ):
+                return result
+            else:
+                ve_exc = ValueError("%r is not a valid %s" % (value, cls.__qualname__))
+                if result is None and exc is None:
+>                   raise ve_exc
+E                   ValueError: 'migration' is not a valid ProcessRole
+
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/enum.py:1170: ValueError
+
+The above exception was the direct cause of the following exception:
+
+    @pytest.fixture(scope="session")
+    def app():
+        """Create application for testing."""
+>       application = create_app("testing")
+                      ^^^^^^^^^^^^^^^^^^^^^
+
+tests/conftest.py:32: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+app/__init__.py:141: in create_app
+    init_http_observability(app)
+app/observability/__init__.py:5: in init_http_observability
+    from app.observability.http import init_http_observability as initialize
+app/observability/http.py:12: in <module>
+    from app.observability.metrics import HTTP_DURATION, HTTP_IN_PROGRESS, HTTP_REQUESTS
+app/observability/metrics.py:69: in <module>
+    BUILD_INFO.labels(version=APP_VERSION, role=current_process_role().value).set(1)
+                                                ^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def current_process_role() -> ProcessRole:
+        raw = os.getenv("QD_PROCESS_ROLE", ProcessRole.LEGACY.value).strip().lower()
+        try:
+            return ProcessRole(raw)
+        except ValueError as exc:
+            allowed = ", ".join(role.value for role in ProcessRole)
+>           raise RuntimeError(f"Invalid QD_PROCESS_ROLE={raw!r}; expected one of: {allowed}") from exc
+E           RuntimeError: Invalid QD_PROCESS_ROLE='migration'; expected one of: legacy, api, trading, scheduler, polymarket-observer, celery
+
+app/runtime/roles.py:24: RuntimeError
+_ ERROR at setup of test_alpaca_repair_uses_current_owned_snapshot[AAPL-orders1-positionOwnership.symbolNotOwned] _
+
+    def current_process_role() -> ProcessRole:
+        raw = os.getenv("QD_PROCESS_ROLE", ProcessRole.LEGACY.value).strip().lower()
+        try:
+>           return ProcessRole(raw)
+                   ^^^^^^^^^^^^^^^^
+
+app/runtime/roles.py:21: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/enum.py:751: in __call__
+    return cls.__new__(cls, value)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+cls = <enum 'ProcessRole'>, value = 'migration'
+
+    def __new__(cls, value):
+        # all enum instances are actually created during class construction
+        # without calling this method; this method is called by the metaclass'
+        # __call__ (i.e. Color(3) ), and by pickle
+        if type(value) is cls:
+            # For lookups like Color(Color.RED)
+            return value
+        # by-value search for a matching enum member
+        # see if it's in the reverse mapping (for hashable values)
+        try:
+            return cls._value2member_map_[value]
+        except KeyError:
+            # Not found, no need to do long O(n) search
+            pass
+        except TypeError:
+            # not there, now do long search -- O(n) behavior
+            for member in cls._member_map_.values():
+                if member._value_ == value:
+                    return member
+        # still not found -- verify that members exist, in-case somebody got here mistakenly
+        # (such as via super when trying to override __new__)
+        if not cls._member_map_:
+            raise TypeError("%r has no members defined" % cls)
+        #
+        # still not found -- try _missing_ hook
+        try:
+            exc = None
+            result = cls._missing_(value)
+        except Exception as e:
+            exc = e
+            result = None
+        try:
+            if isinstance(result, cls):
+                return result
+            elif (
+                    Flag is not None and issubclass(cls, Flag)
+                    and cls._boundary_ is EJECT and isinstance(result, int)
+                ):
+                return result
+            else:
+                ve_exc = ValueError("%r is not a valid %s" % (value, cls.__qualname__))
+                if result is None and exc is None:
+>                   raise ve_exc
+E                   ValueError: 'migration' is not a valid ProcessRole
+
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/enum.py:1170: ValueError
+
+The above exception was the direct cause of the following exception:
+
+    @pytest.fixture(scope="session")
+    def app():
+        """Create application for testing."""
+>       application = create_app("testing")
+                      ^^^^^^^^^^^^^^^^^^^^^
+
+tests/conftest.py:32: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+app/__init__.py:141: in create_app
+    init_http_observability(app)
+app/observability/__init__.py:5: in init_http_observability
+    from app.observability.http import init_http_observability as initialize
+app/observability/http.py:12: in <module>
+    from app.observability.metrics import HTTP_DURATION, HTTP_IN_PROGRESS, HTTP_REQUESTS
+app/observability/metrics.py:69: in <module>
+    BUILD_INFO.labels(version=APP_VERSION, role=current_process_role().value).set(1)
+                                                ^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def current_process_role() -> ProcessRole:
+        raw = os.getenv("QD_PROCESS_ROLE", ProcessRole.LEGACY.value).strip().lower()
+        try:
+            return ProcessRole(raw)
+        except ValueError as exc:
+            allowed = ", ".join(role.value for role in ProcessRole)
+>           raise RuntimeError(f"Invalid QD_PROCESS_ROLE={raw!r}; expected one of: {allowed}") from exc
+E           RuntimeError: Invalid QD_PROCESS_ROLE='migration'; expected one of: legacy, api, trading, scheduler, polymarket-observer, celery
+
+app/runtime/roles.py:24: RuntimeError
+_ ERROR at setup of test_alpaca_repair_uses_current_owned_snapshot[NVDA-orders2-positionOwnership.ordersPending] _
+
+    def current_process_role() -> ProcessRole:
+        raw = os.getenv("QD_PROCESS_ROLE", ProcessRole.LEGACY.value).strip().lower()
+        try:
+>           return ProcessRole(raw)
+                   ^^^^^^^^^^^^^^^^
+
+app/runtime/roles.py:21: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/enum.py:751: in __call__
+    return cls.__new__(cls, value)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+cls = <enum 'ProcessRole'>, value = 'migration'
+
+    def __new__(cls, value):
+        # all enum instances are actually created during class construction
+        # without calling this method; this method is called by the metaclass'
+        # __call__ (i.e. Color(3) ), and by pickle
+        if type(value) is cls:
+            # For lookups like Color(Color.RED)
+            return value
+        # by-value search for a matching enum member
+        # see if it's in the reverse mapping (for hashable values)
+        try:
+            return cls._value2member_map_[value]
+        except KeyError:
+            # Not found, no need to do long O(n) search
+            pass
+        except TypeError:
+            # not there, now do long search -- O(n) behavior
+            for member in cls._member_map_.values():
+                if member._value_ == value:
+                    return member
+        # still not found -- verify that members exist, in-case somebody got here mistakenly
+        # (such as via super when trying to override __new__)
+        if not cls._member_map_:
+            raise TypeError("%r has no members defined" % cls)
+        #
+        # still not found -- try _missing_ hook
+        try:
+            exc = None
+            result = cls._missing_(value)
+        except Exception as e:
+            exc = e
+            result = None
+        try:
+            if isinstance(result, cls):
+                return result
+            elif (
+                    Flag is not None and issubclass(cls, Flag)
+                    and cls._boundary_ is EJECT and isinstance(result, int)
+                ):
+                return result
+            else:
+                ve_exc = ValueError("%r is not a valid %s" % (value, cls.__qualname__))
+                if result is None and exc is None:
+>                   raise ve_exc
+E                   ValueError: 'migration' is not a valid ProcessRole
+
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/enum.py:1170: ValueError
+
+The above exception was the direct cause of the following exception:
+
+    @pytest.fixture(scope="session")
+    def app():
+        """Create application for testing."""
+>       application = create_app("testing")
+                      ^^^^^^^^^^^^^^^^^^^^^
+
+tests/conftest.py:32: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+app/__init__.py:141: in create_app
+    init_http_observability(app)
+app/observability/__init__.py:5: in init_http_observability
+    from app.observability.http import init_http_observability as initialize
+app/observability/http.py:12: in <module>
+    from app.observability.metrics import HTTP_DURATION, HTTP_IN_PROGRESS, HTTP_REQUESTS
+app/observability/metrics.py:69: in <module>
+    BUILD_INFO.labels(version=APP_VERSION, role=current_process_role().value).set(1)
+                                                ^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def current_process_role() -> ProcessRole:
+        raw = os.getenv("QD_PROCESS_ROLE", ProcessRole.LEGACY.value).strip().lower()
+        try:
+            return ProcessRole(raw)
+        except ValueError as exc:
+            allowed = ", ".join(role.value for role in ProcessRole)
+>           raise RuntimeError(f"Invalid QD_PROCESS_ROLE={raw!r}; expected one of: {allowed}") from exc
+E           RuntimeError: Invalid QD_PROCESS_ROLE='migration'; expected one of: legacy, api, trading, scheduler, polymarket-observer, celery
+
+app/runtime/roles.py:24: RuntimeError
+=================================== FAILURES ===================================
+________________________ test_export_script_writes_yaml ________________________
+
+tmp_path = PosixPath('/tmp/pytest-of-box/pytest-2/test_export_script_writes_yaml0')
+
+    def test_export_script_writes_yaml(tmp_path):
+        """Regression: export_openapi.py produces parseable YAML."""
+        import subprocess
+        import sys
+    
+        out = tmp_path / "out.yaml"
+        env = os.environ.copy()
+        env["SKIP_STARTUP_HOOKS"] = "1"
+        env["OPENAPI_ENABLED"] = "false"
+        backend_root = os.path.join(os.path.dirname(__file__), "..")
+        script = os.path.join(backend_root, "scripts", "export_openapi.py")
+>       subprocess.run(
+            [sys.executable, script, "--output", str(out)],
+            check=True,
+            cwd=backend_root,
+            env=env,
+        )
+
+tests/test_openapi.py:65: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+input = None, capture_output = False, timeout = None, check = True
+popenargs = (['/tmp/pm-r22-venv/bin/python', '/workspace/quantdinger/wt_r22/backend_api_python/tests/../scripts/export_openapi.py', '--output', '/tmp/pytest-of-box/pytest-2/test_export_script_writes_yaml0/out.yaml'],)
+kwargs = {'cwd': '/workspace/quantdinger/wt_r22/backend_api_python/tests/..', 'env': {'CODEX_MANAGED_PACKAGE_ROOT': '/home/box/...CURSOR_REQUEST_ID='bc6516ed-dbde-455f-a45f-ccd97764e1ce'", 'SAND_BOX_SCRIPT_SYNC_DISABLED': '1', 'COLORTERM': '', ...}}
+
+    def run(*popenargs,
+            input=None, capture_output=False, timeout=None, check=False, **kwargs):
+        """Run command with arguments and return a CompletedProcess instance.
+    
+        The returned instance will have attributes args, returncode, stdout and
+        stderr. By default, stdout and stderr are not captured, and those attributes
+        will be None. Pass stdout=PIPE and/or stderr=PIPE in order to capture them,
+        or pass capture_output=True to capture both.
+    
+        If check is True and the exit code was non-zero, it raises a
+        CalledProcessError. The CalledProcessError object will have the return code
+        in the returncode attribute, and output & stderr attributes if those streams
+        were captured.
+    
+        If timeout (seconds) is given and the process takes too long,
+         a TimeoutExpired exception will be raised.
+    
+        There is an optional argument "input", allowing you to
+        pass bytes or a string to the subprocess's stdin.  If you use this argument
+        you may not also use the Popen constructor's "stdin" argument, as
+        it will be used internally.
+    
+        By default, all communication is in bytes, and therefore any "input" should
+        be bytes, and the stdout and stderr will be bytes. If in text mode, any
+        "input" should be a string, and stdout and stderr will be strings decoded
+        according to locale encoding, or by "encoding" if set. Text mode is
+        triggered by setting any of text, encoding, errors or universal_newlines.
+    
+        The other arguments are the same as for the Popen constructor.
+        """
+        if input is not None:
+            if kwargs.get('stdin') is not None:
+                raise ValueError('stdin and input arguments may not both be used.')
+            kwargs['stdin'] = PIPE
+    
+        if capture_output:
+            if kwargs.get('stdout') is not None or kwargs.get('stderr') is not None:
+                raise ValueError('stdout and stderr arguments may not be used '
+                                 'with capture_output.')
+            kwargs['stdout'] = PIPE
+            kwargs['stderr'] = PIPE
+    
+        with Popen(*popenargs, **kwargs) as process:
+            try:
+                stdout, stderr = process.communicate(input, timeout=timeout)
+            except TimeoutExpired as exc:
+                process.kill()
+                if _mswindows:
+                    # Windows accumulates the output in a single blocking
+                    # read() call run on child threads, with the timeout
+                    # being done in a join() on those threads.  communicate()
+                    # _after_ kill() is required to collect that and add it
+                    # to the exception.
+                    exc.stdout, exc.stderr = process.communicate()
+                else:
+                    # POSIX _communicate already populated the output so
+                    # far into the TimeoutExpired exception.
+                    process.wait()
+                raise
+            except:  # Including KeyboardInterrupt, communicate handled that.
+                process.kill()
+                # We don't call process.wait() as .__exit__ does that for us.
+                raise
+            retcode = process.poll()
+            if check and retcode:
+>               raise CalledProcessError(retcode, process.args,
+                                         output=stdout, stderr=stderr)
+E               subprocess.CalledProcessError: Command '['/tmp/pm-r22-venv/bin/python', '/workspace/quantdinger/wt_r22/backend_api_python/tests/../scripts/export_openapi.py', '--output', '/tmp/pytest-of-box/pytest-2/test_export_script_writes_yaml0/out.yaml']' returned non-zero exit status 1.
+
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/subprocess.py:571: CalledProcessError
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/workspace/quantdinger/wt_r22/backend_api_python/app/runtime/roles.py", line 21, in current_process_role
+    return ProcessRole(raw)
+           ^^^^^^^^^^^^^^^^
+  File "/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/enum.py", line 751, in __call__
+    return cls.__new__(cls, value)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/enum.py", line 1170, in __new__
+    raise ve_exc
+ValueError: 'migration' is not a valid ProcessRole
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/workspace/quantdinger/wt_r22/backend_api_python/tests/../scripts/export_openapi.py", line 121, in <module>
+    main()
+  File "/workspace/quantdinger/wt_r22/backend_api_python/tests/../scripts/export_openapi.py", line 117, in main
+    export_spec(args.output, args.format)
+  File "/workspace/quantdinger/wt_r22/backend_api_python/tests/../scripts/export_openapi.py", line 60, in export_spec
+    app = create_app()
+          ^^^^^^^^^^^^
+  File "/workspace/quantdinger/wt_r22/backend_api_python/app/__init__.py", line 141, in create_app
+    init_http_observability(app)
+  File "/workspace/quantdinger/wt_r22/backend_api_python/app/observability/__init__.py", line 5, in init_http_observability
+    from app.observability.http import init_http_observability as initialize
+  File "/workspace/quantdinger/wt_r22/backend_api_python/app/observability/http.py", line 12, in <module>
+    from app.observability.metrics import HTTP_DURATION, HTTP_IN_PROGRESS, HTTP_REQUESTS
+  File "/workspace/quantdinger/wt_r22/backend_api_python/app/observability/metrics.py", line 69, in <module>
+    BUILD_INFO.labels(version=APP_VERSION, role=current_process_role().value).set(1)
+                                                ^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/quantdinger/wt_r22/backend_api_python/app/runtime/roles.py", line 24, in current_process_role
+    raise RuntimeError(f"Invalid QD_PROCESS_ROLE={raw!r}; expected one of: {allowed}") from exc
+RuntimeError: Invalid QD_PROCESS_ROLE='migration'; expected one of: legacy, api, trading, scheduler, polymarket-observer, celery
+=============================== warnings summary ===============================
+tests/test_agent_backtest_billing.py::test_celery_delivery_does_not_repeat_claimed_or_terminal_job[running]
+tests/test_agent_backtest_billing.py::test_celery_worker_uses_atomic_terminal_helpers[False]
+tests/test_agent_backtest_billing.py::test_celery_worker_uses_atomic_terminal_helpers[True]
+tests/test_strategy_evolution.py::test_celery_persists_structured_evolution_failure
+  /workspace/quantdinger/wt_r22/backend_api_python/tests/../app/tasks/agent_jobs.py:64: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    if not agent_jobs._set_status(job_id, "running", started_at=datetime.utcnow()):
+
+tests/test_crypto_kline_exchange_matrix.py::test_crypto_kline_is_pure_ohlcv_and_preserves_price_precision
+  /workspace/quantdinger/wt_r22/backend_api_python/tests/../app/data_sources/crypto.py:730: DeprecationWarning: datetime.datetime.utcfromtimestamp() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.fromtimestamp(timestamp, datetime.UTC).
+    first_ts = _dt.utcfromtimestamp(klines[0]['time']).isoformat()
+
+tests/test_crypto_kline_exchange_matrix.py::test_crypto_kline_is_pure_ohlcv_and_preserves_price_precision
+  /workspace/quantdinger/wt_r22/backend_api_python/tests/../app/data_sources/crypto.py:731: DeprecationWarning: datetime.datetime.utcfromtimestamp() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.fromtimestamp(timestamp, datetime.UTC).
+    last_ts = _dt.utcfromtimestamp(klines[-1]['time']).isoformat()
+
+tests/test_indicator_signal_alerts.py: 28 warnings
+  /workspace/quantdinger/wt_r22/backend_api_python/tests/../app/services/indicator_signal_alerts.py:763: DeprecationWarning: datetime.datetime.utcfromtimestamp() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.fromtimestamp(timestamp, datetime.UTC).
+    return datetime.utcfromtimestamp(value).isoformat()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_openapi.py::test_export_script_writes_yaml - subprocess.Cal...
+ERROR tests/test_agent_backtest_billing.py::test_submit_returns_billing_receipt_and_uses_token_owner
+ERROR tests/test_agent_backtest_billing.py::test_insufficient_balance_returns_402_with_shortage
+ERROR tests/test_agent_backtest_billing.py::test_database_failure_is_not_accepted_as_a_free_job
+ERROR tests/test_agent_backtest_billing.py::test_dispatch_failure_returns_refund_receipt
+ERROR tests/test_agent_backtest_billing.py::test_invalid_request_is_not_charged
+ERROR tests/test_agent_backtest_billing.py::test_replay_receipt_precedes_concurrency_limit
+ERROR tests/test_agent_backtest_billing.py::test_client_cannot_inject_billing_receipt
+ERROR tests/test_ai_copilot_prompt_library.py::test_saved_prompt_is_scoped_and_normalized
+ERROR tests/test_ai_copilot_prompt_library.py::test_event_tracking_discards_prompt_text_and_unknown_metadata
+ERROR tests/test_ai_copilot_prompt_library.py::test_event_summary_returns_personalized_task_counts
+ERROR tests/test_ai_copilot_prompt_library.py::test_event_tracking_rejects_unknown_event_type
+ERROR tests/test_broker_market_policy.py::TestPolicyEndpoint::test_get_broker_market_returns_full_snapshot
+ERROR tests/test_openapi.py::test_health_endpoints_still_work - RuntimeError:...
+ERROR tests/test_openapi.py::test_api_root - RuntimeError: Invalid QD_PROCESS...
+ERROR tests/test_openapi.py::test_openapi_spec_has_health_paths - RuntimeErro...
+ERROR tests/test_openapi.py::test_openapi_shared_schemas - RuntimeError: Inva...
+ERROR tests/test_polymarket_backtest.py::test_report_auth_and_openapi - Runti...
+ERROR tests/test_strategy_position_ownership_routes.py::test_ownership_read_does_not_expose_internal_exception
+ERROR tests/test_strategy_position_ownership_routes.py::test_ownership_repair_does_not_expose_internal_exception
+ERROR tests/test_strategy_position_ownership_routes.py::test_ownership_repair_rejects_non_numeric_strategy_id
+ERROR tests/test_strategy_position_ownership_routes.py::test_ownership_read_reports_supported_coexistence_markets[spot-binance-True]
+ERROR tests/test_strategy_position_ownership_routes.py::test_ownership_read_reports_supported_coexistence_markets[swap-okx-True]
+ERROR tests/test_strategy_position_ownership_routes.py::test_ownership_read_reports_supported_coexistence_markets[spot-alpaca-True]
+ERROR tests/test_strategy_position_ownership_routes.py::test_ownership_read_reports_supported_coexistence_markets[USStock-alpaca-True]
+ERROR tests/test_strategy_position_ownership_routes.py::test_alpaca_repair_uses_current_owned_snapshot[NVDA-orders0-]
+ERROR tests/test_strategy_position_ownership_routes.py::test_alpaca_repair_uses_current_owned_snapshot[AAPL-orders1-positionOwnership.symbolNotOwned]
+ERROR tests/test_strategy_position_ownership_routes.py::test_alpaca_repair_uses_current_owned_snapshot[NVDA-orders2-positionOwnership.ordersPending]
+1 failed, 712 passed, 19 skipped, 34 warnings, 27 errors in 54.34s

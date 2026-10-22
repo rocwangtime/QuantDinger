@@ -1008,10 +1008,22 @@ def test_group_processes_keep_status_shape_and_reap(monkeypatch):
             assets = [a for m in child.spec['markets'] for a in (m['yesAssetId'], m['noAssetId'])]
             child.send(dict(op='emit', role='primary',
                 raw=json.dumps(wire_event(99, 1, assets, 140, int(time.time()*1000)))))
+            # Populate the per-source stale metric with an actually old book.
+            child.send(dict(op='emit', role='primary',
+                raw=json.dumps(wire_event(100, 1, assets, 140, int(time.time()*1000)-60000))))
         deadline = time.monotonic()+3
         while not all((((c.latest or {}).get('status') or {}).get('ws_continuity') or {}).get(
                 'receive_cadence_ms', {}).get('hot', {}).get('samples', 0) for c in feeds.children.values()):
             assert time.monotonic() < deadline, 'cadence publication did not reach status'
+            for child in feeds.children.values():
+                child.send(dict(op='status'))
+            time.sleep(.01)
+        feeds.publish_status()
+        deadline = time.monotonic()+3
+        while not all(any(m.get('stale_by_source') for m in
+                ((c.latest or {}).get('status') or {}).get('ws_merge_metrics', {}).values())
+                for c in feeds.children.values()):
+            assert time.monotonic() < deadline, 'per-source stale count did not reach status'
             for child in feeds.children.values():
                 child.send(dict(op='status'))
             time.sleep(.01)

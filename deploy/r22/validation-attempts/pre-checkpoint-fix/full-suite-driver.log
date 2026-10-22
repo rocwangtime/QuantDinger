@@ -1,0 +1,9 @@
+742 passed, 19 skipped, 34 warnings in 61.04s (0:01:01)
+750 passed, 2 warnings in 21.44s
+828 passed, 2 warnings in 73.97s (0:01:13)
+849 passed, 2 warnings in 36.36s
+887 passed, 5 skipped, 25 warnings in 25.61s
+994 passed, 2 warnings in 49.11s
+29 passed in 4.20s
+{"exit": 0, "wall_seconds": 46.96588041799987, "user_cpu": 46.738164, "system_cpu": 0.22397499999999998, "max_rss_kb": 65792}
+{"python": "3.12.15", "postgres": "18.0", "database": "isolated PG18 under /tmp, localhost:5432", "test_files": 416, "passed": 5085, "skipped": 24, "failed": 0, "errors": 0, "total": 5109, "cold_simulation": {"exit": 0, "wall_seconds": 46.96588041799987, "user_cpu": 46.738164, "system_cpu": 0.22397499999999998, "max_rss_kb": 65792}}

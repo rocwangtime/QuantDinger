@@ -1,0 +1,9 @@
+before exit 0 valid True gap 7023.132407999583 reason None classification None
+after exit 0 valid True gap 52.769723000892554 reason upstream_lag classification upstream_lag
+quiet exit 0 valid True gap 0 reason None classification None
+pressure exit 0 valid True gap 299.65158500090183 reason upstream_lag classification upstream_lag
+Traceback (most recent call last):
+  File "/workspace/quantdinger/wt_r22/deploy/r22/run-lag-comparison.py", line 37, in <module>
+    assert a['pressure']['result']['reason']=='ingress_pressure'
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError

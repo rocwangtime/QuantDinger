@@ -83,6 +83,7 @@ MERGE_DICTS = frozenset({
     'ws_local_100ms', 'ws_hot_backup_by_group', 'ws_hot_primary_failures',
     'ws_group_rates', 'ws_group_byte_rates', 'ws_group_ingress_byte_rates',
     'ws_rollover_gaps', 'close_reason_counts', 'ws_stage_cpu_seconds', 'ws_backup_book_cpu_seconds',
+    'ws_feed_exchange_lag', 'ws_recording_stale_by_source',
 })
 _STOP_CHILD = threading.Event()
 
@@ -661,7 +662,7 @@ class _Outbox:
         self.pickle_s = 0.0
         self.on_drop = None
 
-    def submit(self, event, owned, received_at):
+    def submit(self, event, owned, received_at, source=None):
         dropped_assets = None
         with self.cv:
             self.seq += 1
@@ -671,14 +672,14 @@ class _Outbox:
                 gap = time.monotonic() - self.kick_at
                 self.kick_seq = None
             self.pubs.append((event, None if owned is None else list(owned),
-                              int(received_at.timestamp() * 1000) if received_at else 0, seq))
+                              int(received_at.timestamp() * 1000) if received_at else 0, seq, source))
             self.high = max(self.high, len(self.pubs))
             if len(self.pubs) > 8000:
                 drop = len(self.pubs) - 4000
                 lost = self.pubs[:drop]
                 del self.pubs[:drop]
                 self.dropped += drop
-                assets = sorted({asset for _event, owned_ids, _stamp, _seq in lost if owned_ids for asset in owned_ids})
+                assets = sorted({asset for _event, owned_ids, _stamp, _seq, _source in lost if owned_ids for asset in owned_ids})
                 self.urgent.append(dict(op='dropped', n=drop, total=self.dropped, assets=assets))
                 dropped_assets = assets
             if gap is not None:
@@ -723,7 +724,8 @@ class _Outbox:
                     self.pickle_s += time.thread_time() - started
                 if pubs:
                     started = time.thread_time()
-                    items = [dict(e=event, o=owned, t=stamp, seq=seq) for event, owned, stamp, seq in pubs]
+                    items = [dict(e=event, o=owned, t=stamp, seq=seq, source=source)
+                             for event, owned, stamp, seq, source in pubs]
                     _send(self.conn, dict(op='pub', items=items))
                     self.pickle_s += time.thread_time() - started
                     self.batches += 1
@@ -1127,11 +1129,12 @@ def _install_forwarder(outbox):
                 self.dirty.intersection_update(self.markets)
                 self.last_eval = {key: value for key, value in self.last_eval.items() if key in self.markets}
 
-        def receive(self, raw, owned=None, received_at=None, inbox=None, epoch=None):
+        def receive(self, raw, owned=None, received_at=None, inbox=None, epoch=None, source=None):
             before = self.messages
-            super().receive(raw, owned, received_at, inbox, epoch)
+            source = source or getattr(inbox, 'source', None)
+            super().receive(raw, owned, received_at, inbox, epoch, source=source)
             if self.messages != before and raw != 'PONG':
-                outbox.submit(raw, owned, received_at or datetime.now(timezone.utc))
+                outbox.submit(raw, owned, received_at or datetime.now(timezone.utc), source=source)
 
     pipeline = ForwardingPipeline()
     observer._PIPELINE = pipeline
@@ -1345,7 +1348,7 @@ class _Feed:
             owned = None if item.get('o') is None else frozenset(item['o'])
             try:
                 started = time.thread_time()
-                pipeline.receive(event, owned, received)
+                pipeline.receive(event, owned, received, source=item.get('source'))
                 self.apply_s += time.thread_time() - started
                 gap = self.gap_pending.pop(item.get('seq'), None)
                 if gap is not None and gap.get('submitted_mono') is not None:

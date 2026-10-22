@@ -1,0 +1,23 @@
+[
+  {
+    "shard": 0,
+    "exit": 0,
+    "summary": "740 passed, 19 skipped, 34 warnings in 57.46s",
+    "files": 70,
+    "elapsed": 59.46768248999979
+  },
+  {
+    "shard": 1,
+    "exit": 0,
+    "summary": "750 passed, 2 warnings in 21.62s",
+    "files": 70,
+    "elapsed": 23.380569247001404
+  },
+  {
+    "shard": 2,
+    "exit": 1,
+    "summary": "1 failed, 827 passed, 2 warnings in 76.97s (0:01:16)",
+    "files": 68,
+    "elapsed": 78.89078461800091
+  }
+]

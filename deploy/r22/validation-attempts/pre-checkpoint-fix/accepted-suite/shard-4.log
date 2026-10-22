@@ -1,0 +1,40 @@
+........................................................................ [  8%]
+........................................................................ [ 16%]
+........................................................................ [ 24%]
+........................................................................ [ 32%]
+.................................sssss.................................. [ 40%]
+........................................................................ [ 48%]
+........................................................................ [ 56%]
+........................................................................ [ 64%]
+........................................................................ [ 72%]
+........................................................................ [ 80%]
+........................................................................ [ 88%]
+........................................................................ [ 96%]
+............................                                             [100%]
+=============================== warnings summary ===============================
+tests/integration/test_polymarket_jobs.py: 14 warnings
+  /workspace/quantdinger/wt_r22/backend_api_python/tests/../app/utils/agent_jobs.py:101: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    created_at = datetime.utcnow()
+
+tests/integration/test_polymarket_jobs.py::test_evidence_is_durable_hash_verified_and_omitted_from_history
+  /workspace/quantdinger/wt_r22/backend_api_python/tests/../app/utils/agent_jobs.py:245: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = datetime.utcnow()
+
+tests/test_ai_market_query_planner.py::test_equity_daily_candles_close_by_exchange_session[HKStock-2026-10-01T16:00:00+00:00-2026-10-02T09:00:00+00:00-True]
+tests/test_ai_market_query_planner.py::test_equity_daily_candles_close_by_exchange_session[HKStock-2026-10-01T16:00:00+00:00-2026-10-02T09:00:00+00:00-True]
+  /tmp/pm-r22-venv/lib/python3.12/site-packages/exchange_calendars/exchange_calendar_xhkg.py:363: DeprecationWarning: The 'generic' unit for NumPy timedelta is deprecated, and will raise an error in the future. This includes implicit conversion of bare integers (e.g. `+ 1`).Please use a specific unit instead.
+    easter_monday = EasterMonday.dates(years[0], years[-1] + 1)
+
+tests/test_strategy_v2_bar_phase_ordering.py::test_opening_callback_entry_is_protected_on_its_entry_bar[101-90-stop_loss_pct=0.05-stop_loss-95-before_trading_start-1d]
+tests/test_strategy_v2_bar_phase_ordering.py::test_opening_callback_entry_is_protected_on_its_entry_bar[101-90-stop_loss_pct=0.05-stop_loss-95-rebalance-1d]
+tests/test_strategy_v2_bar_phase_ordering.py::test_opening_callback_entry_is_protected_on_its_entry_bar[101-90-stop_loss_pct=0.05-stop_loss-95-on_rebalance-1d]
+tests/test_strategy_v2_bar_phase_ordering.py::test_opening_callback_entry_is_protected_on_its_entry_bar[110-99-take_profit_pct=0.05-take_profit-105-before_trading_start-1d]
+tests/test_strategy_v2_bar_phase_ordering.py::test_opening_callback_entry_is_protected_on_its_entry_bar[110-99-take_profit_pct=0.05-take_profit-105-rebalance-1d]
+tests/test_strategy_v2_bar_phase_ordering.py::test_opening_callback_entry_is_protected_on_its_entry_bar[110-99-take_profit_pct=0.05-take_profit-105-on_rebalance-1d]
+tests/test_strategy_v2_bar_phase_ordering.py::test_intrabar_stop_is_visible_at_close_but_cannot_trigger_same_open_reentry
+tests/test_strategy_v2_bar_phase_ordering.py::test_close_callback_can_consume_stop_reason_and_queues_for_next_bar
+  /workspace/quantdinger/wt_r22/backend_api_python/tests/test_strategy_v2_bar_phase_ordering.py:14: Pandas4Warning: 'd' is deprecated and will be removed in a future version, please use 'D' instead.
+    index=pd.date_range("2026-01-01", periods=len(rows), freq=frequency),
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+887 passed, 5 skipped, 25 warnings in 25.61s

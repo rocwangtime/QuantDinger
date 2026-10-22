@@ -1,0 +1,94 @@
+........................................................................ [  8%]
+........................................................................ [ 17%]
+........................................................................ [ 26%]
+........................................................................ [ 34%]
+........................................................................ [ 43%]
+........................................................................ [ 52%]
+........................................................................ [ 60%]
+........................................................................ [ 69%]
+............F........................................................... [ 78%]
+........................................................................ [ 86%]
+........................................................................ [ 95%]
+....................................                                     [100%]
+=================================== FAILURES ===================================
+_______________ test_group_processes_keep_status_shape_and_reap ________________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fbfe3e20d70>
+
+    def test_group_processes_keep_status_shape_and_reap(monkeypatch):
+        inprocess = _inprocess_paths(monkeypatch)
+        monkeypatch.setenv('POLYMARKET_OBSERVER_WS_SHARDS', '4')
+        monkeypatch.setenv('POLYMARKET_OBSERVER_WS_HOT_BACKUP_COUNT', '1')
+        monkeypatch.setenv('POLYMARKET_OBSERVER_WS_HOT_BACKUP_STAGGER_SECONDS', '0')
+        monkeypatch.setenv('POLYMARKET_OBSERVER_WS_COLD_ROTATION_ENABLED', '0')
+        monkeypatch.setenv('POLYMARKET_OBSERVER_WS_REPLAY', '1')
+        monkeypatch.setattr(observer, '_STOP', threading.Event())
+        monkeypatch.setattr(observer, 'STATUS', dict(mode='running', enabled=True, running=True,
+                                                      reconnect_count=0, slow_consumer_count=0))
+        pipeline = observer.Pipeline()
+        pipeline.recording.enabled = False
+        monkeypatch.setattr(observer, '_PIPELINE', pipeline)
+        markets = _markets()
+        pipeline.set_markets(markets)
+        feeds = GroupFeeds(replay=True)
+        monkeypatch.setattr(observer, '_WS', feeds)
+        try:
+            feeds.sync(markets)
+            feeds.wait_ready(20)
+            # Cadence has no maximum after only one initial snapshot. Publish a
+            # second real update before comparing populated diagnostic schemas.
+            for child in feeds.children.values():
+                assets = [a for m in child.spec['markets'] for a in (m['yesAssetId'], m['noAssetId'])]
+                child.send(dict(op='emit', role='primary',
+                    raw=json.dumps(wire_event(99, 1, assets, 140, int(time.time()*1000)))))
+            deadline = time.monotonic()+3
+            while not all((((c.latest or {}).get('status') or {}).get('ws_continuity') or {}).get(
+                    'receive_cadence_ms', {}).get('hot', {}).get('samples', 0) for c in feeds.children.values()):
+                assert time.monotonic() < deadline, 'cadence publication did not reach status'
+                for child in feeds.children.values():
+                    child.send(dict(op='status'))
+                time.sleep(.01)
+            feeds.publish_status()
+            assert observer.STATUS['mode'] == 'ws'
+            assert observer.STATUS['enabled'] is True and observer.STATUS['running'] is True
+            observer.STATUS['mode'] = 'stopping'
+            feeds.publish_status()
+            assert observer.STATUS['mode'] == 'stopping'
+            observer.STATUS['mode'] = 'starting'
+            feeds.publish_status()
+            assert observer.STATUS['mode'] == 'ws'
+            # Reason names are samples. Liveness does not emit shadow-book
+            # blockers (missing_snapshot, catchup); the document shape still matches.
+            def _schema(paths):
+                skip = ('unready_reason_entries.', 'unready_reason_seconds.')
+                return {path for path in paths if not any(part in path for part in skip)}
+            missing = _schema(inprocess) - _schema(_paths(observer.snapshot()))
+>           assert not missing, sorted(missing)[:50]
+E           AssertionError: ['.ws_merge_metrics.#.stale_by_source.#']
+E           assert not {'.ws_merge_metrics.#.stale_by_source.#'}
+
+tests/test_polymarket_ws_fix_b.py:1033: AssertionError
+------------------------------ Captured log call -------------------------------
+2026-10-23 00:56:48,471 - app.services.polymarket.observer - INFO - Polymarket WS open shard=0 standby=False assets=2
+2026-10-23 00:56:48,473 - app.services.polymarket.observer - INFO - Polymarket WS open shard=1 standby=False assets=2
+2026-10-23 00:56:48,474 - app.services.polymarket.observer - INFO - Polymarket WS open shard=2 standby=False assets=2
+2026-10-23 00:56:48,475 - app.services.polymarket.observer - INFO - Polymarket WS open shard=3 standby=False assets=2
+2026-10-23 00:56:48,476 - app.services.polymarket.observer - INFO - Polymarket WS redundant prepare shard=0 assets=2 reserve=False
+2026-10-23 00:56:48,479 - app.services.polymarket.observer - INFO - Polymarket WS open shard=0 standby=True assets=2
+2026-10-23 00:56:48,500 - app.services.polymarket.observer - INFO - Polymarket WS redundant prepare shard=1 assets=2 reserve=False
+2026-10-23 00:56:48,503 - app.services.polymarket.observer - INFO - Polymarket WS open shard=1 standby=True assets=2
+2026-10-23 00:56:48,525 - app.services.polymarket.observer - INFO - Polymarket WS redundant prepare shard=2 assets=2 reserve=False
+2026-10-23 00:56:48,528 - app.services.polymarket.observer - INFO - Polymarket WS open shard=2 standby=True assets=2
+2026-10-23 00:56:48,550 - app.services.polymarket.observer - INFO - Polymarket WS redundant prepare shard=3 assets=2 reserve=False
+2026-10-23 00:56:48,554 - app.services.polymarket.observer - INFO - Polymarket WS open shard=3 standby=True assets=2
+2026-10-23 00:56:48,578 - app.services.polymarket.observer - INFO - Polymarket WS manager local shutdown primary_shards=4
+=============================== warnings summary ===============================
+tests/test_agent_scoring_db.py::test_persist_recover_score_and_refresh_daily_report[plan_only-HKStock-01810.HK-200-0]
+tests/test_agent_scoring_db.py::test_persist_recover_score_and_refresh_daily_report[plan_only-HKStock-01810.HK-200-0]
+  /tmp/pm-r22-venv/lib/python3.12/site-packages/exchange_calendars/exchange_calendar_xhkg.py:363: DeprecationWarning: The 'generic' unit for NumPy timedelta is deprecated, and will raise an error in the future. This includes implicit conversion of bare integers (e.g. `+ 1`).Please use a specific unit instead.
+    easter_monday = EasterMonday.dates(years[0], years[-1] + 1)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_polymarket_ws_fix_b.py::test_group_processes_keep_status_shape_and_reap
+1 failed, 827 passed, 2 warnings in 76.97s (0:01:16)

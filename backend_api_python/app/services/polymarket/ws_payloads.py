@@ -334,6 +334,21 @@ def _fast_envelope(raw):
     return decoded_envelope(data)
 
 
+def feed_envelope(event):
+    """Ingress book/trade tips from parsed public events, including wrappers."""
+    from .recording import events
+    tips = []
+    for kind, payload in events(event):
+        stamp = payload.get('timestamp')
+        rows = (payload.get('price_changes', payload.get('priceChanges', []))
+                if kind == 'price_change' else [payload])
+        for row in rows:
+            asset = str(row.get('asset_id') or row.get('assetId') or '')
+            if asset:
+                tips.append((kind, asset, stamp, row.get('hash')))
+    return tips
+
+
 def decoded_envelope(data):
     """Same public envelope validation, reusing an already decoded frame."""
     objects = data if type(data) is list else (data,)

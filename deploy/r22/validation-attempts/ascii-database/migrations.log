@@ -1,0 +1,37 @@
+[migration] database bootstrap starting
+[migration] schema-init: applying 151085 bytes
+PostgreSQL operation error (UnicodeEncodeError): 'ascii' codec can't encode characters in position 808-813: ordinal not in range(128)
+Traceback (most recent call last):
+  File "/workspace/quantdinger/wt_r22/backend_api_python/app/utils/db_postgres.py", line 747, in get_pg_connection
+    yield pg_conn
+  File "/workspace/quantdinger/wt_r22/backend_api_python/app/utils/db.py", line 273, in _apply_init_sql
+    _apply_migration_component(
+  File "/workspace/quantdinger/wt_r22/backend_api_python/app/utils/db.py", line 227, in _apply_migration_component
+    cur.execute(path.read_text(encoding="utf-8"))
+  File "/workspace/quantdinger/wt_r22/backend_api_python/app/utils/db_postgres.py", line 568, in execute
+    result = self._cursor.execute(query)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/tmp/pm-r22-venv/lib/python3.12/site-packages/psycopg2/extras.py", line 236, in execute
+    return super().execute(query, vars)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'ascii' codec can't encode characters in position 808-813: ordinal not in range(128)
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/workspace/quantdinger/wt_r22/backend_api_python/app/commands/migrate.py", line 15, in <module>
+    main()
+  File "/workspace/quantdinger/wt_r22/backend_api_python/app/commands/migrate.py", line 10, in main
+    init_database(strict_migrations=True)
+  File "/workspace/quantdinger/wt_r22/backend_api_python/app/utils/db.py", line 88, in init_database
+    _apply_init_sql(logger, strict=strict_migrations)
+  File "/workspace/quantdinger/wt_r22/backend_api_python/app/utils/db.py", line 273, in _apply_init_sql
+    _apply_migration_component(
+  File "/workspace/quantdinger/wt_r22/backend_api_python/app/utils/db.py", line 227, in _apply_migration_component
+    cur.execute(path.read_text(encoding="utf-8"))
+  File "/workspace/quantdinger/wt_r22/backend_api_python/app/utils/db_postgres.py", line 568, in execute
+    result = self._cursor.execute(query)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/tmp/pm-r22-venv/lib/python3.12/site-packages/psycopg2/extras.py", line 236, in execute
+    return super().execute(query, vars)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'ascii' codec can't encode characters in position 808-813: ordinal not in range(128)

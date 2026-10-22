@@ -1,0 +1,110 @@
+{
+  "event26": [
+    {
+      "file": "h0021/mon_2350_0013.txt",
+      "line": 804,
+      "event": {
+        "business_event_id": 26,
+        "interruption_at": "2026-10-22T16:08:44.163985+00:00",
+        "merged_gap_ms": 7259.584,
+        "source_silence_ms": 45.400000000000006,
+        "merged_receipt_gap_ms": 7054.53,
+        "detection_to_promotion_ms": 5.439744010800496,
+        "detection_to_first_valid_publication_ms": 240.79766900104005
+      }
+    },
+    {
+      "file": "h0021/mon_2350_0013.txt",
+      "line": 826,
+      "event": {
+        "business_event_id": 26,
+        "interruption_at": "2026-10-22T16:08:44.163985+00:00",
+        "merged_gap_ms": 7259.584,
+        "source_silence_ms": 45.400000000000006,
+        "merged_receipt_gap_ms": 7054.53,
+        "detection_to_promotion_ms": 5.439744010800496,
+        "detection_to_first_valid_publication_ms": 240.79766900104005
+      }
+    },
+    {
+      "file": "h0021/mon_2350_0013.txt",
+      "line": 848,
+      "event": {
+        "business_event_id": 26,
+        "interruption_at": "2026-10-22T16:08:44.163985+00:00",
+        "merged_gap_ms": 7259.584,
+        "source_silence_ms": 45.400000000000006,
+        "merged_receipt_gap_ms": 7054.53,
+        "detection_to_promotion_ms": 5.439744010800496,
+        "detection_to_first_valid_publication_ms": 240.79766900104005
+      }
+    },
+    {
+      "file": "h0021/mon_2350_0013.txt",
+      "line": 870,
+      "event": {
+        "business_event_id": 26,
+        "interruption_at": "2026-10-22T16:08:44.163985+00:00",
+        "merged_gap_ms": 7259.584,
+        "source_silence_ms": 45.400000000000006,
+        "merged_receipt_gap_ms": 7054.53,
+        "detection_to_promotion_ms": 5.439744010800496,
+        "detection_to_first_valid_publication_ms": 240.79766900104005
+      }
+    },
+    {
+      "file": "h0021/mon_2350_0013.txt",
+      "line": 892,
+      "event": {
+        "business_event_id": 26,
+        "interruption_at": "2026-10-22T16:08:44.163985+00:00",
+        "merged_gap_ms": 7259.584,
+        "source_silence_ms": 45.400000000000006,
+        "merged_receipt_gap_ms": 7054.53,
+        "detection_to_promotion_ms": 5.439744010800496,
+        "detection_to_first_valid_publication_ms": 240.79766900104005
+      }
+    },
+    {
+      "file": "h0021/mon_2350_0013.txt",
+      "line": 914,
+      "event": {
+        "business_event_id": 26,
+        "interruption_at": "2026-10-22T16:08:44.163985+00:00",
+        "merged_gap_ms": 7259.584,
+        "source_silence_ms": 45.400000000000006,
+        "merged_receipt_gap_ms": 7054.53,
+        "detection_to_promotion_ms": 5.439744010800496,
+        "detection_to_first_valid_publication_ms": 240.79766900104005
+      }
+    },
+    {
+      "file": "h0021/mon_2350_0013.txt",
+      "line": 936,
+      "event": {
+        "business_event_id": 26,
+        "interruption_at": "2026-10-22T16:08:44.163985+00:00",
+        "merged_gap_ms": 7259.584,
+        "source_silence_ms": 45.400000000000006,
+        "merged_receipt_gap_ms": 7054.53,
+        "detection_to_promotion_ms": 5.439744010800496,
+        "detection_to_first_valid_publication_ms": 240.79766900104005
+      }
+    },
+    {
+      "file": "h0021/mon_2350_0013.txt",
+      "line": 958,
+      "event": {
+        "business_event_id": 26,
+        "interruption_at": "2026-10-22T16:08:44.163985+00:00",
+        "merged_gap_ms": 7259.584,
+        "source_silence_ms": 45.400000000000006,
+        "merged_receipt_gap_ms": 7054.53,
+        "detection_to_promotion_ms": 5.439744010800496,
+        "detection_to_first_valid_publication_ms": 240.79766900104005
+      }
+    }
+  ],
+  "stage_cpu": null,
+  "backup_stage": null
+}

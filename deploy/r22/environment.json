@@ -1,0 +1,8 @@
+{
+  "python": "3.12.15",
+  "machine": "x86_64",
+  "allowed_cpus": 8,
+  "replay_confined_cpus": 4,
+  "postgres": "postgres (PostgreSQL) 18.0",
+  "requirements_lock_sha256": "a254ff9580ccb736ba1c8a3e2643251ea5db8df52283474bec96623dc70f461c"
+}

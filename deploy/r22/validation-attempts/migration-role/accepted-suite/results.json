@@ -1,0 +1,9 @@
+[
+  {
+    "shard": 0,
+    "exit": 1,
+    "summary": "1 failed, 712 passed, 19 skipped, 34 warnings, 27 errors in 54.34s",
+    "files": 70,
+    "elapsed": 56.14643370200065
+  }
+]

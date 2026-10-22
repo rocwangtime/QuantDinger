@@ -1,0 +1,113 @@
+{
+  "base": "c6acf50",
+  "modules": {
+    "backend_api_python/app/services/polymarket/__init__.py": {
+      "before": "036a5422f845aad71aa9988bb3ae5421a66d9b38c2bfda03041411cc03355977",
+      "after": "036a5422f845aad71aa9988bb3ae5421a66d9b38c2bfda03041411cc03355977"
+    },
+    "backend_api_python/app/services/polymarket/account_api.py": {
+      "before": "2afffdfb0f22b3009922f6ade81c2bd26790f9dec28529dd6d4d770b16096ad2",
+      "after": "2afffdfb0f22b3009922f6ade81c2bd26790f9dec28529dd6d4d770b16096ad2"
+    },
+    "backend_api_python/app/services/polymarket/account_history.py": {
+      "before": "5242eb99787210cbef2326d06092ae7aff695729c4ed8db0922dd5fe56923ec3",
+      "after": "5242eb99787210cbef2326d06092ae7aff695729c4ed8db0922dd5fe56923ec3"
+    },
+    "backend_api_python/app/services/polymarket/account_model.py": {
+      "before": "ff5d737f4769760019ace42d9b6fb8ea25d4ad77a4c7f957225a1f6384468422",
+      "after": "ff5d737f4769760019ace42d9b6fb8ea25d4ad77a4c7f957225a1f6384468422"
+    },
+    "backend_api_python/app/services/polymarket/backtest.py": {
+      "before": "89a85cba00f6427b2e4f3436919ca7cb50605cfea9a467b472512077f90dd239",
+      "after": "89a85cba00f6427b2e4f3436919ca7cb50605cfea9a467b472512077f90dd239"
+    },
+    "backend_api_python/app/services/polymarket/client.py": {
+      "before": "3cf105e1cb0309bd15660e804a3cb32d4e4ef28e39505c17dddee34caed9d12d",
+      "after": "66b85b6967282f0b7bea32fd0ca7d21b2a8ccc41f57dbb66e47557f5db810e8b"
+    },
+    "backend_api_python/app/services/polymarket/eligibility.py": {
+      "before": "4734e91d61515f542ce2a084a272f81cabf5d0830a025bb1820de7b8e07d6f1e",
+      "after": "4734e91d61515f542ce2a084a272f81cabf5d0830a025bb1820de7b8e07d6f1e"
+    },
+    "backend_api_python/app/services/polymarket/engine.py": {
+      "before": "e1019a1f57cf6283abd36dc64bfa4429711e4dc0e8531028622399f4912c408b",
+      "after": "e1019a1f57cf6283abd36dc64bfa4429711e4dc0e8531028622399f4912c408b"
+    },
+    "backend_api_python/app/services/polymarket/jobs.py": {
+      "before": "91aef9539ee7310e9d9e92c43693ce7758ba8df8f047300b1d7219199003d64d",
+      "after": "91aef9539ee7310e9d9e92c43693ce7758ba8df8f047300b1d7219199003d64d"
+    },
+    "backend_api_python/app/services/polymarket/maker.py": {
+      "before": "3e1d6fdefcc27539a87a34df02ddafda64c22c57ae2cfb9c2688292817cb5744",
+      "after": "3e1d6fdefcc27539a87a34df02ddafda64c22c57ae2cfb9c2688292817cb5744"
+    },
+    "backend_api_python/app/services/polymarket/maker_model.py": {
+      "before": "cbabaea55cc70bed5dea09d8256afbddce5a5eee3777bbce3dea045cbcde90dd",
+      "after": "cbabaea55cc70bed5dea09d8256afbddce5a5eee3777bbce3dea045cbcde90dd"
+    },
+    "backend_api_python/app/services/polymarket/maker_replay.py": {
+      "before": "ccc4b1d40001f46493d2e4cb65a1fcbd6514aabeb430b3524ac3792ba6d32238",
+      "after": "ccc4b1d40001f46493d2e4cb65a1fcbd6514aabeb430b3524ac3792ba6d32238"
+    },
+    "backend_api_python/app/services/polymarket/observer.py": {
+      "before": "1516f5e47fa67092925815d4832f769f049842155326777d7a98fc87faef0cf0",
+      "after": "cb042718ba7956f4998cde63a2e6e811858dba9285aab916ef510845ea9df48d"
+    },
+    "backend_api_python/app/services/polymarket/observer_db.py": {
+      "before": "d14195503e49036505431a2bd73aa6afaa5e79c579d2ea184eec3eaa5366c12a",
+      "after": "d14195503e49036505431a2bd73aa6afaa5e79c579d2ea184eec3eaa5366c12a"
+    },
+    "backend_api_python/app/services/polymarket/paper_account.py": {
+      "before": "3be5c9bd930bbf5596972b268823b4abe06de8649ff3de6ba4092f03a7d47ede",
+      "after": "9da0b5005a63fab99b93d8255922f0aed7300cc0a339df5535e6e276c0674d88"
+    },
+    "backend_api_python/app/services/polymarket/recording.py": {
+      "before": "aed2e6a939d589f87c9529d49730bcca00ddb16d6c9b7d1b64783645eed6f180",
+      "after": "c0df01b6a80ae5ca04692ea105f3dfcf5086abf9d88f28beafc7befcd8f4b67f"
+    },
+    "backend_api_python/app/services/polymarket/updown.py": {
+      "before": "a914846f3723e7bb4f66027d9dae9c4ebc15fc00bcf24489d1ea3314c26385e6",
+      "after": "a914846f3723e7bb4f66027d9dae9c4ebc15fc00bcf24489d1ea3314c26385e6"
+    },
+    "backend_api_python/app/services/polymarket/ws_balance.py": {
+      "before": "3e29d5d48618e1f3d92d6f676f9e90d3c525bcf0137b9ee252e4b9530ec46543",
+      "after": "3e29d5d48618e1f3d92d6f676f9e90d3c525bcf0137b9ee252e4b9530ec46543"
+    },
+    "backend_api_python/app/services/polymarket/ws_group_process.py": {
+      "before": "2fefd0aed641aa7d84f7414511bd6e8d9eabfff775f6fb788a9ebceeb16ed3ee",
+      "after": "694846ddd43923893fa88e5430e98086a15ce6d916fe529b38f93e9b20823473"
+    },
+    "backend_api_python/app/services/polymarket/ws_payloads.py": {
+      "before": "a558df0c4aa571ade818ecf35b194d3013facf75531cc87e9583ea2c9a53822c",
+      "after": "ca0cdb6d7a03b5b97412e095c8e37c3b5a2473a19dc96c1d4635fae1113f3c5d"
+    },
+    "backend_api_python/app/services/polymarket/ws_recovery.py": {
+      "before": "bf105a5754226270da159b699631b2b98e196c36985cb1bd104132602d9962ec",
+      "after": "bf105a5754226270da159b699631b2b98e196c36985cb1bd104132602d9962ec"
+    },
+    "backend_api_python/app/services/polymarket/ws_redundancy.py": {
+      "before": "ac0e871560a189321e9cd78a5ae075eb36618f40969b6bccee29afd623d13534",
+      "after": "2b8bc495dc926b60129869afe3ca50890aeff86ed5a5ec6d6841819539956011"
+    },
+    "backend_api_python/app/services/polymarket/ws_rollover_gap.py": {
+      "before": "e5fbca28f4e457749215c11ecb1691921ad1f75ab19d379f616d73f5d33e5cfe",
+      "after": "e5fbca28f4e457749215c11ecb1691921ad1f75ab19d379f616d73f5d33e5cfe"
+    },
+    "backend_api_python/app/services/polymarket/ws_rotation.py": {
+      "before": "a9e1343e650dddb7fc2bb6d4ed51876649c498671ca02a971ba1deeb22d0ddd1",
+      "after": "72921a33a1ceafadb5a032b0d0b1dfb5c3f54d43fed0a1f42b44accbb19bd439"
+    },
+    "backend_api_python/app/services/polymarket/ws_subscriptions.py": {
+      "before": "d8d4511a7e716a15dc3868b75b2a227c01cbd4df97afa0845cd3f0bd8e609750",
+      "after": "d8d4511a7e716a15dc3868b75b2a227c01cbd4df97afa0845cd3f0bd8e609750"
+    },
+    "backend_api_python/app/services/polymarket/ws_transport.py": {
+      "before": "13c1eebacaba1f1a9a285eb46aec9db49893cdd238725aa78a7237308db28040",
+      "after": "13c1eebacaba1f1a9a285eb46aec9db49893cdd238725aa78a7237308db28040"
+    },
+    "backend_api_python/app/services/polymarket/ws_warm_book.py": {
+      "before": "0327b1cb01807a9d1d7b371cc8c564f1a0876a9956ff7d3dd3fc4feedb796f83",
+      "after": "0327b1cb01807a9d1d7b371cc8c564f1a0876a9956ff7d3dd3fc4feedb796f83"
+    }
+  }
+}

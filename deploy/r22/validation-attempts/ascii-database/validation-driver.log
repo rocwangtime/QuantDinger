@@ -1,0 +1,10 @@
+waiting for server to start.... done
+server started
+waiting for server to shut down.... done
+server stopped
+Traceback (most recent call last):
+  File "/workspace/quantdinger/wt_r22/deploy/r22/run-validation.py", line 17, in <module>
+    subprocess.run([sys.executable,'-m','app.commands.migrate'],cwd=backend,env=env,stdout=log,stderr=subprocess.STDOUT,check=True)
+  File "/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['/tmp/pm-r22-venv/bin/python', '-m', 'app.commands.migrate']' returned non-zero exit status 1.

@@ -20,6 +20,27 @@ from .ws_balance import setting
 SOURCE_GENERATIONS = 8
 
 
+def source_increment(counts, source):
+    source = source or 'unknown'
+    counts[source] = counts.get(source, 0) + 1
+    while len(counts) > 65:
+        key = next(k for k in counts if k != 'retired_sources')
+        counts['retired_sources'] = counts.get('retired_sources', 0) + counts.pop(key)
+
+
+def business_gap_counts(events, wall):
+    """All acceptance counters use final publication gaps, unique interruption IDs."""
+    unique = {e.get('business_event_id', id(e)): e for e in events
+              if e.get('at', wall) > wall-3600}
+    rows = list(unique.values())
+    return dict(business_gaps_rolling_hour=sum(e.get('merged_gap_final') is True
+                    and e.get('merged_gap_ms') is not None and e['merged_gap_ms'] > 1500 for e in rows),
+                pending_rolling_hour=sum(not e.get('merged_gap_final') for e in rows),
+                rolling_hour_count_capped=bool(getattr(events, 'maxlen', None) == len(events)
+                    and events and events[0].get('at', 0) > wall-3600),
+                events_rolling_hour=len(rows))
+
+
 class HotBackupCoverage:
     """Session cumulative coverage; a split series needs every shard ready.
 
@@ -113,6 +134,7 @@ class FeedMerge:
         self.levels = OrderedDict()
         self.seen = OrderedDict()
         self.duplicates = self.stale = self.evictions = 0
+        self.stale_by_source = {}
 
     def prune(self, assets):
         self.latest = {a: at for a, at in self.latest.items() if a in assets}
@@ -179,6 +201,7 @@ class FeedMerge:
                     floor = level_at
                 if (backup and at is None) or (at is not None and floor is not None and at < floor):
                     self.stale += 1
+                    source_increment(self.stale_by_source, source)
                     continue
                 if self.deduplicate:
                     if not self.unique(row, source, duplicate_key):
@@ -203,6 +226,7 @@ class FeedMerge:
             floor = self.latest.get(asset)
             if (backup and at is None) or (at is not None and floor is not None and at < floor):
                 self.stale += 1
+                source_increment(self.stale_by_source, source)
                 return {}
             if not self.unique(event, source):
                 return {}
@@ -558,6 +582,10 @@ class DoubleKicks:
         self.events = deque(maxlen=256)
         self.total = 0
         self.hourly = OrderedDict()
+        self.primary_events = deque(maxlen=256)
+
+    def watch_primary(self, group, source, event, now):
+        self.primary_events.append((group, source, event, now))
 
     def record(self, group, source, role, code, now, wall):
         recent = self.recent.setdefault(group, deque(maxlen=8))
@@ -578,12 +606,26 @@ class DoubleKicks:
                      roles=[peer['role'], role], codes=[peer['code'], code],
                      separation_ms=(now-peer['monotonic'])*1000, merged_gap_ms=None,
                      merged_gap_final=False, business_gap=False)
+        event['_window_events'] = [e for g, s, e, t in self.primary_events
+            if g == group and s in (peer['source'], source) and peer['monotonic']-15 <= t <= now]
         self.events.append(event)
         return event
 
     def metrics(self, wall):
         hour = int(wall // 3600) * 3600
-        events = [e for e in self.events if e['at'] > wall-3600]
+        all_events = []
+        for event in self.events:
+            members = [event, *event.get('_window_events', [])]
+            measured = [e for e in members if e.get('merged_gap_ms') is not None]
+            row = {k:v for k,v in event.items() if not k.startswith('_')}
+            if measured:
+                row['merged_gap_ms'] = max(e['merged_gap_ms'] for e in measured)
+            row['merged_gap_final'] = all(e.get('merged_gap_final') for e in members)
+            row['business_gap'] = (row['merged_gap_ms'] > 1500 if row['merged_gap_final'] else None)
+            row['window_interruption_ids'] = sorted({e['business_event_id'] for e in members if 'business_event_id' in e})
+            row['gap_definition'] = BUSINESS_GAP_DEFINITION + ' Double kick: maximum of associated interruptions across both kicks.'
+            all_events.append(row)
+        events = [e for e in all_events if e['at'] > wall-3600]
         return dict(total=self.total, count_current_hour=self.hourly.get(hour, 0),
                     count_rolling_hour=len(events),
                     rolling_hour_count_capped=bool(self.total > len(self.events) and self.events and self.events[0]['at'] > wall-3600),
@@ -591,7 +633,7 @@ class DoubleKicks:
                     business_gaps_current_hour=sum(e.get('business_gap') is True for e in events if e['at'] >= hour),
                     pending_rolling_hour=sum(not e['merged_gap_final'] for e in events),
                     hourly=[dict(hour_start_utc=h, count=n) for h, n in self.hourly.items()],
-                    events=[{k: v for k, v in e.items() if not k.startswith('_')} for e in self.events], pair_window_seconds=15)
+                    events=all_events, pair_window_seconds=15)
 
 
 class DisconnectClusters:

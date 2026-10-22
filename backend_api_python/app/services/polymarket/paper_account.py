@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from app.utils.db import get_db_connection
 from . import account_model as model
 from .account_history import BookHistory, coherent_pair, max_pair_skew_ms
-from .client import CLOB, PublicClient
+from .client import PublicClient
 from .engine import ZERO, _array, digest, number, public
 from .updown import timestamp
 
@@ -67,7 +67,7 @@ class Latency:
     def measure(self, client, now):
         began = time.monotonic()
         try:
-            client._json('GET', CLOB + '/time')
+            client.server_time()
             self.samples.append((time.monotonic() - began) * 1000)
             self.error = None
         except ValueError as exc:

@@ -1,0 +1,33 @@
+........................................................................ [  9%]
+........................................................................ [ 18%]
+..................................................................ssssss [ 28%]
+sssssss................................................................. [ 37%]
+........................................................................ [ 47%]
+........................................................................ [ 56%]
+........................................................................ [ 66%]
+........................................................................ [ 75%]
+......................ssssss............................................ [ 85%]
+........................................................................ [ 94%]
+.........................................                                [100%]
+=============================== warnings summary ===============================
+tests/test_agent_backtest_billing.py::test_celery_delivery_does_not_repeat_claimed_or_terminal_job[running]
+tests/test_agent_backtest_billing.py::test_celery_worker_uses_atomic_terminal_helpers[False]
+tests/test_agent_backtest_billing.py::test_celery_worker_uses_atomic_terminal_helpers[True]
+tests/test_strategy_evolution.py::test_celery_persists_structured_evolution_failure
+  /workspace/quantdinger/wt_r22/backend_api_python/tests/../app/tasks/agent_jobs.py:64: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    if not agent_jobs._set_status(job_id, "running", started_at=datetime.utcnow()):
+
+tests/test_crypto_kline_exchange_matrix.py::test_crypto_kline_is_pure_ohlcv_and_preserves_price_precision
+  /workspace/quantdinger/wt_r22/backend_api_python/tests/../app/data_sources/crypto.py:730: DeprecationWarning: datetime.datetime.utcfromtimestamp() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.fromtimestamp(timestamp, datetime.UTC).
+    first_ts = _dt.utcfromtimestamp(klines[0]['time']).isoformat()
+
+tests/test_crypto_kline_exchange_matrix.py::test_crypto_kline_is_pure_ohlcv_and_preserves_price_precision
+  /workspace/quantdinger/wt_r22/backend_api_python/tests/../app/data_sources/crypto.py:731: DeprecationWarning: datetime.datetime.utcfromtimestamp() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.fromtimestamp(timestamp, datetime.UTC).
+    last_ts = _dt.utcfromtimestamp(klines[-1]['time']).isoformat()
+
+tests/test_indicator_signal_alerts.py: 28 warnings
+  /workspace/quantdinger/wt_r22/backend_api_python/tests/../app/services/indicator_signal_alerts.py:763: DeprecationWarning: datetime.datetime.utcfromtimestamp() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.fromtimestamp(timestamp, datetime.UTC).
+    return datetime.utcfromtimestamp(value).isoformat()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+742 passed, 19 skipped, 34 warnings in 59.31s

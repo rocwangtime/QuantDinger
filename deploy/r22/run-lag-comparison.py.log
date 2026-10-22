@@ -1,0 +1,4 @@
+before exit 0 valid True gap 7022.419314000217 reason None classification None
+after exit 0 valid True gap 31.379549000121187 reason upstream_lag classification upstream_lag
+quiet exit 0 valid True gap 0 reason None classification None
+pressure exit 0 valid True gap 975.8393770007388 reason ingress_pressure classification ingress_pressure
