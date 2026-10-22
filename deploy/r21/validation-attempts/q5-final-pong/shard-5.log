@@ -1,0 +1,42 @@
+........................................................................ [  7%]
+........................................................................ [ 15%]
+........................................................................ [ 23%]
+........................................................................ [ 31%]
+........................................................................ [ 39%]
+........................................................................ [ 47%]
+........................................................................ [ 55%]
+....................................................................F... [ 63%]
+........................................................................ [ 71%]
+........................................................................ [ 79%]
+........................................................................ [ 87%]
+........................................................................ [ 95%]
+............................................                             [100%]
+=================================== FAILURES ===================================
+______________________ test_stall_drops_frames_and_pongs _______________________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f5582627260>
+
+    def test_stall_drops_frames_and_pongs(monkeypatch):
+        got = []
+        sock = ReplaySocket('x', on_message=lambda s, raw: got.append(raw))
+        sock.emit('a'); sock.send('PING')
+        pongs = sock.transport.pongs
+        sock.stall(0.2)
+        sock.emit('b'); sock.send('PING')
+>       assert got == ['a'] and sock.transport.pongs == pongs
+E       AssertionError: assert (['a', 'PONG'] == ['a']
+E         
+E         Left contains one more item: 'PONG'
+E         Use -v to get more diff)
+
+tests/test_polymarket_replay_stall.py:10: AssertionError
+=============================== warnings summary ===============================
+tests/test_agent_symbol_config.py::test_percent_edges_cooldown_daily_cap_blackout_and_stale
+tests/test_agent_symbol_config.py::test_percent_edges_cooldown_daily_cap_blackout_and_stale
+  /tmp/pm-r20-venv/lib/python3.12/site-packages/exchange_calendars/exchange_calendar_xhkg.py:363: DeprecationWarning: The 'generic' unit for NumPy timedelta is deprecated, and will raise an error in the future. This includes implicit conversion of bare integers (e.g. `+ 1`).Please use a specific unit instead.
+    easter_monday = EasterMonday.dates(years[0], years[-1] + 1)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_polymarket_replay_stall.py::test_stall_drops_frames_and_pongs
+1 failed, 907 passed, 2 warnings in 168.12s (0:02:48)

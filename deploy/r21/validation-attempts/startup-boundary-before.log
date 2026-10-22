@@ -1,0 +1,24 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+____ test_mid_window_process_start_does_not_invent_a_pre_start_business_gap ____
+
+    def test_mid_window_process_start_does_not_invent_a_pre_start_business_gap():
+        gaps = RolloverGaps()
+        gaps.observe([market('startup', T-timedelta(minutes=3))], {}, T)
+        assert gaps.current['up_down:BTC:5m']['phase'] == 'startup'
+>       assert gaps.baselines({'startupy', 'startupn'}) == {}
+E       AssertionError: assert {'startupy': ...event_id': 1}} == {}
+E         
+E         Left contains 2 more items:
+E         {'startupn': {'published_at': datetime.datetime(2026, 10, 21, 23, 37, tzinfo=datetime.timezone.utc),
+E                       'received': datetime.datetime(2026, 10, 21, 23, 37, tzinfo=datetime.timezone.utc),
+E                       'rollover_event_id': 1},
+E          'startupy': {'published_at': datetime.datetime(2026, 10, 21, 23, 37, tzinfo=datetime.timezone.utc),
+E                       'received': datetime.datetime(2026, 10, 21, 23, 37, tzinfo=datetime.timezone.utc),
+E                       'rollover_event_id': 1}}
+E         Use -v to get more diff
+
+backend_api_python/tests/test_polymarket_ws_r21_rollover.py:68: AssertionError
+=========================== short test summary info ============================
+FAILED backend_api_python/tests/test_polymarket_ws_r21_rollover.py::test_mid_window_process_start_does_not_invent_a_pre_start_business_gap
+1 failed in 0.11s
