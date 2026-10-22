@@ -99,7 +99,7 @@ def test_transport_reads_count_as_bytes():
     assert manager.states[0] is primary and not primary.get('data_suspect')
 
 
-def test_second_silence_within_60s_is_suppressed():
+def test_new_primary_is_protected_even_within_previous_primary_cooldown():
     manager, primary, backup, *_ = _wired()
     _feed(manager, backup)
     primary['inbox'].last_byte_at = time.monotonic() - 5
@@ -111,11 +111,10 @@ def test_second_silence_within_60s_is_suppressed():
     _feed(manager2, backup2)
     primary2['inbox'].last_byte_at = time.monotonic() - 5
     _feed(manager2, backup2)
-    assert manager2.states[0] is primary2 and not primary2.get('data_suspect')
+    assert manager2.states[0] is backup2 and primary2.get('data_suspect')
     row = manager2.liveness_silence['up_down:BTC:5m']
-    assert row['promotions'] == 1 and row['suppressed'] == 1
-    # After the cooldown it fires again.
-    row['_last_monotonic'] -= observer.LIVENESS_SILENCE_COOLDOWN_SECONDS
+    assert row['promotions'] == 2 and row['suppressed'] == 0
+    # The failed physical generation cannot trigger a duplicate promotion.
     _feed(manager2, backup2)
     assert manager2.states[0] is backup2 and row['promotions'] == 2
 

@@ -1,0 +1,63 @@
+{
+  "phase": "before",
+  "scenario": "four-second",
+  "exit": 0,
+  "wall_seconds": 4.900772406999749,
+  "result": {
+    "scenario": "four-second",
+    "wall_seconds": 4.3881056390018784,
+    "switches": [
+      {
+        "source": "feed-3",
+        "seconds": 4.060161163000885
+      }
+    ],
+    "second_stall_seconds": null,
+    "max_publication_gap_ms": 4366.676071000256,
+    "rest_requests": 1,
+    "failures": [
+      {
+        "code": null,
+        "ready_backup_at_kick": true,
+        "ready_backups": 2,
+        "takeover_gap_ms": 4369.012,
+        "receipt_gap_ms": 4369.012,
+        "recovery": "rest_snapshot",
+        "gap_final": true,
+        "merged_gap_ms": 4368.156,
+        "merged_gap_final": true,
+        "gap_definition": "Per interruption event and asset: last merged publication before interruption to first merged publication after interruption; max across affected assets. Publication wall time, not socket receipt, detection-to-takeover, physical silence or ordinary interarrival. Missing baseline is unmeasured, never zero.",
+        "interruption_at": "2026-10-22T01:39:21.969872+00:00",
+        "business_event_id": 1,
+        "unmeasured_assets": [],
+        "gap_measurement": "measured",
+        "source_silence_ms": 4012.6730000000002,
+        "merged_receipt_gap_ms": 4012.6730000000002,
+        "reason": "byte_silence",
+        "gap_maximum": {
+          "ms": 4368.156,
+          "asset": "ay",
+          "at": "2026-10-22T01:39:22.326013+00:00"
+        },
+        "business_gap": false,
+        "detection_to_takeover_ms": 356.33754299851716
+      }
+    ],
+    "silence": {
+      "up_down:ETH:5m": {
+        "promotions": 1,
+        "suppressed": 0,
+        "last_at": "2026-10-22T01:39:21.969353+00:00",
+        "last_silence_s": 4.012,
+        "_last_monotonic": 21464.146845293,
+        "reason": "byte_silence",
+        "tcp_pending_bytes": null,
+        "queue_wait_seconds": 0,
+        "remote_silence_confirmed": false
+      }
+    },
+    "final_book_sha256": "e2d6bf133ac61c257ea928800f8ebfa42c009b2efb6d8a7b60ccacee9972fc22",
+    "expected_book_sha256": "e2d6bf133ac61c257ea928800f8ebfa42c009b2efb6d8a7b60ccacee9972fc22",
+    "valid": true
+  }
+}
