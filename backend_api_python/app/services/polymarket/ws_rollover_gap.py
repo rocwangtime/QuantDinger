@@ -53,7 +53,7 @@ class RolloverGaps:
     def baselines(self, assets):
         result = {}
         for row in self.current.values():
-            if not row['scheduled_start']:
+            if row['phase'] != 'rollover' or not row['scheduled_start']:
                 continue
             at = datetime.fromisoformat(row['scheduled_start'])
             for asset in set(row['assets']) & set(assets):

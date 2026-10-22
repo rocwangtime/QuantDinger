@@ -34,6 +34,7 @@ def test_interruption_at_new_market_start_uses_explicit_named_boundary(monkeypat
     clock = type('Clock', (), {'now': staticmethod(lambda tz: T+timedelta(seconds=1))})
     monkeypatch.setattr(ws_redundancy, 'datetime', clock)
     continuity = FeedContinuity()
+    continuity.rollover.observe([market('old', T-timedelta(minutes=5))], {}, T-timedelta(minutes=5))
     continuity.rollover.observe([market('new')], {}, T)
     event = {}
     continuity.watch_gap(event, {'newy', 'newn'})
@@ -59,3 +60,10 @@ def test_parent_status_keeps_both_groups_rollover_measurements():
         group = f'up_down:{asset}:5m'
         parts.append(dict(key=group, shard_base=i, status={'ws_rollover_gaps': {group: dict(events=[dict(event_id=1)])}}))
     assert len(merge_feed_status(parts)['ws_rollover_gaps']) == 2
+
+
+def test_mid_window_process_start_does_not_invent_a_pre_start_business_gap():
+    gaps = RolloverGaps()
+    gaps.observe([market('startup', T-timedelta(minutes=3))], {}, T)
+    assert gaps.current['up_down:BTC:5m']['phase'] == 'startup'
+    assert gaps.baselines({'startupy', 'startupn'}) == {}
