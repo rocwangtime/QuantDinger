@@ -1,0 +1,878 @@
+EEEEEEEEEEEEEEE......................................................... [  9%]
+........................................................................ [ 18%]
+..................................................................ssssss [ 28%]
+sssssss................................................................. [ 37%]
+........................................................................ [ 47%]
+........................................................................ [ 56%]
+........................................................................ [ 66%]
+........................................................................ [ 75%]
+....................ssssss...........................E.................. [ 85%]
+........................................................................ [ 94%]
+............EEEEE......EEE.............                                  [100%]
+==================================== ERRORS ====================================
+_ ERROR at setup of test_failed_projection_rolls_back_all_writes_and_replays[config] _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f91f68645c0>
+
+    @pytest.fixture
+    def projection(monkeypatch):
+        dsn = os.environ.get("QD_TEST_POSTGRES_DSN")
+        if not dsn:
+            pytest.skip("QD_TEST_POSTGRES_DSN is required")
+        import psycopg2
+        from psycopg2 import sql
+        from psycopg2.pool import ThreadedConnectionPool
+    
+        schema = "qd_projection_test_" + uuid4().hex
+        admin = psycopg2.connect(dsn)
+        admin.autocommit = True
+        tables = (
+            "pending_orders",
+            "qd_live_order_bindings",
+            "qd_strategy_positions",
+            "qd_strategy_trades",
+            "strategy_order_fills",
+            "strategy_order_intents",
+        )
+        pool = None
+        try:
+            with admin.cursor() as cur:
+                cur.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
+                for table in tables:
+>                   cur.execute(
+                        sql.SQL("CREATE TABLE {}.{} (LIKE public.{} INCLUDING DEFAULTS INCLUDING INDEXES)").format(
+                            sql.Identifier(schema), sql.Identifier(table), sql.Identifier(table)
+                        )
+                    )
+E                   psycopg2.errors.UndefinedTable: relation "public.pending_orders" does not exist
+E                   LINE 1: ...67f584a20bdb122db8589be81"."pending_orders" (LIKE public."pe...
+E                                                                                ^
+
+tests/integration/test_execution_projection_atomic.py:45: UndefinedTable
+_ ERROR at setup of test_failed_projection_rolls_back_all_writes_and_replays[after_position] _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f91f686e6f0>
+
+    @pytest.fixture
+    def projection(monkeypatch):
+        dsn = os.environ.get("QD_TEST_POSTGRES_DSN")
+        if not dsn:
+            pytest.skip("QD_TEST_POSTGRES_DSN is required")
+        import psycopg2
+        from psycopg2 import sql
+        from psycopg2.pool import ThreadedConnectionPool
+    
+        schema = "qd_projection_test_" + uuid4().hex
+        admin = psycopg2.connect(dsn)
+        admin.autocommit = True
+        tables = (
+            "pending_orders",
+            "qd_live_order_bindings",
+            "qd_strategy_positions",
+            "qd_strategy_trades",
+            "strategy_order_fills",
+            "strategy_order_intents",
+        )
+        pool = None
+        try:
+            with admin.cursor() as cur:
+                cur.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
+                for table in tables:
+>                   cur.execute(
+                        sql.SQL("CREATE TABLE {}.{} (LIKE public.{} INCLUDING DEFAULTS INCLUDING INDEXES)").format(
+                            sql.Identifier(schema), sql.Identifier(table), sql.Identifier(table)
+                        )
+                    )
+E                   psycopg2.errors.UndefinedTable: relation "public.pending_orders" does not exist
+E                   LINE 1: ...f098b49d0becdd38bfd07bafb"."pending_orders" (LIKE public."pe...
+E                                                                                ^
+
+tests/integration/test_execution_projection_atomic.py:45: UndefinedTable
+_ ERROR at setup of test_failed_projection_rolls_back_all_writes_and_replays[after_trade] _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f91f686f2c0>
+
+    @pytest.fixture
+    def projection(monkeypatch):
+        dsn = os.environ.get("QD_TEST_POSTGRES_DSN")
+        if not dsn:
+            pytest.skip("QD_TEST_POSTGRES_DSN is required")
+        import psycopg2
+        from psycopg2 import sql
+        from psycopg2.pool import ThreadedConnectionPool
+    
+        schema = "qd_projection_test_" + uuid4().hex
+        admin = psycopg2.connect(dsn)
+        admin.autocommit = True
+        tables = (
+            "pending_orders",
+            "qd_live_order_bindings",
+            "qd_strategy_positions",
+            "qd_strategy_trades",
+            "strategy_order_fills",
+            "strategy_order_intents",
+        )
+        pool = None
+        try:
+            with admin.cursor() as cur:
+                cur.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
+                for table in tables:
+>                   cur.execute(
+                        sql.SQL("CREATE TABLE {}.{} (LIKE public.{} INCLUDING DEFAULTS INCLUDING INDEXES)").format(
+                            sql.Identifier(schema), sql.Identifier(table), sql.Identifier(table)
+                        )
+                    )
+E                   psycopg2.errors.UndefinedTable: relation "public.pending_orders" does not exist
+E                   LINE 1: ...15bc7470d9043b0715bdb4a0c"."pending_orders" (LIKE public."pe...
+E                                                                                ^
+
+tests/integration/test_execution_projection_atomic.py:45: UndefinedTable
+_ ERROR at setup of test_failed_projection_rolls_back_all_writes_and_replays[runtime_sql] _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f91f686fe90>
+
+    @pytest.fixture
+    def projection(monkeypatch):
+        dsn = os.environ.get("QD_TEST_POSTGRES_DSN")
+        if not dsn:
+            pytest.skip("QD_TEST_POSTGRES_DSN is required")
+        import psycopg2
+        from psycopg2 import sql
+        from psycopg2.pool import ThreadedConnectionPool
+    
+        schema = "qd_projection_test_" + uuid4().hex
+        admin = psycopg2.connect(dsn)
+        admin.autocommit = True
+        tables = (
+            "pending_orders",
+            "qd_live_order_bindings",
+            "qd_strategy_positions",
+            "qd_strategy_trades",
+            "strategy_order_fills",
+            "strategy_order_intents",
+        )
+        pool = None
+        try:
+            with admin.cursor() as cur:
+                cur.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
+                for table in tables:
+>                   cur.execute(
+                        sql.SQL("CREATE TABLE {}.{} (LIKE public.{} INCLUDING DEFAULTS INCLUDING INDEXES)").format(
+                            sql.Identifier(schema), sql.Identifier(table), sql.Identifier(table)
+                        )
+                    )
+E                   psycopg2.errors.UndefinedTable: relation "public.pending_orders" does not exist
+E                   LINE 1: ...c6c3547568ee8d4cad16ba78e"."pending_orders" (LIKE public."pe...
+E                                                                                ^
+
+tests/integration/test_execution_projection_atomic.py:45: UndefinedTable
+___ ERROR at setup of test_concurrent_duplicate_event_is_applied_once[True] ____
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f91f6876ae0>
+
+    @pytest.fixture
+    def projection(monkeypatch):
+        dsn = os.environ.get("QD_TEST_POSTGRES_DSN")
+        if not dsn:
+            pytest.skip("QD_TEST_POSTGRES_DSN is required")
+        import psycopg2
+        from psycopg2 import sql
+        from psycopg2.pool import ThreadedConnectionPool
+    
+        schema = "qd_projection_test_" + uuid4().hex
+        admin = psycopg2.connect(dsn)
+        admin.autocommit = True
+        tables = (
+            "pending_orders",
+            "qd_live_order_bindings",
+            "qd_strategy_positions",
+            "qd_strategy_trades",
+            "strategy_order_fills",
+            "strategy_order_intents",
+        )
+        pool = None
+        try:
+            with admin.cursor() as cur:
+                cur.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
+                for table in tables:
+>                   cur.execute(
+                        sql.SQL("CREATE TABLE {}.{} (LIKE public.{} INCLUDING DEFAULTS INCLUDING INDEXES)").format(
+                            sql.Identifier(schema), sql.Identifier(table), sql.Identifier(table)
+                        )
+                    )
+E                   psycopg2.errors.UndefinedTable: relation "public.pending_orders" does not exist
+E                   LINE 1: ...d5b864b49bc9972ff8c3ce94f"."pending_orders" (LIKE public."pe...
+E                                                                                ^
+
+tests/integration/test_execution_projection_atomic.py:45: UndefinedTable
+___ ERROR at setup of test_concurrent_duplicate_event_is_applied_once[False] ___
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f91f686c050>
+
+    @pytest.fixture
+    def projection(monkeypatch):
+        dsn = os.environ.get("QD_TEST_POSTGRES_DSN")
+        if not dsn:
+            pytest.skip("QD_TEST_POSTGRES_DSN is required")
+        import psycopg2
+        from psycopg2 import sql
+        from psycopg2.pool import ThreadedConnectionPool
+    
+        schema = "qd_projection_test_" + uuid4().hex
+        admin = psycopg2.connect(dsn)
+        admin.autocommit = True
+        tables = (
+            "pending_orders",
+            "qd_live_order_bindings",
+            "qd_strategy_positions",
+            "qd_strategy_trades",
+            "strategy_order_fills",
+            "strategy_order_intents",
+        )
+        pool = None
+        try:
+            with admin.cursor() as cur:
+                cur.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
+                for table in tables:
+>                   cur.execute(
+                        sql.SQL("CREATE TABLE {}.{} (LIKE public.{} INCLUDING DEFAULTS INCLUDING INDEXES)").format(
+                            sql.Identifier(schema), sql.Identifier(table), sql.Identifier(table)
+                        )
+                    )
+E                   psycopg2.errors.UndefinedTable: relation "public.pending_orders" does not exist
+E                   LINE 1: ...788fe4d2cbc7908cb27778fc9"."pending_orders" (LIKE public."pe...
+E                                                                                ^
+
+tests/integration/test_execution_projection_atomic.py:45: UndefinedTable
+_ ERROR at setup of test_subsequent_partial_fill_keeps_quantity_and_fees_consistent _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f91f686f6b0>
+
+    @pytest.fixture
+    def projection(monkeypatch):
+        dsn = os.environ.get("QD_TEST_POSTGRES_DSN")
+        if not dsn:
+            pytest.skip("QD_TEST_POSTGRES_DSN is required")
+        import psycopg2
+        from psycopg2 import sql
+        from psycopg2.pool import ThreadedConnectionPool
+    
+        schema = "qd_projection_test_" + uuid4().hex
+        admin = psycopg2.connect(dsn)
+        admin.autocommit = True
+        tables = (
+            "pending_orders",
+            "qd_live_order_bindings",
+            "qd_strategy_positions",
+            "qd_strategy_trades",
+            "strategy_order_fills",
+            "strategy_order_intents",
+        )
+        pool = None
+        try:
+            with admin.cursor() as cur:
+                cur.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
+                for table in tables:
+>                   cur.execute(
+                        sql.SQL("CREATE TABLE {}.{} (LIKE public.{} INCLUDING DEFAULTS INCLUDING INDEXES)").format(
+                            sql.Identifier(schema), sql.Identifier(table), sql.Identifier(table)
+                        )
+                    )
+E                   psycopg2.errors.UndefinedTable: relation "public.pending_orders" does not exist
+E                   LINE 1: ...bfd644555b60941ca4eb2815f"."pending_orders" (LIKE public."pe...
+E                                                                                ^
+
+tests/integration/test_execution_projection_atomic.py:45: UndefinedTable
+__ ERROR at setup of test_rest_writer_and_ws_share_the_posted_baseline[True] ___
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f91f686edb0>
+
+    @pytest.fixture
+    def projection(monkeypatch):
+        dsn = os.environ.get("QD_TEST_POSTGRES_DSN")
+        if not dsn:
+            pytest.skip("QD_TEST_POSTGRES_DSN is required")
+        import psycopg2
+        from psycopg2 import sql
+        from psycopg2.pool import ThreadedConnectionPool
+    
+        schema = "qd_projection_test_" + uuid4().hex
+        admin = psycopg2.connect(dsn)
+        admin.autocommit = True
+        tables = (
+            "pending_orders",
+            "qd_live_order_bindings",
+            "qd_strategy_positions",
+            "qd_strategy_trades",
+            "strategy_order_fills",
+            "strategy_order_intents",
+        )
+        pool = None
+        try:
+            with admin.cursor() as cur:
+                cur.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
+                for table in tables:
+>                   cur.execute(
+                        sql.SQL("CREATE TABLE {}.{} (LIKE public.{} INCLUDING DEFAULTS INCLUDING INDEXES)").format(
+                            sql.Identifier(schema), sql.Identifier(table), sql.Identifier(table)
+                        )
+                    )
+E                   psycopg2.errors.UndefinedTable: relation "public.pending_orders" does not exist
+E                   LINE 1: ...0cf964f9287f61e426b60675c"."pending_orders" (LIKE public."pe...
+E                                                                                ^
+
+tests/integration/test_execution_projection_atomic.py:45: UndefinedTable
+__ ERROR at setup of test_rest_writer_and_ws_share_the_posted_baseline[False] __
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f91f6877770>
+
+    @pytest.fixture
+    def projection(monkeypatch):
+        dsn = os.environ.get("QD_TEST_POSTGRES_DSN")
+        if not dsn:
+            pytest.skip("QD_TEST_POSTGRES_DSN is required")
+        import psycopg2
+        from psycopg2 import sql
+        from psycopg2.pool import ThreadedConnectionPool
+    
+        schema = "qd_projection_test_" + uuid4().hex
+        admin = psycopg2.connect(dsn)
+        admin.autocommit = True
+        tables = (
+            "pending_orders",
+            "qd_live_order_bindings",
+            "qd_strategy_positions",
+            "qd_strategy_trades",
+            "strategy_order_fills",
+            "strategy_order_intents",
+        )
+        pool = None
+        try:
+            with admin.cursor() as cur:
+                cur.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
+                for table in tables:
+>                   cur.execute(
+                        sql.SQL("CREATE TABLE {}.{} (LIKE public.{} INCLUDING DEFAULTS INCLUDING INDEXES)").format(
+                            sql.Identifier(schema), sql.Identifier(table), sql.Identifier(table)
+                        )
+                    )
+E                   psycopg2.errors.UndefinedTable: relation "public.pending_orders" does not exist
+E                   LINE 1: ...d9a7448b3806898769ec989be"."pending_orders" (LIKE public."pe...
+E                                                                                ^
+
+tests/integration/test_execution_projection_atomic.py:45: UndefinedTable
+___ ERROR at setup of test_observed_fill_without_ledger_recovers_after_crash ___
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f91f68748f0>
+
+    @pytest.fixture
+    def projection(monkeypatch):
+        dsn = os.environ.get("QD_TEST_POSTGRES_DSN")
+        if not dsn:
+            pytest.skip("QD_TEST_POSTGRES_DSN is required")
+        import psycopg2
+        from psycopg2 import sql
+        from psycopg2.pool import ThreadedConnectionPool
+    
+        schema = "qd_projection_test_" + uuid4().hex
+        admin = psycopg2.connect(dsn)
+        admin.autocommit = True
+        tables = (
+            "pending_orders",
+            "qd_live_order_bindings",
+            "qd_strategy_positions",
+            "qd_strategy_trades",
+            "strategy_order_fills",
+            "strategy_order_intents",
+        )
+        pool = None
+        try:
+            with admin.cursor() as cur:
+                cur.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
+                for table in tables:
+>                   cur.execute(
+                        sql.SQL("CREATE TABLE {}.{} (LIKE public.{} INCLUDING DEFAULTS INCLUDING INDEXES)").format(
+                            sql.Identifier(schema), sql.Identifier(table), sql.Identifier(table)
+                        )
+                    )
+E                   psycopg2.errors.UndefinedTable: relation "public.pending_orders" does not exist
+E                   LINE 1: ...f8dae4862968688c7db417d52"."pending_orders" (LIKE public."pe...
+E                                                                                ^
+
+tests/integration/test_execution_projection_atomic.py:45: UndefinedTable
+__ ERROR at setup of test_late_cumulative_fee_and_rebate_do_not_add_quantity ___
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f91f6875670>
+
+    @pytest.fixture
+    def projection(monkeypatch):
+        dsn = os.environ.get("QD_TEST_POSTGRES_DSN")
+        if not dsn:
+            pytest.skip("QD_TEST_POSTGRES_DSN is required")
+        import psycopg2
+        from psycopg2 import sql
+        from psycopg2.pool import ThreadedConnectionPool
+    
+        schema = "qd_projection_test_" + uuid4().hex
+        admin = psycopg2.connect(dsn)
+        admin.autocommit = True
+        tables = (
+            "pending_orders",
+            "qd_live_order_bindings",
+            "qd_strategy_positions",
+            "qd_strategy_trades",
+            "strategy_order_fills",
+            "strategy_order_intents",
+        )
+        pool = None
+        try:
+            with admin.cursor() as cur:
+                cur.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
+                for table in tables:
+>                   cur.execute(
+                        sql.SQL("CREATE TABLE {}.{} (LIKE public.{} INCLUDING DEFAULTS INCLUDING INDEXES)").format(
+                            sql.Identifier(schema), sql.Identifier(table), sql.Identifier(table)
+                        )
+                    )
+E                   psycopg2.errors.UndefinedTable: relation "public.pending_orders" does not exist
+E                   LINE 1: ...7e3e04092a94450479d978457"."pending_orders" (LIKE public."pe...
+E                                                                                ^
+
+tests/integration/test_execution_projection_atomic.py:45: UndefinedTable
+__ ERROR at setup of test_compound_order_ws_does_not_compare_one_leg_to_total __
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f91f6876780>
+
+    @pytest.fixture
+    def projection(monkeypatch):
+        dsn = os.environ.get("QD_TEST_POSTGRES_DSN")
+        if not dsn:
+            pytest.skip("QD_TEST_POSTGRES_DSN is required")
+        import psycopg2
+        from psycopg2 import sql
+        from psycopg2.pool import ThreadedConnectionPool
+    
+        schema = "qd_projection_test_" + uuid4().hex
+        admin = psycopg2.connect(dsn)
+        admin.autocommit = True
+        tables = (
+            "pending_orders",
+            "qd_live_order_bindings",
+            "qd_strategy_positions",
+            "qd_strategy_trades",
+            "strategy_order_fills",
+            "strategy_order_intents",
+        )
+        pool = None
+        try:
+            with admin.cursor() as cur:
+                cur.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
+                for table in tables:
+>                   cur.execute(
+                        sql.SQL("CREATE TABLE {}.{} (LIKE public.{} INCLUDING DEFAULTS INCLUDING INDEXES)").format(
+                            sql.Identifier(schema), sql.Identifier(table), sql.Identifier(table)
+                        )
+                    )
+E                   psycopg2.errors.UndefinedTable: relation "public.pending_orders" does not exist
+E                   LINE 1: ...552aa40dcaff1726c1d27bfbd"."pending_orders" (LIKE public."pe...
+E                                                                                ^
+
+tests/integration/test_execution_projection_atomic.py:45: UndefinedTable
+_ ERROR at setup of test_missing_execution_price_does_not_reuse_previous_fill_and_can_replay _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f91e89358e0>
+
+    @pytest.fixture
+    def projection(monkeypatch):
+        dsn = os.environ.get("QD_TEST_POSTGRES_DSN")
+        if not dsn:
+            pytest.skip("QD_TEST_POSTGRES_DSN is required")
+        import psycopg2
+        from psycopg2 import sql
+        from psycopg2.pool import ThreadedConnectionPool
+    
+        schema = "qd_projection_test_" + uuid4().hex
+        admin = psycopg2.connect(dsn)
+        admin.autocommit = True
+        tables = (
+            "pending_orders",
+            "qd_live_order_bindings",
+            "qd_strategy_positions",
+            "qd_strategy_trades",
+            "strategy_order_fills",
+            "strategy_order_intents",
+        )
+        pool = None
+        try:
+            with admin.cursor() as cur:
+                cur.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
+                for table in tables:
+>                   cur.execute(
+                        sql.SQL("CREATE TABLE {}.{} (LIKE public.{} INCLUDING DEFAULTS INCLUDING INDEXES)").format(
+                            sql.Identifier(schema), sql.Identifier(table), sql.Identifier(table)
+                        )
+                    )
+E                   psycopg2.errors.UndefinedTable: relation "public.pending_orders" does not exist
+E                   LINE 1: ...aedeb4023bd94234a5a7fba00"."pending_orders" (LIKE public."pe...
+E                                                                                ^
+
+tests/integration/test_execution_projection_atomic.py:45: UndefinedTable
+___ ERROR at setup of test_cumulative_order_average_prices_only_the_new_fill ___
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f91f56f5f10>
+
+    @pytest.fixture
+    def projection(monkeypatch):
+        dsn = os.environ.get("QD_TEST_POSTGRES_DSN")
+        if not dsn:
+            pytest.skip("QD_TEST_POSTGRES_DSN is required")
+        import psycopg2
+        from psycopg2 import sql
+        from psycopg2.pool import ThreadedConnectionPool
+    
+        schema = "qd_projection_test_" + uuid4().hex
+        admin = psycopg2.connect(dsn)
+        admin.autocommit = True
+        tables = (
+            "pending_orders",
+            "qd_live_order_bindings",
+            "qd_strategy_positions",
+            "qd_strategy_trades",
+            "strategy_order_fills",
+            "strategy_order_intents",
+        )
+        pool = None
+        try:
+            with admin.cursor() as cur:
+                cur.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
+                for table in tables:
+>                   cur.execute(
+                        sql.SQL("CREATE TABLE {}.{} (LIKE public.{} INCLUDING DEFAULTS INCLUDING INDEXES)").format(
+                            sql.Identifier(schema), sql.Identifier(table), sql.Identifier(table)
+                        )
+                    )
+E                   psycopg2.errors.UndefinedTable: relation "public.pending_orders" does not exist
+E                   LINE 1: ...d7ab3477996e7555811faab32"."pending_orders" (LIKE public."pe...
+E                                                                                ^
+
+tests/integration/test_execution_projection_atomic.py:45: UndefinedTable
+_ ERROR at setup of test_futu_duplicate_order_push_after_rest_fill_does_not_add_trade _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f91e7ae0920>
+
+    @pytest.fixture
+    def projection(monkeypatch):
+        dsn = os.environ.get("QD_TEST_POSTGRES_DSN")
+        if not dsn:
+            pytest.skip("QD_TEST_POSTGRES_DSN is required")
+        import psycopg2
+        from psycopg2 import sql
+        from psycopg2.pool import ThreadedConnectionPool
+    
+        schema = "qd_projection_test_" + uuid4().hex
+        admin = psycopg2.connect(dsn)
+        admin.autocommit = True
+        tables = (
+            "pending_orders",
+            "qd_live_order_bindings",
+            "qd_strategy_positions",
+            "qd_strategy_trades",
+            "strategy_order_fills",
+            "strategy_order_intents",
+        )
+        pool = None
+        try:
+            with admin.cursor() as cur:
+                cur.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
+                for table in tables:
+>                   cur.execute(
+                        sql.SQL("CREATE TABLE {}.{} (LIKE public.{} INCLUDING DEFAULTS INCLUDING INDEXES)").format(
+                            sql.Identifier(schema), sql.Identifier(table), sql.Identifier(table)
+                        )
+                    )
+E                   psycopg2.errors.UndefinedTable: relation "public.pending_orders" does not exist
+E                   LINE 1: ...218304704ada58f70b672b925"."pending_orders" (LIKE public."pe...
+E                                                                                ^
+
+tests/integration/test_execution_projection_atomic.py:45: UndefinedTable
+_ ERROR at setup of test_scheduler_query_selects_monitored_rows_through_real_wrapper _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f91e60b5640>
+
+    @pytest.fixture
+    def db(monkeypatch):
+        import psycopg2
+        from psycopg2.extras import RealDictCursor
+        url=os.getenv('AUTOMATION_TEST_DATABASE_URL','')
+        if not url:
+            pytest.skip('Disposable PostgreSQL not supplied')
+        from urllib.parse import urlparse
+        parsed=urlparse(url)
+        assert parsed.hostname in {'127.0.0.1','localhost'} and parsed.path=='/qd_automation_test'
+        schema='automation_test_'+uuid.uuid4().hex
+        conn=psycopg2.connect(url)
+        conn.autocommit=True
+        with conn.cursor() as cur:
+            cur.execute('SHOW server_version_num')
+            assert 180000 <= int(cur.fetchone()[0]) < 190000, 'Tests require local PostgreSQL 18'
+            cur.execute(f'CREATE SCHEMA {schema}')
+            cur.execute(f'SET search_path TO {schema}')
+>           cur.execute((Path(__file__).parents[1]/'migrations/init.sql').read_text())
+E           UnicodeEncodeError: 'ascii' codec can't encode characters in position 808-813: ordinal not in range(128)
+
+tests/test_agent_automations_db.py:40: UnicodeEncodeError
+_____ ERROR at setup of test_resolution_latest_completed_and_stale_partial _____
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f91f58232f0>
+
+    @pytest.fixture
+    def db(monkeypatch):
+        import psycopg2
+        from psycopg2.extras import RealDictCursor
+        url=os.getenv('AUTOMATION_TEST_DATABASE_URL','')
+        if not url:
+            pytest.skip('Disposable PostgreSQL not supplied')
+        from urllib.parse import urlparse
+        parsed=urlparse(url)
+        assert parsed.hostname in {'127.0.0.1','localhost'} and parsed.path=='/qd_automation_test'
+        schema='automation_test_'+uuid.uuid4().hex
+        conn=psycopg2.connect(url)
+        conn.autocommit=True
+        with conn.cursor() as cur:
+            cur.execute('SHOW server_version_num')
+            assert 180000 <= int(cur.fetchone()[0]) < 190000, 'Tests require local PostgreSQL 18'
+            cur.execute(f'CREATE SCHEMA {schema}')
+            cur.execute(f'SET search_path TO {schema}')
+>           cur.execute((Path(__file__).parents[1]/'migrations/init.sql').read_text())
+E           UnicodeEncodeError: 'ascii' codec can't encode characters in position 808-813: ordinal not in range(128)
+
+tests/test_agent_automations_db.py:40: UnicodeEncodeError
+__ ERROR at setup of test_runtime_rejects_before_market_or_orders[paper_auto] __
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f91e725da60>
+
+    @pytest.fixture
+    def db(monkeypatch):
+        import psycopg2
+        from psycopg2.extras import RealDictCursor
+        url=os.getenv('AUTOMATION_TEST_DATABASE_URL','')
+        if not url:
+            pytest.skip('Disposable PostgreSQL not supplied')
+        from urllib.parse import urlparse
+        parsed=urlparse(url)
+        assert parsed.hostname in {'127.0.0.1','localhost'} and parsed.path=='/qd_automation_test'
+        schema='automation_test_'+uuid.uuid4().hex
+        conn=psycopg2.connect(url)
+        conn.autocommit=True
+        with conn.cursor() as cur:
+            cur.execute('SHOW server_version_num')
+            assert 180000 <= int(cur.fetchone()[0]) < 190000, 'Tests require local PostgreSQL 18'
+            cur.execute(f'CREATE SCHEMA {schema}')
+            cur.execute(f'SET search_path TO {schema}')
+>           cur.execute((Path(__file__).parents[1]/'migrations/init.sql').read_text())
+E           UnicodeEncodeError: 'ascii' codec can't encode characters in position 808-813: ordinal not in range(128)
+
+tests/test_agent_automations_db.py:40: UnicodeEncodeError
+_____ ERROR at setup of test_runtime_rejects_before_market_or_orders[live] _____
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f91f57eb170>
+
+    @pytest.fixture
+    def db(monkeypatch):
+        import psycopg2
+        from psycopg2.extras import RealDictCursor
+        url=os.getenv('AUTOMATION_TEST_DATABASE_URL','')
+        if not url:
+            pytest.skip('Disposable PostgreSQL not supplied')
+        from urllib.parse import urlparse
+        parsed=urlparse(url)
+        assert parsed.hostname in {'127.0.0.1','localhost'} and parsed.path=='/qd_automation_test'
+        schema='automation_test_'+uuid.uuid4().hex
+        conn=psycopg2.connect(url)
+        conn.autocommit=True
+        with conn.cursor() as cur:
+            cur.execute('SHOW server_version_num')
+            assert 180000 <= int(cur.fetchone()[0]) < 190000, 'Tests require local PostgreSQL 18'
+            cur.execute(f'CREATE SCHEMA {schema}')
+            cur.execute(f'SET search_path TO {schema}')
+>           cur.execute((Path(__file__).parents[1]/'migrations/init.sql').read_text())
+E           UnicodeEncodeError: 'ascii' codec can't encode characters in position 808-813: ordinal not in range(128)
+
+tests/test_agent_automations_db.py:40: UnicodeEncodeError
+__ ERROR at setup of test_runtime_rejects_before_market_or_orders[PAPER_AUTO] __
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f91e7506690>
+
+    @pytest.fixture
+    def db(monkeypatch):
+        import psycopg2
+        from psycopg2.extras import RealDictCursor
+        url=os.getenv('AUTOMATION_TEST_DATABASE_URL','')
+        if not url:
+            pytest.skip('Disposable PostgreSQL not supplied')
+        from urllib.parse import urlparse
+        parsed=urlparse(url)
+        assert parsed.hostname in {'127.0.0.1','localhost'} and parsed.path=='/qd_automation_test'
+        schema='automation_test_'+uuid.uuid4().hex
+        conn=psycopg2.connect(url)
+        conn.autocommit=True
+        with conn.cursor() as cur:
+            cur.execute('SHOW server_version_num')
+            assert 180000 <= int(cur.fetchone()[0]) < 190000, 'Tests require local PostgreSQL 18'
+            cur.execute(f'CREATE SCHEMA {schema}')
+            cur.execute(f'SET search_path TO {schema}')
+>           cur.execute((Path(__file__).parents[1]/'migrations/init.sql').read_text())
+E           UnicodeEncodeError: 'ascii' codec can't encode characters in position 808-813: ordinal not in range(128)
+
+tests/test_agent_automations_db.py:40: UnicodeEncodeError
+_ ERROR at setup of test_missing_shortlist_skips_without_decisions_or_mutations _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f91e723cb30>
+
+    @pytest.fixture
+    def db(monkeypatch):
+        import psycopg2
+        from psycopg2.extras import RealDictCursor
+        url=os.getenv('AUTOMATION_TEST_DATABASE_URL','')
+        if not url:
+            pytest.skip('Disposable PostgreSQL not supplied')
+        from urllib.parse import urlparse
+        parsed=urlparse(url)
+        assert parsed.hostname in {'127.0.0.1','localhost'} and parsed.path=='/qd_automation_test'
+        schema='automation_test_'+uuid.uuid4().hex
+        conn=psycopg2.connect(url)
+        conn.autocommit=True
+        with conn.cursor() as cur:
+            cur.execute('SHOW server_version_num')
+            assert 180000 <= int(cur.fetchone()[0]) < 190000, 'Tests require local PostgreSQL 18'
+            cur.execute(f'CREATE SCHEMA {schema}')
+            cur.execute(f'SET search_path TO {schema}')
+>           cur.execute((Path(__file__).parents[1]/'migrations/init.sql').read_text())
+E           UnicodeEncodeError: 'ascii' codec can't encode characters in position 808-813: ordinal not in range(128)
+
+tests/test_agent_automations_db.py:40: UnicodeEncodeError
+_ ERROR at setup of test_forward_recovery_maturity_idempotency_and_daily_metrics _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f91d53899d0>
+
+    @pytest.fixture
+    def db(monkeypatch):
+        import psycopg2
+        from psycopg2.extras import RealDictCursor
+        url=os.getenv('AUTOMATION_TEST_DATABASE_URL','')
+        if not url:
+            pytest.skip('Disposable PostgreSQL not supplied')
+        from urllib.parse import urlparse
+        parsed=urlparse(url)
+        assert parsed.hostname in {'127.0.0.1','localhost'} and parsed.path=='/qd_automation_test'
+        schema='automation_test_'+uuid.uuid4().hex
+        conn=psycopg2.connect(url)
+        conn.autocommit=True
+        with conn.cursor() as cur:
+            cur.execute('SHOW server_version_num')
+            assert 180000 <= int(cur.fetchone()[0]) < 190000, 'Tests require local PostgreSQL 18'
+            cur.execute(f'CREATE SCHEMA {schema}')
+            cur.execute(f'SET search_path TO {schema}')
+>           cur.execute((Path(__file__).parents[1]/'migrations/init.sql').read_text())
+E           UnicodeEncodeError: 'ascii' codec can't encode characters in position 808-813: ordinal not in range(128)
+
+tests/test_agent_automations_db.py:40: UnicodeEncodeError
+_ ERROR at setup of test_runner_resolves_run_local_symbols_and_never_executes __
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f91d77ef830>
+
+    @pytest.fixture
+    def db(monkeypatch):
+        import psycopg2
+        from psycopg2.extras import RealDictCursor
+        url=os.getenv('AUTOMATION_TEST_DATABASE_URL','')
+        if not url:
+            pytest.skip('Disposable PostgreSQL not supplied')
+        from urllib.parse import urlparse
+        parsed=urlparse(url)
+        assert parsed.hostname in {'127.0.0.1','localhost'} and parsed.path=='/qd_automation_test'
+        schema='automation_test_'+uuid.uuid4().hex
+        conn=psycopg2.connect(url)
+        conn.autocommit=True
+        with conn.cursor() as cur:
+            cur.execute('SHOW server_version_num')
+            assert 180000 <= int(cur.fetchone()[0]) < 190000, 'Tests require local PostgreSQL 18'
+            cur.execute(f'CREATE SCHEMA {schema}')
+            cur.execute(f'SET search_path TO {schema}')
+>           cur.execute((Path(__file__).parents[1]/'migrations/init.sql').read_text())
+E           UnicodeEncodeError: 'ascii' codec can't encode characters in position 808-813: ordinal not in range(128)
+
+tests/test_agent_automations_db.py:40: UnicodeEncodeError
+___________ ERROR at setup of test_save_rejects_before_account_scope ___________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f91d5059730>
+
+    @pytest.fixture
+    def db(monkeypatch):
+        import psycopg2
+        from psycopg2.extras import RealDictCursor
+        url=os.getenv('AUTOMATION_TEST_DATABASE_URL','')
+        if not url:
+            pytest.skip('Disposable PostgreSQL not supplied')
+        from urllib.parse import urlparse
+        parsed=urlparse(url)
+        assert parsed.hostname in {'127.0.0.1','localhost'} and parsed.path=='/qd_automation_test'
+        schema='automation_test_'+uuid.uuid4().hex
+        conn=psycopg2.connect(url)
+        conn.autocommit=True
+        with conn.cursor() as cur:
+            cur.execute('SHOW server_version_num')
+            assert 180000 <= int(cur.fetchone()[0]) < 190000, 'Tests require local PostgreSQL 18'
+            cur.execute(f'CREATE SCHEMA {schema}')
+            cur.execute(f'SET search_path TO {schema}')
+>           cur.execute((Path(__file__).parents[1]/'migrations/init.sql').read_text())
+E           UnicodeEncodeError: 'ascii' codec can't encode characters in position 808-813: ordinal not in range(128)
+
+tests/test_agent_automations_db.py:40: UnicodeEncodeError
+=============================== warnings summary ===============================
+tests/test_agent_backtest_billing.py::test_celery_delivery_does_not_repeat_claimed_or_terminal_job[running]
+tests/test_agent_backtest_billing.py::test_celery_worker_uses_atomic_terminal_helpers[False]
+tests/test_agent_backtest_billing.py::test_celery_worker_uses_atomic_terminal_helpers[True]
+tests/test_strategy_evolution.py::test_celery_persists_structured_evolution_failure
+  /workspace/quantdinger/wt_r22/backend_api_python/tests/../app/tasks/agent_jobs.py:64: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    if not agent_jobs._set_status(job_id, "running", started_at=datetime.utcnow()):
+
+tests/test_crypto_kline_exchange_matrix.py::test_crypto_kline_is_pure_ohlcv_and_preserves_price_precision
+  /workspace/quantdinger/wt_r22/backend_api_python/tests/../app/data_sources/crypto.py:730: DeprecationWarning: datetime.datetime.utcfromtimestamp() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.fromtimestamp(timestamp, datetime.UTC).
+    first_ts = _dt.utcfromtimestamp(klines[0]['time']).isoformat()
+
+tests/test_crypto_kline_exchange_matrix.py::test_crypto_kline_is_pure_ohlcv_and_preserves_price_precision
+  /workspace/quantdinger/wt_r22/backend_api_python/tests/../app/data_sources/crypto.py:731: DeprecationWarning: datetime.datetime.utcfromtimestamp() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.fromtimestamp(timestamp, datetime.UTC).
+    last_ts = _dt.utcfromtimestamp(klines[-1]['time']).isoformat()
+
+tests/test_indicator_signal_alerts.py: 28 warnings
+  /workspace/quantdinger/wt_r22/backend_api_python/tests/../app/services/indicator_signal_alerts.py:763: DeprecationWarning: datetime.datetime.utcfromtimestamp() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.fromtimestamp(timestamp, datetime.UTC).
+    return datetime.utcfromtimestamp(value).isoformat()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+ERROR tests/integration/test_execution_projection_atomic.py::test_failed_projection_rolls_back_all_writes_and_replays[config]
+ERROR tests/integration/test_execution_projection_atomic.py::test_failed_projection_rolls_back_all_writes_and_replays[after_position]
+ERROR tests/integration/test_execution_projection_atomic.py::test_failed_projection_rolls_back_all_writes_and_replays[after_trade]
+ERROR tests/integration/test_execution_projection_atomic.py::test_failed_projection_rolls_back_all_writes_and_replays[runtime_sql]
+ERROR tests/integration/test_execution_projection_atomic.py::test_concurrent_duplicate_event_is_applied_once[True]
+ERROR tests/integration/test_execution_projection_atomic.py::test_concurrent_duplicate_event_is_applied_once[False]
+ERROR tests/integration/test_execution_projection_atomic.py::test_subsequent_partial_fill_keeps_quantity_and_fees_consistent
+ERROR tests/integration/test_execution_projection_atomic.py::test_rest_writer_and_ws_share_the_posted_baseline[True]
+ERROR tests/integration/test_execution_projection_atomic.py::test_rest_writer_and_ws_share_the_posted_baseline[False]
+ERROR tests/integration/test_execution_projection_atomic.py::test_observed_fill_without_ledger_recovers_after_crash
+ERROR tests/integration/test_execution_projection_atomic.py::test_late_cumulative_fee_and_rebate_do_not_add_quantity
+ERROR tests/integration/test_execution_projection_atomic.py::test_compound_order_ws_does_not_compare_one_leg_to_total
+ERROR tests/integration/test_execution_projection_atomic.py::test_missing_execution_price_does_not_reuse_previous_fill_and_can_replay
+ERROR tests/integration/test_execution_projection_atomic.py::test_cumulative_order_average_prices_only_the_new_fill
+ERROR tests/integration/test_execution_projection_atomic.py::test_futu_duplicate_order_push_after_rest_fill_does_not_add_trade
+ERROR tests/test_scheduler_sql.py::test_scheduler_query_selects_monitored_rows_through_real_wrapper
+ERROR tests/test_us_shortlist_scoring.py::test_resolution_latest_completed_and_stale_partial
+ERROR tests/test_us_shortlist_scoring.py::test_runtime_rejects_before_market_or_orders[paper_auto]
+ERROR tests/test_us_shortlist_scoring.py::test_runtime_rejects_before_market_or_orders[live]
+ERROR tests/test_us_shortlist_scoring.py::test_runtime_rejects_before_market_or_orders[PAPER_AUTO]
+ERROR tests/test_us_shortlist_scoring.py::test_missing_shortlist_skips_without_decisions_or_mutations
+ERROR tests/test_us_shortlist_scoring.py::test_forward_recovery_maturity_idempotency_and_daily_metrics
+ERROR tests/test_us_shortlist_scoring.py::test_runner_resolves_run_local_symbols_and_never_executes
+ERROR tests/test_us_shortlist_scoring.py::test_save_rejects_before_account_scope
+716 passed, 19 skipped, 34 warnings, 24 errors in 53.17s

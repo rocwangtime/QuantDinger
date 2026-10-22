@@ -1,0 +1,2330 @@
+EEEEEEEEEEEEEEEEEEEEE................................................... [  9%]
+........................................................................ [ 18%]
+..................................................................ssssss [ 28%]
+sssssss................................................................. [ 37%]
+........................................................................ [ 47%]
+........................................................................ [ 56%]
+........................................................................ [ 66%]
+........................................................................ [ 75%]
+....................ssssss...........................E.................. [ 85%]
+........................................................................ [ 94%]
+............EEEEE......EEE.............                                  [100%]
+==================================== ERRORS ====================================
+_ ERROR at setup of test_failed_projection_rolls_back_all_writes_and_replays[config] _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fc2c530c080>
+
+    @pytest.fixture
+    def projection(monkeypatch):
+        dsn = os.environ.get("QD_TEST_POSTGRES_DSN")
+        if not dsn:
+            pytest.skip("QD_TEST_POSTGRES_DSN is required")
+        import psycopg2
+        from psycopg2 import sql
+        from psycopg2.pool import ThreadedConnectionPool
+    
+        schema = "qd_projection_test_" + uuid4().hex
+>       admin = psycopg2.connect(dsn)
+                ^^^^^^^^^^^^^^^^^^^^^
+
+tests/integration/test_execution_projection_atomic.py:30: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+dsn = 'postgresql://qd_test:qd_test@127.0.0.1:5432/qd_automation_test'
+connection_factory = None, cursor_factory = None, kwargs = {}
+
+    def connect(dsn=None, connection_factory=None, cursor_factory=None, **kwargs):
+        """
+        Create a new database connection.
+    
+        The connection parameters can be specified as a string:
+    
+            conn = psycopg2.connect("dbname=test user=postgres password=secret")
+    
+        or using a set of keyword arguments:
+    
+            conn = psycopg2.connect(database="test", user="postgres", password="secret")
+    
+        Or as a mix of both. The basic connection parameters are:
+    
+        - *dbname*: the database name
+        - *database*: the database name (only as keyword argument)
+        - *user*: user name used to authenticate
+        - *password*: password used to authenticate
+        - *host*: database host address (defaults to UNIX socket if not provided)
+        - *port*: connection port number (defaults to 5432 if not provided)
+    
+        Using the *connection_factory* parameter a different class or connections
+        factory can be specified. It should be a callable object taking a dsn
+        argument.
+    
+        Using the *cursor_factory* parameter, a new default cursor factory will be
+        used by cursor().
+    
+        Using *async*=True an asynchronous connection will be created. *async_* is
+        a valid alias (for Python versions where ``async`` is a keyword).
+    
+        Any other keyword parameter will be passed to the underlying client
+        library: the list of supported parameters depends on the library version.
+    
+        """
+        kwasync = {}
+        if 'async' in kwargs:
+            kwasync['async'] = kwargs.pop('async')
+        if 'async_' in kwargs:
+            kwasync['async_'] = kwargs.pop('async_')
+    
+        dsn = _ext.make_dsn(dsn, **kwargs)
+>       conn = _connect(dsn, connection_factory=connection_factory, **kwasync)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       psycopg2.OperationalError: connection to server at "127.0.0.1", port 5432 failed: Connection refused
+E       	Is the server running on that host and accepting TCP/IP connections?
+
+/tmp/pm-r22-venv/lib/python3.12/site-packages/psycopg2/__init__.py:122: OperationalError
+_ ERROR at setup of test_failed_projection_rolls_back_all_writes_and_replays[after_position] _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fc2b6651250>
+
+    @pytest.fixture
+    def projection(monkeypatch):
+        dsn = os.environ.get("QD_TEST_POSTGRES_DSN")
+        if not dsn:
+            pytest.skip("QD_TEST_POSTGRES_DSN is required")
+        import psycopg2
+        from psycopg2 import sql
+        from psycopg2.pool import ThreadedConnectionPool
+    
+        schema = "qd_projection_test_" + uuid4().hex
+>       admin = psycopg2.connect(dsn)
+                ^^^^^^^^^^^^^^^^^^^^^
+
+tests/integration/test_execution_projection_atomic.py:30: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+dsn = 'postgresql://qd_test:qd_test@127.0.0.1:5432/qd_automation_test'
+connection_factory = None, cursor_factory = None, kwargs = {}
+
+    def connect(dsn=None, connection_factory=None, cursor_factory=None, **kwargs):
+        """
+        Create a new database connection.
+    
+        The connection parameters can be specified as a string:
+    
+            conn = psycopg2.connect("dbname=test user=postgres password=secret")
+    
+        or using a set of keyword arguments:
+    
+            conn = psycopg2.connect(database="test", user="postgres", password="secret")
+    
+        Or as a mix of both. The basic connection parameters are:
+    
+        - *dbname*: the database name
+        - *database*: the database name (only as keyword argument)
+        - *user*: user name used to authenticate
+        - *password*: password used to authenticate
+        - *host*: database host address (defaults to UNIX socket if not provided)
+        - *port*: connection port number (defaults to 5432 if not provided)
+    
+        Using the *connection_factory* parameter a different class or connections
+        factory can be specified. It should be a callable object taking a dsn
+        argument.
+    
+        Using the *cursor_factory* parameter, a new default cursor factory will be
+        used by cursor().
+    
+        Using *async*=True an asynchronous connection will be created. *async_* is
+        a valid alias (for Python versions where ``async`` is a keyword).
+    
+        Any other keyword parameter will be passed to the underlying client
+        library: the list of supported parameters depends on the library version.
+    
+        """
+        kwasync = {}
+        if 'async' in kwargs:
+            kwasync['async'] = kwargs.pop('async')
+        if 'async_' in kwargs:
+            kwasync['async_'] = kwargs.pop('async_')
+    
+        dsn = _ext.make_dsn(dsn, **kwargs)
+>       conn = _connect(dsn, connection_factory=connection_factory, **kwasync)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       psycopg2.OperationalError: connection to server at "127.0.0.1", port 5432 failed: Connection refused
+E       	Is the server running on that host and accepting TCP/IP connections?
+
+/tmp/pm-r22-venv/lib/python3.12/site-packages/psycopg2/__init__.py:122: OperationalError
+_ ERROR at setup of test_failed_projection_rolls_back_all_writes_and_replays[after_trade] _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fc2c530fce0>
+
+    @pytest.fixture
+    def projection(monkeypatch):
+        dsn = os.environ.get("QD_TEST_POSTGRES_DSN")
+        if not dsn:
+            pytest.skip("QD_TEST_POSTGRES_DSN is required")
+        import psycopg2
+        from psycopg2 import sql
+        from psycopg2.pool import ThreadedConnectionPool
+    
+        schema = "qd_projection_test_" + uuid4().hex
+>       admin = psycopg2.connect(dsn)
+                ^^^^^^^^^^^^^^^^^^^^^
+
+tests/integration/test_execution_projection_atomic.py:30: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+dsn = 'postgresql://qd_test:qd_test@127.0.0.1:5432/qd_automation_test'
+connection_factory = None, cursor_factory = None, kwargs = {}
+
+    def connect(dsn=None, connection_factory=None, cursor_factory=None, **kwargs):
+        """
+        Create a new database connection.
+    
+        The connection parameters can be specified as a string:
+    
+            conn = psycopg2.connect("dbname=test user=postgres password=secret")
+    
+        or using a set of keyword arguments:
+    
+            conn = psycopg2.connect(database="test", user="postgres", password="secret")
+    
+        Or as a mix of both. The basic connection parameters are:
+    
+        - *dbname*: the database name
+        - *database*: the database name (only as keyword argument)
+        - *user*: user name used to authenticate
+        - *password*: password used to authenticate
+        - *host*: database host address (defaults to UNIX socket if not provided)
+        - *port*: connection port number (defaults to 5432 if not provided)
+    
+        Using the *connection_factory* parameter a different class or connections
+        factory can be specified. It should be a callable object taking a dsn
+        argument.
+    
+        Using the *cursor_factory* parameter, a new default cursor factory will be
+        used by cursor().
+    
+        Using *async*=True an asynchronous connection will be created. *async_* is
+        a valid alias (for Python versions where ``async`` is a keyword).
+    
+        Any other keyword parameter will be passed to the underlying client
+        library: the list of supported parameters depends on the library version.
+    
+        """
+        kwasync = {}
+        if 'async' in kwargs:
+            kwasync['async'] = kwargs.pop('async')
+        if 'async_' in kwargs:
+            kwasync['async_'] = kwargs.pop('async_')
+    
+        dsn = _ext.make_dsn(dsn, **kwargs)
+>       conn = _connect(dsn, connection_factory=connection_factory, **kwasync)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       psycopg2.OperationalError: connection to server at "127.0.0.1", port 5432 failed: Connection refused
+E       	Is the server running on that host and accepting TCP/IP connections?
+
+/tmp/pm-r22-venv/lib/python3.12/site-packages/psycopg2/__init__.py:122: OperationalError
+_ ERROR at setup of test_failed_projection_rolls_back_all_writes_and_replays[runtime_sql] _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fc2c5315550>
+
+    @pytest.fixture
+    def projection(monkeypatch):
+        dsn = os.environ.get("QD_TEST_POSTGRES_DSN")
+        if not dsn:
+            pytest.skip("QD_TEST_POSTGRES_DSN is required")
+        import psycopg2
+        from psycopg2 import sql
+        from psycopg2.pool import ThreadedConnectionPool
+    
+        schema = "qd_projection_test_" + uuid4().hex
+>       admin = psycopg2.connect(dsn)
+                ^^^^^^^^^^^^^^^^^^^^^
+
+tests/integration/test_execution_projection_atomic.py:30: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+dsn = 'postgresql://qd_test:qd_test@127.0.0.1:5432/qd_automation_test'
+connection_factory = None, cursor_factory = None, kwargs = {}
+
+    def connect(dsn=None, connection_factory=None, cursor_factory=None, **kwargs):
+        """
+        Create a new database connection.
+    
+        The connection parameters can be specified as a string:
+    
+            conn = psycopg2.connect("dbname=test user=postgres password=secret")
+    
+        or using a set of keyword arguments:
+    
+            conn = psycopg2.connect(database="test", user="postgres", password="secret")
+    
+        Or as a mix of both. The basic connection parameters are:
+    
+        - *dbname*: the database name
+        - *database*: the database name (only as keyword argument)
+        - *user*: user name used to authenticate
+        - *password*: password used to authenticate
+        - *host*: database host address (defaults to UNIX socket if not provided)
+        - *port*: connection port number (defaults to 5432 if not provided)
+    
+        Using the *connection_factory* parameter a different class or connections
+        factory can be specified. It should be a callable object taking a dsn
+        argument.
+    
+        Using the *cursor_factory* parameter, a new default cursor factory will be
+        used by cursor().
+    
+        Using *async*=True an asynchronous connection will be created. *async_* is
+        a valid alias (for Python versions where ``async`` is a keyword).
+    
+        Any other keyword parameter will be passed to the underlying client
+        library: the list of supported parameters depends on the library version.
+    
+        """
+        kwasync = {}
+        if 'async' in kwargs:
+            kwasync['async'] = kwargs.pop('async')
+        if 'async_' in kwargs:
+            kwasync['async_'] = kwargs.pop('async_')
+    
+        dsn = _ext.make_dsn(dsn, **kwargs)
+>       conn = _connect(dsn, connection_factory=connection_factory, **kwasync)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       psycopg2.OperationalError: connection to server at "127.0.0.1", port 5432 failed: Connection refused
+E       	Is the server running on that host and accepting TCP/IP connections?
+
+/tmp/pm-r22-venv/lib/python3.12/site-packages/psycopg2/__init__.py:122: OperationalError
+___ ERROR at setup of test_concurrent_duplicate_event_is_applied_once[True] ____
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fc2c5316390>
+
+    @pytest.fixture
+    def projection(monkeypatch):
+        dsn = os.environ.get("QD_TEST_POSTGRES_DSN")
+        if not dsn:
+            pytest.skip("QD_TEST_POSTGRES_DSN is required")
+        import psycopg2
+        from psycopg2 import sql
+        from psycopg2.pool import ThreadedConnectionPool
+    
+        schema = "qd_projection_test_" + uuid4().hex
+>       admin = psycopg2.connect(dsn)
+                ^^^^^^^^^^^^^^^^^^^^^
+
+tests/integration/test_execution_projection_atomic.py:30: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+dsn = 'postgresql://qd_test:qd_test@127.0.0.1:5432/qd_automation_test'
+connection_factory = None, cursor_factory = None, kwargs = {}
+
+    def connect(dsn=None, connection_factory=None, cursor_factory=None, **kwargs):
+        """
+        Create a new database connection.
+    
+        The connection parameters can be specified as a string:
+    
+            conn = psycopg2.connect("dbname=test user=postgres password=secret")
+    
+        or using a set of keyword arguments:
+    
+            conn = psycopg2.connect(database="test", user="postgres", password="secret")
+    
+        Or as a mix of both. The basic connection parameters are:
+    
+        - *dbname*: the database name
+        - *database*: the database name (only as keyword argument)
+        - *user*: user name used to authenticate
+        - *password*: password used to authenticate
+        - *host*: database host address (defaults to UNIX socket if not provided)
+        - *port*: connection port number (defaults to 5432 if not provided)
+    
+        Using the *connection_factory* parameter a different class or connections
+        factory can be specified. It should be a callable object taking a dsn
+        argument.
+    
+        Using the *cursor_factory* parameter, a new default cursor factory will be
+        used by cursor().
+    
+        Using *async*=True an asynchronous connection will be created. *async_* is
+        a valid alias (for Python versions where ``async`` is a keyword).
+    
+        Any other keyword parameter will be passed to the underlying client
+        library: the list of supported parameters depends on the library version.
+    
+        """
+        kwasync = {}
+        if 'async' in kwargs:
+            kwasync['async'] = kwargs.pop('async')
+        if 'async_' in kwargs:
+            kwasync['async_'] = kwargs.pop('async_')
+    
+        dsn = _ext.make_dsn(dsn, **kwargs)
+>       conn = _connect(dsn, connection_factory=connection_factory, **kwasync)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       psycopg2.OperationalError: connection to server at "127.0.0.1", port 5432 failed: Connection refused
+E       	Is the server running on that host and accepting TCP/IP connections?
+
+/tmp/pm-r22-venv/lib/python3.12/site-packages/psycopg2/__init__.py:122: OperationalError
+___ ERROR at setup of test_concurrent_duplicate_event_is_applied_once[False] ___
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fc2c53170b0>
+
+    @pytest.fixture
+    def projection(monkeypatch):
+        dsn = os.environ.get("QD_TEST_POSTGRES_DSN")
+        if not dsn:
+            pytest.skip("QD_TEST_POSTGRES_DSN is required")
+        import psycopg2
+        from psycopg2 import sql
+        from psycopg2.pool import ThreadedConnectionPool
+    
+        schema = "qd_projection_test_" + uuid4().hex
+>       admin = psycopg2.connect(dsn)
+                ^^^^^^^^^^^^^^^^^^^^^
+
+tests/integration/test_execution_projection_atomic.py:30: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+dsn = 'postgresql://qd_test:qd_test@127.0.0.1:5432/qd_automation_test'
+connection_factory = None, cursor_factory = None, kwargs = {}
+
+    def connect(dsn=None, connection_factory=None, cursor_factory=None, **kwargs):
+        """
+        Create a new database connection.
+    
+        The connection parameters can be specified as a string:
+    
+            conn = psycopg2.connect("dbname=test user=postgres password=secret")
+    
+        or using a set of keyword arguments:
+    
+            conn = psycopg2.connect(database="test", user="postgres", password="secret")
+    
+        Or as a mix of both. The basic connection parameters are:
+    
+        - *dbname*: the database name
+        - *database*: the database name (only as keyword argument)
+        - *user*: user name used to authenticate
+        - *password*: password used to authenticate
+        - *host*: database host address (defaults to UNIX socket if not provided)
+        - *port*: connection port number (defaults to 5432 if not provided)
+    
+        Using the *connection_factory* parameter a different class or connections
+        factory can be specified. It should be a callable object taking a dsn
+        argument.
+    
+        Using the *cursor_factory* parameter, a new default cursor factory will be
+        used by cursor().
+    
+        Using *async*=True an asynchronous connection will be created. *async_* is
+        a valid alias (for Python versions where ``async`` is a keyword).
+    
+        Any other keyword parameter will be passed to the underlying client
+        library: the list of supported parameters depends on the library version.
+    
+        """
+        kwasync = {}
+        if 'async' in kwargs:
+            kwasync['async'] = kwargs.pop('async')
+        if 'async_' in kwargs:
+            kwasync['async_'] = kwargs.pop('async_')
+    
+        dsn = _ext.make_dsn(dsn, **kwargs)
+>       conn = _connect(dsn, connection_factory=connection_factory, **kwasync)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       psycopg2.OperationalError: connection to server at "127.0.0.1", port 5432 failed: Connection refused
+E       	Is the server running on that host and accepting TCP/IP connections?
+
+/tmp/pm-r22-venv/lib/python3.12/site-packages/psycopg2/__init__.py:122: OperationalError
+_ ERROR at setup of test_subsequent_partial_fill_keeps_quantity_and_fees_consistent _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fc2c5314080>
+
+    @pytest.fixture
+    def projection(monkeypatch):
+        dsn = os.environ.get("QD_TEST_POSTGRES_DSN")
+        if not dsn:
+            pytest.skip("QD_TEST_POSTGRES_DSN is required")
+        import psycopg2
+        from psycopg2 import sql
+        from psycopg2.pool import ThreadedConnectionPool
+    
+        schema = "qd_projection_test_" + uuid4().hex
+>       admin = psycopg2.connect(dsn)
+                ^^^^^^^^^^^^^^^^^^^^^
+
+tests/integration/test_execution_projection_atomic.py:30: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+dsn = 'postgresql://qd_test:qd_test@127.0.0.1:5432/qd_automation_test'
+connection_factory = None, cursor_factory = None, kwargs = {}
+
+    def connect(dsn=None, connection_factory=None, cursor_factory=None, **kwargs):
+        """
+        Create a new database connection.
+    
+        The connection parameters can be specified as a string:
+    
+            conn = psycopg2.connect("dbname=test user=postgres password=secret")
+    
+        or using a set of keyword arguments:
+    
+            conn = psycopg2.connect(database="test", user="postgres", password="secret")
+    
+        Or as a mix of both. The basic connection parameters are:
+    
+        - *dbname*: the database name
+        - *database*: the database name (only as keyword argument)
+        - *user*: user name used to authenticate
+        - *password*: password used to authenticate
+        - *host*: database host address (defaults to UNIX socket if not provided)
+        - *port*: connection port number (defaults to 5432 if not provided)
+    
+        Using the *connection_factory* parameter a different class or connections
+        factory can be specified. It should be a callable object taking a dsn
+        argument.
+    
+        Using the *cursor_factory* parameter, a new default cursor factory will be
+        used by cursor().
+    
+        Using *async*=True an asynchronous connection will be created. *async_* is
+        a valid alias (for Python versions where ``async`` is a keyword).
+    
+        Any other keyword parameter will be passed to the underlying client
+        library: the list of supported parameters depends on the library version.
+    
+        """
+        kwasync = {}
+        if 'async' in kwargs:
+            kwasync['async'] = kwargs.pop('async')
+        if 'async_' in kwargs:
+            kwasync['async_'] = kwargs.pop('async_')
+    
+        dsn = _ext.make_dsn(dsn, **kwargs)
+>       conn = _connect(dsn, connection_factory=connection_factory, **kwasync)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       psycopg2.OperationalError: connection to server at "127.0.0.1", port 5432 failed: Connection refused
+E       	Is the server running on that host and accepting TCP/IP connections?
+
+/tmp/pm-r22-venv/lib/python3.12/site-packages/psycopg2/__init__.py:122: OperationalError
+__ ERROR at setup of test_rest_writer_and_ws_share_the_posted_baseline[True] ___
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fc2c1ddf200>
+
+    @pytest.fixture
+    def projection(monkeypatch):
+        dsn = os.environ.get("QD_TEST_POSTGRES_DSN")
+        if not dsn:
+            pytest.skip("QD_TEST_POSTGRES_DSN is required")
+        import psycopg2
+        from psycopg2 import sql
+        from psycopg2.pool import ThreadedConnectionPool
+    
+        schema = "qd_projection_test_" + uuid4().hex
+>       admin = psycopg2.connect(dsn)
+                ^^^^^^^^^^^^^^^^^^^^^
+
+tests/integration/test_execution_projection_atomic.py:30: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+dsn = 'postgresql://qd_test:qd_test@127.0.0.1:5432/qd_automation_test'
+connection_factory = None, cursor_factory = None, kwargs = {}
+
+    def connect(dsn=None, connection_factory=None, cursor_factory=None, **kwargs):
+        """
+        Create a new database connection.
+    
+        The connection parameters can be specified as a string:
+    
+            conn = psycopg2.connect("dbname=test user=postgres password=secret")
+    
+        or using a set of keyword arguments:
+    
+            conn = psycopg2.connect(database="test", user="postgres", password="secret")
+    
+        Or as a mix of both. The basic connection parameters are:
+    
+        - *dbname*: the database name
+        - *database*: the database name (only as keyword argument)
+        - *user*: user name used to authenticate
+        - *password*: password used to authenticate
+        - *host*: database host address (defaults to UNIX socket if not provided)
+        - *port*: connection port number (defaults to 5432 if not provided)
+    
+        Using the *connection_factory* parameter a different class or connections
+        factory can be specified. It should be a callable object taking a dsn
+        argument.
+    
+        Using the *cursor_factory* parameter, a new default cursor factory will be
+        used by cursor().
+    
+        Using *async*=True an asynchronous connection will be created. *async_* is
+        a valid alias (for Python versions where ``async`` is a keyword).
+    
+        Any other keyword parameter will be passed to the underlying client
+        library: the list of supported parameters depends on the library version.
+    
+        """
+        kwasync = {}
+        if 'async' in kwargs:
+            kwasync['async'] = kwargs.pop('async')
+        if 'async_' in kwargs:
+            kwasync['async_'] = kwargs.pop('async_')
+    
+        dsn = _ext.make_dsn(dsn, **kwargs)
+>       conn = _connect(dsn, connection_factory=connection_factory, **kwasync)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       psycopg2.OperationalError: connection to server at "127.0.0.1", port 5432 failed: Connection refused
+E       	Is the server running on that host and accepting TCP/IP connections?
+
+/tmp/pm-r22-venv/lib/python3.12/site-packages/psycopg2/__init__.py:122: OperationalError
+__ ERROR at setup of test_rest_writer_and_ws_share_the_posted_baseline[False] __
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fc2c531d1f0>
+
+    @pytest.fixture
+    def projection(monkeypatch):
+        dsn = os.environ.get("QD_TEST_POSTGRES_DSN")
+        if not dsn:
+            pytest.skip("QD_TEST_POSTGRES_DSN is required")
+        import psycopg2
+        from psycopg2 import sql
+        from psycopg2.pool import ThreadedConnectionPool
+    
+        schema = "qd_projection_test_" + uuid4().hex
+>       admin = psycopg2.connect(dsn)
+                ^^^^^^^^^^^^^^^^^^^^^
+
+tests/integration/test_execution_projection_atomic.py:30: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+dsn = 'postgresql://qd_test:qd_test@127.0.0.1:5432/qd_automation_test'
+connection_factory = None, cursor_factory = None, kwargs = {}
+
+    def connect(dsn=None, connection_factory=None, cursor_factory=None, **kwargs):
+        """
+        Create a new database connection.
+    
+        The connection parameters can be specified as a string:
+    
+            conn = psycopg2.connect("dbname=test user=postgres password=secret")
+    
+        or using a set of keyword arguments:
+    
+            conn = psycopg2.connect(database="test", user="postgres", password="secret")
+    
+        Or as a mix of both. The basic connection parameters are:
+    
+        - *dbname*: the database name
+        - *database*: the database name (only as keyword argument)
+        - *user*: user name used to authenticate
+        - *password*: password used to authenticate
+        - *host*: database host address (defaults to UNIX socket if not provided)
+        - *port*: connection port number (defaults to 5432 if not provided)
+    
+        Using the *connection_factory* parameter a different class or connections
+        factory can be specified. It should be a callable object taking a dsn
+        argument.
+    
+        Using the *cursor_factory* parameter, a new default cursor factory will be
+        used by cursor().
+    
+        Using *async*=True an asynchronous connection will be created. *async_* is
+        a valid alias (for Python versions where ``async`` is a keyword).
+    
+        Any other keyword parameter will be passed to the underlying client
+        library: the list of supported parameters depends on the library version.
+    
+        """
+        kwasync = {}
+        if 'async' in kwargs:
+            kwasync['async'] = kwargs.pop('async')
+        if 'async_' in kwargs:
+            kwasync['async_'] = kwargs.pop('async_')
+    
+        dsn = _ext.make_dsn(dsn, **kwargs)
+>       conn = _connect(dsn, connection_factory=connection_factory, **kwasync)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       psycopg2.OperationalError: connection to server at "127.0.0.1", port 5432 failed: Connection refused
+E       	Is the server running on that host and accepting TCP/IP connections?
+
+/tmp/pm-r22-venv/lib/python3.12/site-packages/psycopg2/__init__.py:122: OperationalError
+___ ERROR at setup of test_observed_fill_without_ledger_recovers_after_crash ___
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fc2c531cd70>
+
+    @pytest.fixture
+    def projection(monkeypatch):
+        dsn = os.environ.get("QD_TEST_POSTGRES_DSN")
+        if not dsn:
+            pytest.skip("QD_TEST_POSTGRES_DSN is required")
+        import psycopg2
+        from psycopg2 import sql
+        from psycopg2.pool import ThreadedConnectionPool
+    
+        schema = "qd_projection_test_" + uuid4().hex
+>       admin = psycopg2.connect(dsn)
+                ^^^^^^^^^^^^^^^^^^^^^
+
+tests/integration/test_execution_projection_atomic.py:30: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+dsn = 'postgresql://qd_test:qd_test@127.0.0.1:5432/qd_automation_test'
+connection_factory = None, cursor_factory = None, kwargs = {}
+
+    def connect(dsn=None, connection_factory=None, cursor_factory=None, **kwargs):
+        """
+        Create a new database connection.
+    
+        The connection parameters can be specified as a string:
+    
+            conn = psycopg2.connect("dbname=test user=postgres password=secret")
+    
+        or using a set of keyword arguments:
+    
+            conn = psycopg2.connect(database="test", user="postgres", password="secret")
+    
+        Or as a mix of both. The basic connection parameters are:
+    
+        - *dbname*: the database name
+        - *database*: the database name (only as keyword argument)
+        - *user*: user name used to authenticate
+        - *password*: password used to authenticate
+        - *host*: database host address (defaults to UNIX socket if not provided)
+        - *port*: connection port number (defaults to 5432 if not provided)
+    
+        Using the *connection_factory* parameter a different class or connections
+        factory can be specified. It should be a callable object taking a dsn
+        argument.
+    
+        Using the *cursor_factory* parameter, a new default cursor factory will be
+        used by cursor().
+    
+        Using *async*=True an asynchronous connection will be created. *async_* is
+        a valid alias (for Python versions where ``async`` is a keyword).
+    
+        Any other keyword parameter will be passed to the underlying client
+        library: the list of supported parameters depends on the library version.
+    
+        """
+        kwasync = {}
+        if 'async' in kwargs:
+            kwasync['async'] = kwargs.pop('async')
+        if 'async_' in kwargs:
+            kwasync['async_'] = kwargs.pop('async_')
+    
+        dsn = _ext.make_dsn(dsn, **kwargs)
+>       conn = _connect(dsn, connection_factory=connection_factory, **kwasync)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       psycopg2.OperationalError: connection to server at "127.0.0.1", port 5432 failed: Connection refused
+E       	Is the server running on that host and accepting TCP/IP connections?
+
+/tmp/pm-r22-venv/lib/python3.12/site-packages/psycopg2/__init__.py:122: OperationalError
+__ ERROR at setup of test_late_cumulative_fee_and_rebate_do_not_add_quantity ___
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fc2b75bc740>
+
+    @pytest.fixture
+    def projection(monkeypatch):
+        dsn = os.environ.get("QD_TEST_POSTGRES_DSN")
+        if not dsn:
+            pytest.skip("QD_TEST_POSTGRES_DSN is required")
+        import psycopg2
+        from psycopg2 import sql
+        from psycopg2.pool import ThreadedConnectionPool
+    
+        schema = "qd_projection_test_" + uuid4().hex
+>       admin = psycopg2.connect(dsn)
+                ^^^^^^^^^^^^^^^^^^^^^
+
+tests/integration/test_execution_projection_atomic.py:30: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+dsn = 'postgresql://qd_test:qd_test@127.0.0.1:5432/qd_automation_test'
+connection_factory = None, cursor_factory = None, kwargs = {}
+
+    def connect(dsn=None, connection_factory=None, cursor_factory=None, **kwargs):
+        """
+        Create a new database connection.
+    
+        The connection parameters can be specified as a string:
+    
+            conn = psycopg2.connect("dbname=test user=postgres password=secret")
+    
+        or using a set of keyword arguments:
+    
+            conn = psycopg2.connect(database="test", user="postgres", password="secret")
+    
+        Or as a mix of both. The basic connection parameters are:
+    
+        - *dbname*: the database name
+        - *database*: the database name (only as keyword argument)
+        - *user*: user name used to authenticate
+        - *password*: password used to authenticate
+        - *host*: database host address (defaults to UNIX socket if not provided)
+        - *port*: connection port number (defaults to 5432 if not provided)
+    
+        Using the *connection_factory* parameter a different class or connections
+        factory can be specified. It should be a callable object taking a dsn
+        argument.
+    
+        Using the *cursor_factory* parameter, a new default cursor factory will be
+        used by cursor().
+    
+        Using *async*=True an asynchronous connection will be created. *async_* is
+        a valid alias (for Python versions where ``async`` is a keyword).
+    
+        Any other keyword parameter will be passed to the underlying client
+        library: the list of supported parameters depends on the library version.
+    
+        """
+        kwasync = {}
+        if 'async' in kwargs:
+            kwasync['async'] = kwargs.pop('async')
+        if 'async_' in kwargs:
+            kwasync['async_'] = kwargs.pop('async_')
+    
+        dsn = _ext.make_dsn(dsn, **kwargs)
+>       conn = _connect(dsn, connection_factory=connection_factory, **kwasync)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       psycopg2.OperationalError: connection to server at "127.0.0.1", port 5432 failed: Connection refused
+E       	Is the server running on that host and accepting TCP/IP connections?
+
+/tmp/pm-r22-venv/lib/python3.12/site-packages/psycopg2/__init__.py:122: OperationalError
+__ ERROR at setup of test_compound_order_ws_does_not_compare_one_leg_to_total __
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fc2c531e210>
+
+    @pytest.fixture
+    def projection(monkeypatch):
+        dsn = os.environ.get("QD_TEST_POSTGRES_DSN")
+        if not dsn:
+            pytest.skip("QD_TEST_POSTGRES_DSN is required")
+        import psycopg2
+        from psycopg2 import sql
+        from psycopg2.pool import ThreadedConnectionPool
+    
+        schema = "qd_projection_test_" + uuid4().hex
+>       admin = psycopg2.connect(dsn)
+                ^^^^^^^^^^^^^^^^^^^^^
+
+tests/integration/test_execution_projection_atomic.py:30: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+dsn = 'postgresql://qd_test:qd_test@127.0.0.1:5432/qd_automation_test'
+connection_factory = None, cursor_factory = None, kwargs = {}
+
+    def connect(dsn=None, connection_factory=None, cursor_factory=None, **kwargs):
+        """
+        Create a new database connection.
+    
+        The connection parameters can be specified as a string:
+    
+            conn = psycopg2.connect("dbname=test user=postgres password=secret")
+    
+        or using a set of keyword arguments:
+    
+            conn = psycopg2.connect(database="test", user="postgres", password="secret")
+    
+        Or as a mix of both. The basic connection parameters are:
+    
+        - *dbname*: the database name
+        - *database*: the database name (only as keyword argument)
+        - *user*: user name used to authenticate
+        - *password*: password used to authenticate
+        - *host*: database host address (defaults to UNIX socket if not provided)
+        - *port*: connection port number (defaults to 5432 if not provided)
+    
+        Using the *connection_factory* parameter a different class or connections
+        factory can be specified. It should be a callable object taking a dsn
+        argument.
+    
+        Using the *cursor_factory* parameter, a new default cursor factory will be
+        used by cursor().
+    
+        Using *async*=True an asynchronous connection will be created. *async_* is
+        a valid alias (for Python versions where ``async`` is a keyword).
+    
+        Any other keyword parameter will be passed to the underlying client
+        library: the list of supported parameters depends on the library version.
+    
+        """
+        kwasync = {}
+        if 'async' in kwargs:
+            kwasync['async'] = kwargs.pop('async')
+        if 'async_' in kwargs:
+            kwasync['async_'] = kwargs.pop('async_')
+    
+        dsn = _ext.make_dsn(dsn, **kwargs)
+>       conn = _connect(dsn, connection_factory=connection_factory, **kwasync)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       psycopg2.OperationalError: connection to server at "127.0.0.1", port 5432 failed: Connection refused
+E       	Is the server running on that host and accepting TCP/IP connections?
+
+/tmp/pm-r22-venv/lib/python3.12/site-packages/psycopg2/__init__.py:122: OperationalError
+_ ERROR at setup of test_missing_execution_price_does_not_reuse_previous_fill_and_can_replay _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fc2c531d9a0>
+
+    @pytest.fixture
+    def projection(monkeypatch):
+        dsn = os.environ.get("QD_TEST_POSTGRES_DSN")
+        if not dsn:
+            pytest.skip("QD_TEST_POSTGRES_DSN is required")
+        import psycopg2
+        from psycopg2 import sql
+        from psycopg2.pool import ThreadedConnectionPool
+    
+        schema = "qd_projection_test_" + uuid4().hex
+>       admin = psycopg2.connect(dsn)
+                ^^^^^^^^^^^^^^^^^^^^^
+
+tests/integration/test_execution_projection_atomic.py:30: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+dsn = 'postgresql://qd_test:qd_test@127.0.0.1:5432/qd_automation_test'
+connection_factory = None, cursor_factory = None, kwargs = {}
+
+    def connect(dsn=None, connection_factory=None, cursor_factory=None, **kwargs):
+        """
+        Create a new database connection.
+    
+        The connection parameters can be specified as a string:
+    
+            conn = psycopg2.connect("dbname=test user=postgres password=secret")
+    
+        or using a set of keyword arguments:
+    
+            conn = psycopg2.connect(database="test", user="postgres", password="secret")
+    
+        Or as a mix of both. The basic connection parameters are:
+    
+        - *dbname*: the database name
+        - *database*: the database name (only as keyword argument)
+        - *user*: user name used to authenticate
+        - *password*: password used to authenticate
+        - *host*: database host address (defaults to UNIX socket if not provided)
+        - *port*: connection port number (defaults to 5432 if not provided)
+    
+        Using the *connection_factory* parameter a different class or connections
+        factory can be specified. It should be a callable object taking a dsn
+        argument.
+    
+        Using the *cursor_factory* parameter, a new default cursor factory will be
+        used by cursor().
+    
+        Using *async*=True an asynchronous connection will be created. *async_* is
+        a valid alias (for Python versions where ``async`` is a keyword).
+    
+        Any other keyword parameter will be passed to the underlying client
+        library: the list of supported parameters depends on the library version.
+    
+        """
+        kwasync = {}
+        if 'async' in kwargs:
+            kwasync['async'] = kwargs.pop('async')
+        if 'async_' in kwargs:
+            kwasync['async_'] = kwargs.pop('async_')
+    
+        dsn = _ext.make_dsn(dsn, **kwargs)
+>       conn = _connect(dsn, connection_factory=connection_factory, **kwasync)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       psycopg2.OperationalError: connection to server at "127.0.0.1", port 5432 failed: Connection refused
+E       	Is the server running on that host and accepting TCP/IP connections?
+
+/tmp/pm-r22-venv/lib/python3.12/site-packages/psycopg2/__init__.py:122: OperationalError
+___ ERROR at setup of test_cumulative_order_average_prices_only_the_new_fill ___
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fc2b69dfa10>
+
+    @pytest.fixture
+    def projection(monkeypatch):
+        dsn = os.environ.get("QD_TEST_POSTGRES_DSN")
+        if not dsn:
+            pytest.skip("QD_TEST_POSTGRES_DSN is required")
+        import psycopg2
+        from psycopg2 import sql
+        from psycopg2.pool import ThreadedConnectionPool
+    
+        schema = "qd_projection_test_" + uuid4().hex
+>       admin = psycopg2.connect(dsn)
+                ^^^^^^^^^^^^^^^^^^^^^
+
+tests/integration/test_execution_projection_atomic.py:30: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+dsn = 'postgresql://qd_test:qd_test@127.0.0.1:5432/qd_automation_test'
+connection_factory = None, cursor_factory = None, kwargs = {}
+
+    def connect(dsn=None, connection_factory=None, cursor_factory=None, **kwargs):
+        """
+        Create a new database connection.
+    
+        The connection parameters can be specified as a string:
+    
+            conn = psycopg2.connect("dbname=test user=postgres password=secret")
+    
+        or using a set of keyword arguments:
+    
+            conn = psycopg2.connect(database="test", user="postgres", password="secret")
+    
+        Or as a mix of both. The basic connection parameters are:
+    
+        - *dbname*: the database name
+        - *database*: the database name (only as keyword argument)
+        - *user*: user name used to authenticate
+        - *password*: password used to authenticate
+        - *host*: database host address (defaults to UNIX socket if not provided)
+        - *port*: connection port number (defaults to 5432 if not provided)
+    
+        Using the *connection_factory* parameter a different class or connections
+        factory can be specified. It should be a callable object taking a dsn
+        argument.
+    
+        Using the *cursor_factory* parameter, a new default cursor factory will be
+        used by cursor().
+    
+        Using *async*=True an asynchronous connection will be created. *async_* is
+        a valid alias (for Python versions where ``async`` is a keyword).
+    
+        Any other keyword parameter will be passed to the underlying client
+        library: the list of supported parameters depends on the library version.
+    
+        """
+        kwasync = {}
+        if 'async' in kwargs:
+            kwasync['async'] = kwargs.pop('async')
+        if 'async_' in kwargs:
+            kwasync['async_'] = kwargs.pop('async_')
+    
+        dsn = _ext.make_dsn(dsn, **kwargs)
+>       conn = _connect(dsn, connection_factory=connection_factory, **kwasync)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       psycopg2.OperationalError: connection to server at "127.0.0.1", port 5432 failed: Connection refused
+E       	Is the server running on that host and accepting TCP/IP connections?
+
+/tmp/pm-r22-venv/lib/python3.12/site-packages/psycopg2/__init__.py:122: OperationalError
+_ ERROR at setup of test_futu_duplicate_order_push_after_rest_fill_does_not_add_trade _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fc2c5317ec0>
+
+    @pytest.fixture
+    def projection(monkeypatch):
+        dsn = os.environ.get("QD_TEST_POSTGRES_DSN")
+        if not dsn:
+            pytest.skip("QD_TEST_POSTGRES_DSN is required")
+        import psycopg2
+        from psycopg2 import sql
+        from psycopg2.pool import ThreadedConnectionPool
+    
+        schema = "qd_projection_test_" + uuid4().hex
+>       admin = psycopg2.connect(dsn)
+                ^^^^^^^^^^^^^^^^^^^^^
+
+tests/integration/test_execution_projection_atomic.py:30: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+dsn = 'postgresql://qd_test:qd_test@127.0.0.1:5432/qd_automation_test'
+connection_factory = None, cursor_factory = None, kwargs = {}
+
+    def connect(dsn=None, connection_factory=None, cursor_factory=None, **kwargs):
+        """
+        Create a new database connection.
+    
+        The connection parameters can be specified as a string:
+    
+            conn = psycopg2.connect("dbname=test user=postgres password=secret")
+    
+        or using a set of keyword arguments:
+    
+            conn = psycopg2.connect(database="test", user="postgres", password="secret")
+    
+        Or as a mix of both. The basic connection parameters are:
+    
+        - *dbname*: the database name
+        - *database*: the database name (only as keyword argument)
+        - *user*: user name used to authenticate
+        - *password*: password used to authenticate
+        - *host*: database host address (defaults to UNIX socket if not provided)
+        - *port*: connection port number (defaults to 5432 if not provided)
+    
+        Using the *connection_factory* parameter a different class or connections
+        factory can be specified. It should be a callable object taking a dsn
+        argument.
+    
+        Using the *cursor_factory* parameter, a new default cursor factory will be
+        used by cursor().
+    
+        Using *async*=True an asynchronous connection will be created. *async_* is
+        a valid alias (for Python versions where ``async`` is a keyword).
+    
+        Any other keyword parameter will be passed to the underlying client
+        library: the list of supported parameters depends on the library version.
+    
+        """
+        kwasync = {}
+        if 'async' in kwargs:
+            kwasync['async'] = kwargs.pop('async')
+        if 'async_' in kwargs:
+            kwasync['async_'] = kwargs.pop('async_')
+    
+        dsn = _ext.make_dsn(dsn, **kwargs)
+>       conn = _connect(dsn, connection_factory=connection_factory, **kwasync)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       psycopg2.OperationalError: connection to server at "127.0.0.1", port 5432 failed: Connection refused
+E       	Is the server running on that host and accepting TCP/IP connections?
+
+/tmp/pm-r22-venv/lib/python3.12/site-packages/psycopg2/__init__.py:122: OperationalError
+____ ERROR at setup of test_persistence_report_evidence_replay_and_restart _____
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fc2c53158b0>
+
+    @pytest.fixture
+    def isolated(monkeypatch):
+        dsn = os.getenv('QD_TEST_POSTGRES_DSN', '')
+        if not dsn:
+            pytest.skip('QD_TEST_POSTGRES_DSN required')
+        assert '@127.0.0.1:5432/qd_automation_test' in dsn
+        monkeypatch.setenv('DATABASE_URL', dsn)
+        schema = 'paper_test_' + uuid4().hex
+>       with get_db_connection() as db:
+             ^^^^^^^^^^^^^^^^^^^
+
+tests/integration/test_polymarket_paper_account.py:24: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+app/utils/db_postgres.py:741: in get_pg_connection
+    pg_pool = _get_connection_pool()
+              ^^^^^^^^^^^^^^^^^^^^^^
+app/utils/db_postgres.py:154: in _get_connection_pool
+    _connection_pool = pool.ThreadedConnectionPool(
+/tmp/pm-r22-venv/lib/python3.12/site-packages/psycopg2/pool.py:161: in __init__
+    AbstractConnectionPool.__init__(
+/tmp/pm-r22-venv/lib/python3.12/site-packages/psycopg2/pool.py:59: in __init__
+    self._connect()
+/tmp/pm-r22-venv/lib/python3.12/site-packages/psycopg2/pool.py:63: in _connect
+    conn = psycopg2.connect(*self._args, **self._kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+dsn = "host=127.0.0.1 port=5432 user=qd_test password=qd_test dbname=qd_automation_test connect_timeout=10 application_name=quantdinger_api options='-c timezone=UTC' keepalives=1 keepalives_idle=30 keepalives_interval=10 keepalives_count=3"
+connection_factory = None, cursor_factory = None
+kwargs = {'host': '127.0.0.1', 'port': 5432, 'user': 'qd_test', 'password': 'qd_test', ...}
+
+    def connect(dsn=None, connection_factory=None, cursor_factory=None, **kwargs):
+        """
+        Create a new database connection.
+    
+        The connection parameters can be specified as a string:
+    
+            conn = psycopg2.connect("dbname=test user=postgres password=secret")
+    
+        or using a set of keyword arguments:
+    
+            conn = psycopg2.connect(database="test", user="postgres", password="secret")
+    
+        Or as a mix of both. The basic connection parameters are:
+    
+        - *dbname*: the database name
+        - *database*: the database name (only as keyword argument)
+        - *user*: user name used to authenticate
+        - *password*: password used to authenticate
+        - *host*: database host address (defaults to UNIX socket if not provided)
+        - *port*: connection port number (defaults to 5432 if not provided)
+    
+        Using the *connection_factory* parameter a different class or connections
+        factory can be specified. It should be a callable object taking a dsn
+        argument.
+    
+        Using the *cursor_factory* parameter, a new default cursor factory will be
+        used by cursor().
+    
+        Using *async*=True an asynchronous connection will be created. *async_* is
+        a valid alias (for Python versions where ``async`` is a keyword).
+    
+        Any other keyword parameter will be passed to the underlying client
+        library: the list of supported parameters depends on the library version.
+    
+        """
+        kwasync = {}
+        if 'async' in kwargs:
+            kwasync['async'] = kwargs.pop('async')
+        if 'async_' in kwargs:
+            kwasync['async_'] = kwargs.pop('async_')
+    
+        dsn = _ext.make_dsn(dsn, **kwargs)
+>       conn = _connect(dsn, connection_factory=connection_factory, **kwasync)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       psycopg2.OperationalError: connection to server at "127.0.0.1", port 5432 failed: Connection refused
+E       	Is the server running on that host and accepting TCP/IP connections?
+
+/tmp/pm-r22-venv/lib/python3.12/site-packages/psycopg2/__init__.py:122: OperationalError
+------------------------------ Captured log setup ------------------------------
+WARNING  app.utils.db_postgres:db_postgres.py:236 Could not probe PostgreSQL max_connections; using configured DB pool limits: connection to server at "127.0.0.1", port 5432 failed: Connection refused
+	Is the server running on that host and accepting TCP/IP connections?
+
+ERROR    app.utils.db_postgres:db_postgres.py:184 Failed to create PostgreSQL connection pool: connection to server at "127.0.0.1", port 5432 failed: Connection refused
+	Is the server running on that host and accepting TCP/IP connections?
+___ ERROR at setup of test_retention_bounded_preserves_open_capital_evidence ___
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fc2c52c28a0>
+
+    @pytest.fixture
+    def isolated(monkeypatch):
+        dsn = os.getenv('QD_TEST_POSTGRES_DSN', '')
+        if not dsn:
+            pytest.skip('QD_TEST_POSTGRES_DSN required')
+        assert '@127.0.0.1:5432/qd_automation_test' in dsn
+        monkeypatch.setenv('DATABASE_URL', dsn)
+        schema = 'paper_test_' + uuid4().hex
+>       with get_db_connection() as db:
+             ^^^^^^^^^^^^^^^^^^^
+
+tests/integration/test_polymarket_paper_account.py:24: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+app/utils/db_postgres.py:741: in get_pg_connection
+    pg_pool = _get_connection_pool()
+              ^^^^^^^^^^^^^^^^^^^^^^
+app/utils/db_postgres.py:154: in _get_connection_pool
+    _connection_pool = pool.ThreadedConnectionPool(
+/tmp/pm-r22-venv/lib/python3.12/site-packages/psycopg2/pool.py:161: in __init__
+    AbstractConnectionPool.__init__(
+/tmp/pm-r22-venv/lib/python3.12/site-packages/psycopg2/pool.py:59: in __init__
+    self._connect()
+/tmp/pm-r22-venv/lib/python3.12/site-packages/psycopg2/pool.py:63: in _connect
+    conn = psycopg2.connect(*self._args, **self._kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+dsn = "host=127.0.0.1 port=5432 user=qd_test password=qd_test dbname=qd_automation_test connect_timeout=10 application_name=quantdinger_api options='-c timezone=UTC' keepalives=1 keepalives_idle=30 keepalives_interval=10 keepalives_count=3"
+connection_factory = None, cursor_factory = None
+kwargs = {'host': '127.0.0.1', 'port': 5432, 'user': 'qd_test', 'password': 'qd_test', ...}
+
+    def connect(dsn=None, connection_factory=None, cursor_factory=None, **kwargs):
+        """
+        Create a new database connection.
+    
+        The connection parameters can be specified as a string:
+    
+            conn = psycopg2.connect("dbname=test user=postgres password=secret")
+    
+        or using a set of keyword arguments:
+    
+            conn = psycopg2.connect(database="test", user="postgres", password="secret")
+    
+        Or as a mix of both. The basic connection parameters are:
+    
+        - *dbname*: the database name
+        - *database*: the database name (only as keyword argument)
+        - *user*: user name used to authenticate
+        - *password*: password used to authenticate
+        - *host*: database host address (defaults to UNIX socket if not provided)
+        - *port*: connection port number (defaults to 5432 if not provided)
+    
+        Using the *connection_factory* parameter a different class or connections
+        factory can be specified. It should be a callable object taking a dsn
+        argument.
+    
+        Using the *cursor_factory* parameter, a new default cursor factory will be
+        used by cursor().
+    
+        Using *async*=True an asynchronous connection will be created. *async_* is
+        a valid alias (for Python versions where ``async`` is a keyword).
+    
+        Any other keyword parameter will be passed to the underlying client
+        library: the list of supported parameters depends on the library version.
+    
+        """
+        kwasync = {}
+        if 'async' in kwargs:
+            kwasync['async'] = kwargs.pop('async')
+        if 'async_' in kwargs:
+            kwasync['async_'] = kwargs.pop('async_')
+    
+        dsn = _ext.make_dsn(dsn, **kwargs)
+>       conn = _connect(dsn, connection_factory=connection_factory, **kwasync)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       psycopg2.OperationalError: connection to server at "127.0.0.1", port 5432 failed: Connection refused
+E       	Is the server running on that host and accepting TCP/IP connections?
+
+/tmp/pm-r22-venv/lib/python3.12/site-packages/psycopg2/__init__.py:122: OperationalError
+------------------------------ Captured log setup ------------------------------
+WARNING  app.utils.db_postgres:db_postgres.py:236 Could not probe PostgreSQL max_connections; using configured DB pool limits: connection to server at "127.0.0.1", port 5432 failed: Connection refused
+	Is the server running on that host and accepting TCP/IP connections?
+
+ERROR    app.utils.db_postgres:db_postgres.py:184 Failed to create PostgreSQL connection pool: connection to server at "127.0.0.1", port 5432 failed: Connection refused
+	Is the server running on that host and accepting TCP/IP connections?
+_ ERROR at setup of test_maker_atomic_shared_ledger_reports_restart_and_retry __
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fc2c53156d0>
+
+    @pytest.fixture
+    def isolated(monkeypatch):
+        dsn = os.getenv('QD_TEST_POSTGRES_DSN', '')
+        if not dsn:
+            pytest.skip('QD_TEST_POSTGRES_DSN required')
+        assert '@127.0.0.1:5432/qd_automation_test' in dsn
+        monkeypatch.setenv('DATABASE_URL', dsn)
+        schema = 'paper_test_' + uuid4().hex
+>       with get_db_connection() as db:
+             ^^^^^^^^^^^^^^^^^^^
+
+tests/integration/test_polymarket_paper_account.py:24: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+app/utils/db_postgres.py:741: in get_pg_connection
+    pg_pool = _get_connection_pool()
+              ^^^^^^^^^^^^^^^^^^^^^^
+app/utils/db_postgres.py:154: in _get_connection_pool
+    _connection_pool = pool.ThreadedConnectionPool(
+/tmp/pm-r22-venv/lib/python3.12/site-packages/psycopg2/pool.py:161: in __init__
+    AbstractConnectionPool.__init__(
+/tmp/pm-r22-venv/lib/python3.12/site-packages/psycopg2/pool.py:59: in __init__
+    self._connect()
+/tmp/pm-r22-venv/lib/python3.12/site-packages/psycopg2/pool.py:63: in _connect
+    conn = psycopg2.connect(*self._args, **self._kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+dsn = "host=127.0.0.1 port=5432 user=qd_test password=qd_test dbname=qd_automation_test connect_timeout=10 application_name=quantdinger_api options='-c timezone=UTC' keepalives=1 keepalives_idle=30 keepalives_interval=10 keepalives_count=3"
+connection_factory = None, cursor_factory = None
+kwargs = {'host': '127.0.0.1', 'port': 5432, 'user': 'qd_test', 'password': 'qd_test', ...}
+
+    def connect(dsn=None, connection_factory=None, cursor_factory=None, **kwargs):
+        """
+        Create a new database connection.
+    
+        The connection parameters can be specified as a string:
+    
+            conn = psycopg2.connect("dbname=test user=postgres password=secret")
+    
+        or using a set of keyword arguments:
+    
+            conn = psycopg2.connect(database="test", user="postgres", password="secret")
+    
+        Or as a mix of both. The basic connection parameters are:
+    
+        - *dbname*: the database name
+        - *database*: the database name (only as keyword argument)
+        - *user*: user name used to authenticate
+        - *password*: password used to authenticate
+        - *host*: database host address (defaults to UNIX socket if not provided)
+        - *port*: connection port number (defaults to 5432 if not provided)
+    
+        Using the *connection_factory* parameter a different class or connections
+        factory can be specified. It should be a callable object taking a dsn
+        argument.
+    
+        Using the *cursor_factory* parameter, a new default cursor factory will be
+        used by cursor().
+    
+        Using *async*=True an asynchronous connection will be created. *async_* is
+        a valid alias (for Python versions where ``async`` is a keyword).
+    
+        Any other keyword parameter will be passed to the underlying client
+        library: the list of supported parameters depends on the library version.
+    
+        """
+        kwasync = {}
+        if 'async' in kwargs:
+            kwasync['async'] = kwargs.pop('async')
+        if 'async_' in kwargs:
+            kwasync['async_'] = kwargs.pop('async_')
+    
+        dsn = _ext.make_dsn(dsn, **kwargs)
+>       conn = _connect(dsn, connection_factory=connection_factory, **kwasync)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       psycopg2.OperationalError: connection to server at "127.0.0.1", port 5432 failed: Connection refused
+E       	Is the server running on that host and accepting TCP/IP connections?
+
+/tmp/pm-r22-venv/lib/python3.12/site-packages/psycopg2/__init__.py:122: OperationalError
+------------------------------ Captured log setup ------------------------------
+WARNING  app.utils.db_postgres:db_postgres.py:236 Could not probe PostgreSQL max_connections; using configured DB pool limits: connection to server at "127.0.0.1", port 5432 failed: Connection refused
+	Is the server running on that host and accepting TCP/IP connections?
+
+ERROR    app.utils.db_postgres:db_postgres.py:184 Failed to create PostgreSQL connection pool: connection to server at "127.0.0.1", port 5432 failed: Connection refused
+	Is the server running on that host and accepting TCP/IP connections?
+_ ERROR at setup of test_recorded_maker_feed_prints_official_and_proxy_settlement _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fc2c5317500>
+
+    @pytest.fixture
+    def isolated(monkeypatch):
+        dsn = os.getenv('QD_TEST_POSTGRES_DSN', '')
+        if not dsn:
+            pytest.skip('QD_TEST_POSTGRES_DSN required')
+        assert '@127.0.0.1:5432/qd_automation_test' in dsn
+        monkeypatch.setenv('DATABASE_URL', dsn)
+        schema = 'paper_test_' + uuid4().hex
+>       with get_db_connection() as db:
+             ^^^^^^^^^^^^^^^^^^^
+
+tests/integration/test_polymarket_paper_account.py:24: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+app/utils/db_postgres.py:741: in get_pg_connection
+    pg_pool = _get_connection_pool()
+              ^^^^^^^^^^^^^^^^^^^^^^
+app/utils/db_postgres.py:154: in _get_connection_pool
+    _connection_pool = pool.ThreadedConnectionPool(
+/tmp/pm-r22-venv/lib/python3.12/site-packages/psycopg2/pool.py:161: in __init__
+    AbstractConnectionPool.__init__(
+/tmp/pm-r22-venv/lib/python3.12/site-packages/psycopg2/pool.py:59: in __init__
+    self._connect()
+/tmp/pm-r22-venv/lib/python3.12/site-packages/psycopg2/pool.py:63: in _connect
+    conn = psycopg2.connect(*self._args, **self._kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+dsn = "host=127.0.0.1 port=5432 user=qd_test password=qd_test dbname=qd_automation_test connect_timeout=10 application_name=quantdinger_api options='-c timezone=UTC' keepalives=1 keepalives_idle=30 keepalives_interval=10 keepalives_count=3"
+connection_factory = None, cursor_factory = None
+kwargs = {'host': '127.0.0.1', 'port': 5432, 'user': 'qd_test', 'password': 'qd_test', ...}
+
+    def connect(dsn=None, connection_factory=None, cursor_factory=None, **kwargs):
+        """
+        Create a new database connection.
+    
+        The connection parameters can be specified as a string:
+    
+            conn = psycopg2.connect("dbname=test user=postgres password=secret")
+    
+        or using a set of keyword arguments:
+    
+            conn = psycopg2.connect(database="test", user="postgres", password="secret")
+    
+        Or as a mix of both. The basic connection parameters are:
+    
+        - *dbname*: the database name
+        - *database*: the database name (only as keyword argument)
+        - *user*: user name used to authenticate
+        - *password*: password used to authenticate
+        - *host*: database host address (defaults to UNIX socket if not provided)
+        - *port*: connection port number (defaults to 5432 if not provided)
+    
+        Using the *connection_factory* parameter a different class or connections
+        factory can be specified. It should be a callable object taking a dsn
+        argument.
+    
+        Using the *cursor_factory* parameter, a new default cursor factory will be
+        used by cursor().
+    
+        Using *async*=True an asynchronous connection will be created. *async_* is
+        a valid alias (for Python versions where ``async`` is a keyword).
+    
+        Any other keyword parameter will be passed to the underlying client
+        library: the list of supported parameters depends on the library version.
+    
+        """
+        kwasync = {}
+        if 'async' in kwargs:
+            kwasync['async'] = kwargs.pop('async')
+        if 'async_' in kwargs:
+            kwasync['async_'] = kwargs.pop('async_')
+    
+        dsn = _ext.make_dsn(dsn, **kwargs)
+>       conn = _connect(dsn, connection_factory=connection_factory, **kwasync)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       psycopg2.OperationalError: connection to server at "127.0.0.1", port 5432 failed: Connection refused
+E       	Is the server running on that host and accepting TCP/IP connections?
+
+/tmp/pm-r22-venv/lib/python3.12/site-packages/psycopg2/__init__.py:122: OperationalError
+------------------------------ Captured log setup ------------------------------
+WARNING  app.utils.db_postgres:db_postgres.py:236 Could not probe PostgreSQL max_connections; using configured DB pool limits: connection to server at "127.0.0.1", port 5432 failed: Connection refused
+	Is the server running on that host and accepting TCP/IP connections?
+
+ERROR    app.utils.db_postgres:db_postgres.py:184 Failed to create PostgreSQL connection pool: connection to server at "127.0.0.1", port 5432 failed: Connection refused
+	Is the server running on that host and accepting TCP/IP connections?
+_ ERROR at setup of test_maker_evidence_failure_rolls_back_account_and_ledger __
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fc2c531c380>
+
+    @pytest.fixture
+    def isolated(monkeypatch):
+        dsn = os.getenv('QD_TEST_POSTGRES_DSN', '')
+        if not dsn:
+            pytest.skip('QD_TEST_POSTGRES_DSN required')
+        assert '@127.0.0.1:5432/qd_automation_test' in dsn
+        monkeypatch.setenv('DATABASE_URL', dsn)
+        schema = 'paper_test_' + uuid4().hex
+>       with get_db_connection() as db:
+             ^^^^^^^^^^^^^^^^^^^
+
+tests/integration/test_polymarket_paper_account.py:24: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+app/utils/db_postgres.py:741: in get_pg_connection
+    pg_pool = _get_connection_pool()
+              ^^^^^^^^^^^^^^^^^^^^^^
+app/utils/db_postgres.py:154: in _get_connection_pool
+    _connection_pool = pool.ThreadedConnectionPool(
+/tmp/pm-r22-venv/lib/python3.12/site-packages/psycopg2/pool.py:161: in __init__
+    AbstractConnectionPool.__init__(
+/tmp/pm-r22-venv/lib/python3.12/site-packages/psycopg2/pool.py:59: in __init__
+    self._connect()
+/tmp/pm-r22-venv/lib/python3.12/site-packages/psycopg2/pool.py:63: in _connect
+    conn = psycopg2.connect(*self._args, **self._kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+dsn = "host=127.0.0.1 port=5432 user=qd_test password=qd_test dbname=qd_automation_test connect_timeout=10 application_name=quantdinger_api options='-c timezone=UTC' keepalives=1 keepalives_idle=30 keepalives_interval=10 keepalives_count=3"
+connection_factory = None, cursor_factory = None
+kwargs = {'host': '127.0.0.1', 'port': 5432, 'user': 'qd_test', 'password': 'qd_test', ...}
+
+    def connect(dsn=None, connection_factory=None, cursor_factory=None, **kwargs):
+        """
+        Create a new database connection.
+    
+        The connection parameters can be specified as a string:
+    
+            conn = psycopg2.connect("dbname=test user=postgres password=secret")
+    
+        or using a set of keyword arguments:
+    
+            conn = psycopg2.connect(database="test", user="postgres", password="secret")
+    
+        Or as a mix of both. The basic connection parameters are:
+    
+        - *dbname*: the database name
+        - *database*: the database name (only as keyword argument)
+        - *user*: user name used to authenticate
+        - *password*: password used to authenticate
+        - *host*: database host address (defaults to UNIX socket if not provided)
+        - *port*: connection port number (defaults to 5432 if not provided)
+    
+        Using the *connection_factory* parameter a different class or connections
+        factory can be specified. It should be a callable object taking a dsn
+        argument.
+    
+        Using the *cursor_factory* parameter, a new default cursor factory will be
+        used by cursor().
+    
+        Using *async*=True an asynchronous connection will be created. *async_* is
+        a valid alias (for Python versions where ``async`` is a keyword).
+    
+        Any other keyword parameter will be passed to the underlying client
+        library: the list of supported parameters depends on the library version.
+    
+        """
+        kwasync = {}
+        if 'async' in kwargs:
+            kwasync['async'] = kwargs.pop('async')
+        if 'async_' in kwargs:
+            kwasync['async_'] = kwargs.pop('async_')
+    
+        dsn = _ext.make_dsn(dsn, **kwargs)
+>       conn = _connect(dsn, connection_factory=connection_factory, **kwasync)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       psycopg2.OperationalError: connection to server at "127.0.0.1", port 5432 failed: Connection refused
+E       	Is the server running on that host and accepting TCP/IP connections?
+
+/tmp/pm-r22-venv/lib/python3.12/site-packages/psycopg2/__init__.py:122: OperationalError
+------------------------------ Captured log setup ------------------------------
+WARNING  app.utils.db_postgres:db_postgres.py:236 Could not probe PostgreSQL max_connections; using configured DB pool limits: connection to server at "127.0.0.1", port 5432 failed: Connection refused
+	Is the server running on that host and accepting TCP/IP connections?
+
+ERROR    app.utils.db_postgres:db_postgres.py:184 Failed to create PostgreSQL connection pool: connection to server at "127.0.0.1", port 5432 failed: Connection refused
+	Is the server running on that host and accepting TCP/IP connections?
+____ ERROR at setup of test_verification_annotation_survives_repeated_saves ____
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fc2c531d520>
+
+    @pytest.fixture
+    def isolated(monkeypatch):
+        dsn = os.getenv('QD_TEST_POSTGRES_DSN', '')
+        if not dsn:
+            pytest.skip('QD_TEST_POSTGRES_DSN required')
+        assert '@127.0.0.1:5432/qd_automation_test' in dsn
+        monkeypatch.setenv('DATABASE_URL', dsn)
+        schema = 'paper_test_' + uuid4().hex
+>       with get_db_connection() as db:
+             ^^^^^^^^^^^^^^^^^^^
+
+tests/integration/test_polymarket_paper_account.py:24: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+app/utils/db_postgres.py:741: in get_pg_connection
+    pg_pool = _get_connection_pool()
+              ^^^^^^^^^^^^^^^^^^^^^^
+app/utils/db_postgres.py:154: in _get_connection_pool
+    _connection_pool = pool.ThreadedConnectionPool(
+/tmp/pm-r22-venv/lib/python3.12/site-packages/psycopg2/pool.py:161: in __init__
+    AbstractConnectionPool.__init__(
+/tmp/pm-r22-venv/lib/python3.12/site-packages/psycopg2/pool.py:59: in __init__
+    self._connect()
+/tmp/pm-r22-venv/lib/python3.12/site-packages/psycopg2/pool.py:63: in _connect
+    conn = psycopg2.connect(*self._args, **self._kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+dsn = "host=127.0.0.1 port=5432 user=qd_test password=qd_test dbname=qd_automation_test connect_timeout=10 application_name=quantdinger_api options='-c timezone=UTC' keepalives=1 keepalives_idle=30 keepalives_interval=10 keepalives_count=3"
+connection_factory = None, cursor_factory = None
+kwargs = {'host': '127.0.0.1', 'port': 5432, 'user': 'qd_test', 'password': 'qd_test', ...}
+
+    def connect(dsn=None, connection_factory=None, cursor_factory=None, **kwargs):
+        """
+        Create a new database connection.
+    
+        The connection parameters can be specified as a string:
+    
+            conn = psycopg2.connect("dbname=test user=postgres password=secret")
+    
+        or using a set of keyword arguments:
+    
+            conn = psycopg2.connect(database="test", user="postgres", password="secret")
+    
+        Or as a mix of both. The basic connection parameters are:
+    
+        - *dbname*: the database name
+        - *database*: the database name (only as keyword argument)
+        - *user*: user name used to authenticate
+        - *password*: password used to authenticate
+        - *host*: database host address (defaults to UNIX socket if not provided)
+        - *port*: connection port number (defaults to 5432 if not provided)
+    
+        Using the *connection_factory* parameter a different class or connections
+        factory can be specified. It should be a callable object taking a dsn
+        argument.
+    
+        Using the *cursor_factory* parameter, a new default cursor factory will be
+        used by cursor().
+    
+        Using *async*=True an asynchronous connection will be created. *async_* is
+        a valid alias (for Python versions where ``async`` is a keyword).
+    
+        Any other keyword parameter will be passed to the underlying client
+        library: the list of supported parameters depends on the library version.
+    
+        """
+        kwasync = {}
+        if 'async' in kwargs:
+            kwasync['async'] = kwargs.pop('async')
+        if 'async_' in kwargs:
+            kwasync['async_'] = kwargs.pop('async_')
+    
+        dsn = _ext.make_dsn(dsn, **kwargs)
+>       conn = _connect(dsn, connection_factory=connection_factory, **kwasync)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       psycopg2.OperationalError: connection to server at "127.0.0.1", port 5432 failed: Connection refused
+E       	Is the server running on that host and accepting TCP/IP connections?
+
+/tmp/pm-r22-venv/lib/python3.12/site-packages/psycopg2/__init__.py:122: OperationalError
+------------------------------ Captured log setup ------------------------------
+WARNING  app.utils.db_postgres:db_postgres.py:236 Could not probe PostgreSQL max_connections; using configured DB pool limits: connection to server at "127.0.0.1", port 5432 failed: Connection refused
+	Is the server running on that host and accepting TCP/IP connections?
+
+ERROR    app.utils.db_postgres:db_postgres.py:184 Failed to create PostgreSQL connection pool: connection to server at "127.0.0.1", port 5432 failed: Connection refused
+	Is the server running on that host and accepting TCP/IP connections?
+_ ERROR at setup of test_scheduler_query_selects_monitored_rows_through_real_wrapper _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fc2b4ab5b20>
+
+    @pytest.fixture
+    def db(monkeypatch):
+        import psycopg2
+        from psycopg2.extras import RealDictCursor
+        url=os.getenv('AUTOMATION_TEST_DATABASE_URL','')
+        if not url:
+            pytest.skip('Disposable PostgreSQL not supplied')
+        from urllib.parse import urlparse
+        parsed=urlparse(url)
+        assert parsed.hostname in {'127.0.0.1','localhost'} and parsed.path=='/qd_automation_test'
+        schema='automation_test_'+uuid.uuid4().hex
+>       conn=psycopg2.connect(url)
+             ^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_agent_automations_db.py:33: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+dsn = 'postgresql://qd_test:qd_test@127.0.0.1:5432/qd_automation_test'
+connection_factory = None, cursor_factory = None, kwargs = {}
+
+    def connect(dsn=None, connection_factory=None, cursor_factory=None, **kwargs):
+        """
+        Create a new database connection.
+    
+        The connection parameters can be specified as a string:
+    
+            conn = psycopg2.connect("dbname=test user=postgres password=secret")
+    
+        or using a set of keyword arguments:
+    
+            conn = psycopg2.connect(database="test", user="postgres", password="secret")
+    
+        Or as a mix of both. The basic connection parameters are:
+    
+        - *dbname*: the database name
+        - *database*: the database name (only as keyword argument)
+        - *user*: user name used to authenticate
+        - *password*: password used to authenticate
+        - *host*: database host address (defaults to UNIX socket if not provided)
+        - *port*: connection port number (defaults to 5432 if not provided)
+    
+        Using the *connection_factory* parameter a different class or connections
+        factory can be specified. It should be a callable object taking a dsn
+        argument.
+    
+        Using the *cursor_factory* parameter, a new default cursor factory will be
+        used by cursor().
+    
+        Using *async*=True an asynchronous connection will be created. *async_* is
+        a valid alias (for Python versions where ``async`` is a keyword).
+    
+        Any other keyword parameter will be passed to the underlying client
+        library: the list of supported parameters depends on the library version.
+    
+        """
+        kwasync = {}
+        if 'async' in kwargs:
+            kwasync['async'] = kwargs.pop('async')
+        if 'async_' in kwargs:
+            kwasync['async_'] = kwargs.pop('async_')
+    
+        dsn = _ext.make_dsn(dsn, **kwargs)
+>       conn = _connect(dsn, connection_factory=connection_factory, **kwasync)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       psycopg2.OperationalError: connection to server at "127.0.0.1", port 5432 failed: Connection refused
+E       	Is the server running on that host and accepting TCP/IP connections?
+
+/tmp/pm-r22-venv/lib/python3.12/site-packages/psycopg2/__init__.py:122: OperationalError
+_____ ERROR at setup of test_resolution_latest_completed_and_stale_partial _____
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fc2af3e48c0>
+
+    @pytest.fixture
+    def db(monkeypatch):
+        import psycopg2
+        from psycopg2.extras import RealDictCursor
+        url=os.getenv('AUTOMATION_TEST_DATABASE_URL','')
+        if not url:
+            pytest.skip('Disposable PostgreSQL not supplied')
+        from urllib.parse import urlparse
+        parsed=urlparse(url)
+        assert parsed.hostname in {'127.0.0.1','localhost'} and parsed.path=='/qd_automation_test'
+        schema='automation_test_'+uuid.uuid4().hex
+>       conn=psycopg2.connect(url)
+             ^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_agent_automations_db.py:33: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+dsn = 'postgresql://qd_test:qd_test@127.0.0.1:5432/qd_automation_test'
+connection_factory = None, cursor_factory = None, kwargs = {}
+
+    def connect(dsn=None, connection_factory=None, cursor_factory=None, **kwargs):
+        """
+        Create a new database connection.
+    
+        The connection parameters can be specified as a string:
+    
+            conn = psycopg2.connect("dbname=test user=postgres password=secret")
+    
+        or using a set of keyword arguments:
+    
+            conn = psycopg2.connect(database="test", user="postgres", password="secret")
+    
+        Or as a mix of both. The basic connection parameters are:
+    
+        - *dbname*: the database name
+        - *database*: the database name (only as keyword argument)
+        - *user*: user name used to authenticate
+        - *password*: password used to authenticate
+        - *host*: database host address (defaults to UNIX socket if not provided)
+        - *port*: connection port number (defaults to 5432 if not provided)
+    
+        Using the *connection_factory* parameter a different class or connections
+        factory can be specified. It should be a callable object taking a dsn
+        argument.
+    
+        Using the *cursor_factory* parameter, a new default cursor factory will be
+        used by cursor().
+    
+        Using *async*=True an asynchronous connection will be created. *async_* is
+        a valid alias (for Python versions where ``async`` is a keyword).
+    
+        Any other keyword parameter will be passed to the underlying client
+        library: the list of supported parameters depends on the library version.
+    
+        """
+        kwasync = {}
+        if 'async' in kwargs:
+            kwasync['async'] = kwargs.pop('async')
+        if 'async_' in kwargs:
+            kwasync['async_'] = kwargs.pop('async_')
+    
+        dsn = _ext.make_dsn(dsn, **kwargs)
+>       conn = _connect(dsn, connection_factory=connection_factory, **kwasync)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       psycopg2.OperationalError: connection to server at "127.0.0.1", port 5432 failed: Connection refused
+E       	Is the server running on that host and accepting TCP/IP connections?
+
+/tmp/pm-r22-venv/lib/python3.12/site-packages/psycopg2/__init__.py:122: OperationalError
+__ ERROR at setup of test_runtime_rejects_before_market_or_orders[paper_auto] __
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fc2af3e5c70>
+
+    @pytest.fixture
+    def db(monkeypatch):
+        import psycopg2
+        from psycopg2.extras import RealDictCursor
+        url=os.getenv('AUTOMATION_TEST_DATABASE_URL','')
+        if not url:
+            pytest.skip('Disposable PostgreSQL not supplied')
+        from urllib.parse import urlparse
+        parsed=urlparse(url)
+        assert parsed.hostname in {'127.0.0.1','localhost'} and parsed.path=='/qd_automation_test'
+        schema='automation_test_'+uuid.uuid4().hex
+>       conn=psycopg2.connect(url)
+             ^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_agent_automations_db.py:33: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+dsn = 'postgresql://qd_test:qd_test@127.0.0.1:5432/qd_automation_test'
+connection_factory = None, cursor_factory = None, kwargs = {}
+
+    def connect(dsn=None, connection_factory=None, cursor_factory=None, **kwargs):
+        """
+        Create a new database connection.
+    
+        The connection parameters can be specified as a string:
+    
+            conn = psycopg2.connect("dbname=test user=postgres password=secret")
+    
+        or using a set of keyword arguments:
+    
+            conn = psycopg2.connect(database="test", user="postgres", password="secret")
+    
+        Or as a mix of both. The basic connection parameters are:
+    
+        - *dbname*: the database name
+        - *database*: the database name (only as keyword argument)
+        - *user*: user name used to authenticate
+        - *password*: password used to authenticate
+        - *host*: database host address (defaults to UNIX socket if not provided)
+        - *port*: connection port number (defaults to 5432 if not provided)
+    
+        Using the *connection_factory* parameter a different class or connections
+        factory can be specified. It should be a callable object taking a dsn
+        argument.
+    
+        Using the *cursor_factory* parameter, a new default cursor factory will be
+        used by cursor().
+    
+        Using *async*=True an asynchronous connection will be created. *async_* is
+        a valid alias (for Python versions where ``async`` is a keyword).
+    
+        Any other keyword parameter will be passed to the underlying client
+        library: the list of supported parameters depends on the library version.
+    
+        """
+        kwasync = {}
+        if 'async' in kwargs:
+            kwasync['async'] = kwargs.pop('async')
+        if 'async_' in kwargs:
+            kwasync['async_'] = kwargs.pop('async_')
+    
+        dsn = _ext.make_dsn(dsn, **kwargs)
+>       conn = _connect(dsn, connection_factory=connection_factory, **kwasync)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       psycopg2.OperationalError: connection to server at "127.0.0.1", port 5432 failed: Connection refused
+E       	Is the server running on that host and accepting TCP/IP connections?
+
+/tmp/pm-r22-venv/lib/python3.12/site-packages/psycopg2/__init__.py:122: OperationalError
+_____ ERROR at setup of test_runtime_rejects_before_market_or_orders[live] _____
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fc2ae243230>
+
+    @pytest.fixture
+    def db(monkeypatch):
+        import psycopg2
+        from psycopg2.extras import RealDictCursor
+        url=os.getenv('AUTOMATION_TEST_DATABASE_URL','')
+        if not url:
+            pytest.skip('Disposable PostgreSQL not supplied')
+        from urllib.parse import urlparse
+        parsed=urlparse(url)
+        assert parsed.hostname in {'127.0.0.1','localhost'} and parsed.path=='/qd_automation_test'
+        schema='automation_test_'+uuid.uuid4().hex
+>       conn=psycopg2.connect(url)
+             ^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_agent_automations_db.py:33: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+dsn = 'postgresql://qd_test:qd_test@127.0.0.1:5432/qd_automation_test'
+connection_factory = None, cursor_factory = None, kwargs = {}
+
+    def connect(dsn=None, connection_factory=None, cursor_factory=None, **kwargs):
+        """
+        Create a new database connection.
+    
+        The connection parameters can be specified as a string:
+    
+            conn = psycopg2.connect("dbname=test user=postgres password=secret")
+    
+        or using a set of keyword arguments:
+    
+            conn = psycopg2.connect(database="test", user="postgres", password="secret")
+    
+        Or as a mix of both. The basic connection parameters are:
+    
+        - *dbname*: the database name
+        - *database*: the database name (only as keyword argument)
+        - *user*: user name used to authenticate
+        - *password*: password used to authenticate
+        - *host*: database host address (defaults to UNIX socket if not provided)
+        - *port*: connection port number (defaults to 5432 if not provided)
+    
+        Using the *connection_factory* parameter a different class or connections
+        factory can be specified. It should be a callable object taking a dsn
+        argument.
+    
+        Using the *cursor_factory* parameter, a new default cursor factory will be
+        used by cursor().
+    
+        Using *async*=True an asynchronous connection will be created. *async_* is
+        a valid alias (for Python versions where ``async`` is a keyword).
+    
+        Any other keyword parameter will be passed to the underlying client
+        library: the list of supported parameters depends on the library version.
+    
+        """
+        kwasync = {}
+        if 'async' in kwargs:
+            kwasync['async'] = kwargs.pop('async')
+        if 'async_' in kwargs:
+            kwasync['async_'] = kwargs.pop('async_')
+    
+        dsn = _ext.make_dsn(dsn, **kwargs)
+>       conn = _connect(dsn, connection_factory=connection_factory, **kwasync)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       psycopg2.OperationalError: connection to server at "127.0.0.1", port 5432 failed: Connection refused
+E       	Is the server running on that host and accepting TCP/IP connections?
+
+/tmp/pm-r22-venv/lib/python3.12/site-packages/psycopg2/__init__.py:122: OperationalError
+__ ERROR at setup of test_runtime_rejects_before_market_or_orders[PAPER_AUTO] __
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fc2ae241130>
+
+    @pytest.fixture
+    def db(monkeypatch):
+        import psycopg2
+        from psycopg2.extras import RealDictCursor
+        url=os.getenv('AUTOMATION_TEST_DATABASE_URL','')
+        if not url:
+            pytest.skip('Disposable PostgreSQL not supplied')
+        from urllib.parse import urlparse
+        parsed=urlparse(url)
+        assert parsed.hostname in {'127.0.0.1','localhost'} and parsed.path=='/qd_automation_test'
+        schema='automation_test_'+uuid.uuid4().hex
+>       conn=psycopg2.connect(url)
+             ^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_agent_automations_db.py:33: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+dsn = 'postgresql://qd_test:qd_test@127.0.0.1:5432/qd_automation_test'
+connection_factory = None, cursor_factory = None, kwargs = {}
+
+    def connect(dsn=None, connection_factory=None, cursor_factory=None, **kwargs):
+        """
+        Create a new database connection.
+    
+        The connection parameters can be specified as a string:
+    
+            conn = psycopg2.connect("dbname=test user=postgres password=secret")
+    
+        or using a set of keyword arguments:
+    
+            conn = psycopg2.connect(database="test", user="postgres", password="secret")
+    
+        Or as a mix of both. The basic connection parameters are:
+    
+        - *dbname*: the database name
+        - *database*: the database name (only as keyword argument)
+        - *user*: user name used to authenticate
+        - *password*: password used to authenticate
+        - *host*: database host address (defaults to UNIX socket if not provided)
+        - *port*: connection port number (defaults to 5432 if not provided)
+    
+        Using the *connection_factory* parameter a different class or connections
+        factory can be specified. It should be a callable object taking a dsn
+        argument.
+    
+        Using the *cursor_factory* parameter, a new default cursor factory will be
+        used by cursor().
+    
+        Using *async*=True an asynchronous connection will be created. *async_* is
+        a valid alias (for Python versions where ``async`` is a keyword).
+    
+        Any other keyword parameter will be passed to the underlying client
+        library: the list of supported parameters depends on the library version.
+    
+        """
+        kwasync = {}
+        if 'async' in kwargs:
+            kwasync['async'] = kwargs.pop('async')
+        if 'async_' in kwargs:
+            kwasync['async_'] = kwargs.pop('async_')
+    
+        dsn = _ext.make_dsn(dsn, **kwargs)
+>       conn = _connect(dsn, connection_factory=connection_factory, **kwasync)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       psycopg2.OperationalError: connection to server at "127.0.0.1", port 5432 failed: Connection refused
+E       	Is the server running on that host and accepting TCP/IP connections?
+
+/tmp/pm-r22-venv/lib/python3.12/site-packages/psycopg2/__init__.py:122: OperationalError
+_ ERROR at setup of test_missing_shortlist_skips_without_decisions_or_mutations _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fc2ae243770>
+
+    @pytest.fixture
+    def db(monkeypatch):
+        import psycopg2
+        from psycopg2.extras import RealDictCursor
+        url=os.getenv('AUTOMATION_TEST_DATABASE_URL','')
+        if not url:
+            pytest.skip('Disposable PostgreSQL not supplied')
+        from urllib.parse import urlparse
+        parsed=urlparse(url)
+        assert parsed.hostname in {'127.0.0.1','localhost'} and parsed.path=='/qd_automation_test'
+        schema='automation_test_'+uuid.uuid4().hex
+>       conn=psycopg2.connect(url)
+             ^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_agent_automations_db.py:33: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+dsn = 'postgresql://qd_test:qd_test@127.0.0.1:5432/qd_automation_test'
+connection_factory = None, cursor_factory = None, kwargs = {}
+
+    def connect(dsn=None, connection_factory=None, cursor_factory=None, **kwargs):
+        """
+        Create a new database connection.
+    
+        The connection parameters can be specified as a string:
+    
+            conn = psycopg2.connect("dbname=test user=postgres password=secret")
+    
+        or using a set of keyword arguments:
+    
+            conn = psycopg2.connect(database="test", user="postgres", password="secret")
+    
+        Or as a mix of both. The basic connection parameters are:
+    
+        - *dbname*: the database name
+        - *database*: the database name (only as keyword argument)
+        - *user*: user name used to authenticate
+        - *password*: password used to authenticate
+        - *host*: database host address (defaults to UNIX socket if not provided)
+        - *port*: connection port number (defaults to 5432 if not provided)
+    
+        Using the *connection_factory* parameter a different class or connections
+        factory can be specified. It should be a callable object taking a dsn
+        argument.
+    
+        Using the *cursor_factory* parameter, a new default cursor factory will be
+        used by cursor().
+    
+        Using *async*=True an asynchronous connection will be created. *async_* is
+        a valid alias (for Python versions where ``async`` is a keyword).
+    
+        Any other keyword parameter will be passed to the underlying client
+        library: the list of supported parameters depends on the library version.
+    
+        """
+        kwasync = {}
+        if 'async' in kwargs:
+            kwasync['async'] = kwargs.pop('async')
+        if 'async_' in kwargs:
+            kwasync['async_'] = kwargs.pop('async_')
+    
+        dsn = _ext.make_dsn(dsn, **kwargs)
+>       conn = _connect(dsn, connection_factory=connection_factory, **kwasync)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       psycopg2.OperationalError: connection to server at "127.0.0.1", port 5432 failed: Connection refused
+E       	Is the server running on that host and accepting TCP/IP connections?
+
+/tmp/pm-r22-venv/lib/python3.12/site-packages/psycopg2/__init__.py:122: OperationalError
+_ ERROR at setup of test_forward_recovery_maturity_idempotency_and_daily_metrics _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fc2976536e0>
+
+    @pytest.fixture
+    def db(monkeypatch):
+        import psycopg2
+        from psycopg2.extras import RealDictCursor
+        url=os.getenv('AUTOMATION_TEST_DATABASE_URL','')
+        if not url:
+            pytest.skip('Disposable PostgreSQL not supplied')
+        from urllib.parse import urlparse
+        parsed=urlparse(url)
+        assert parsed.hostname in {'127.0.0.1','localhost'} and parsed.path=='/qd_automation_test'
+        schema='automation_test_'+uuid.uuid4().hex
+>       conn=psycopg2.connect(url)
+             ^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_agent_automations_db.py:33: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+dsn = 'postgresql://qd_test:qd_test@127.0.0.1:5432/qd_automation_test'
+connection_factory = None, cursor_factory = None, kwargs = {}
+
+    def connect(dsn=None, connection_factory=None, cursor_factory=None, **kwargs):
+        """
+        Create a new database connection.
+    
+        The connection parameters can be specified as a string:
+    
+            conn = psycopg2.connect("dbname=test user=postgres password=secret")
+    
+        or using a set of keyword arguments:
+    
+            conn = psycopg2.connect(database="test", user="postgres", password="secret")
+    
+        Or as a mix of both. The basic connection parameters are:
+    
+        - *dbname*: the database name
+        - *database*: the database name (only as keyword argument)
+        - *user*: user name used to authenticate
+        - *password*: password used to authenticate
+        - *host*: database host address (defaults to UNIX socket if not provided)
+        - *port*: connection port number (defaults to 5432 if not provided)
+    
+        Using the *connection_factory* parameter a different class or connections
+        factory can be specified. It should be a callable object taking a dsn
+        argument.
+    
+        Using the *cursor_factory* parameter, a new default cursor factory will be
+        used by cursor().
+    
+        Using *async*=True an asynchronous connection will be created. *async_* is
+        a valid alias (for Python versions where ``async`` is a keyword).
+    
+        Any other keyword parameter will be passed to the underlying client
+        library: the list of supported parameters depends on the library version.
+    
+        """
+        kwasync = {}
+        if 'async' in kwargs:
+            kwasync['async'] = kwargs.pop('async')
+        if 'async_' in kwargs:
+            kwasync['async_'] = kwargs.pop('async_')
+    
+        dsn = _ext.make_dsn(dsn, **kwargs)
+>       conn = _connect(dsn, connection_factory=connection_factory, **kwasync)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       psycopg2.OperationalError: connection to server at "127.0.0.1", port 5432 failed: Connection refused
+E       	Is the server running on that host and accepting TCP/IP connections?
+
+/tmp/pm-r22-venv/lib/python3.12/site-packages/psycopg2/__init__.py:122: OperationalError
+_ ERROR at setup of test_runner_resolves_run_local_symbols_and_never_executes __
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fc297705c70>
+
+    @pytest.fixture
+    def db(monkeypatch):
+        import psycopg2
+        from psycopg2.extras import RealDictCursor
+        url=os.getenv('AUTOMATION_TEST_DATABASE_URL','')
+        if not url:
+            pytest.skip('Disposable PostgreSQL not supplied')
+        from urllib.parse import urlparse
+        parsed=urlparse(url)
+        assert parsed.hostname in {'127.0.0.1','localhost'} and parsed.path=='/qd_automation_test'
+        schema='automation_test_'+uuid.uuid4().hex
+>       conn=psycopg2.connect(url)
+             ^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_agent_automations_db.py:33: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+dsn = 'postgresql://qd_test:qd_test@127.0.0.1:5432/qd_automation_test'
+connection_factory = None, cursor_factory = None, kwargs = {}
+
+    def connect(dsn=None, connection_factory=None, cursor_factory=None, **kwargs):
+        """
+        Create a new database connection.
+    
+        The connection parameters can be specified as a string:
+    
+            conn = psycopg2.connect("dbname=test user=postgres password=secret")
+    
+        or using a set of keyword arguments:
+    
+            conn = psycopg2.connect(database="test", user="postgres", password="secret")
+    
+        Or as a mix of both. The basic connection parameters are:
+    
+        - *dbname*: the database name
+        - *database*: the database name (only as keyword argument)
+        - *user*: user name used to authenticate
+        - *password*: password used to authenticate
+        - *host*: database host address (defaults to UNIX socket if not provided)
+        - *port*: connection port number (defaults to 5432 if not provided)
+    
+        Using the *connection_factory* parameter a different class or connections
+        factory can be specified. It should be a callable object taking a dsn
+        argument.
+    
+        Using the *cursor_factory* parameter, a new default cursor factory will be
+        used by cursor().
+    
+        Using *async*=True an asynchronous connection will be created. *async_* is
+        a valid alias (for Python versions where ``async`` is a keyword).
+    
+        Any other keyword parameter will be passed to the underlying client
+        library: the list of supported parameters depends on the library version.
+    
+        """
+        kwasync = {}
+        if 'async' in kwargs:
+            kwasync['async'] = kwargs.pop('async')
+        if 'async_' in kwargs:
+            kwasync['async_'] = kwargs.pop('async_')
+    
+        dsn = _ext.make_dsn(dsn, **kwargs)
+>       conn = _connect(dsn, connection_factory=connection_factory, **kwasync)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       psycopg2.OperationalError: connection to server at "127.0.0.1", port 5432 failed: Connection refused
+E       	Is the server running on that host and accepting TCP/IP connections?
+
+/tmp/pm-r22-venv/lib/python3.12/site-packages/psycopg2/__init__.py:122: OperationalError
+___________ ERROR at setup of test_save_rejects_before_account_scope ___________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fc297704590>
+
+    @pytest.fixture
+    def db(monkeypatch):
+        import psycopg2
+        from psycopg2.extras import RealDictCursor
+        url=os.getenv('AUTOMATION_TEST_DATABASE_URL','')
+        if not url:
+            pytest.skip('Disposable PostgreSQL not supplied')
+        from urllib.parse import urlparse
+        parsed=urlparse(url)
+        assert parsed.hostname in {'127.0.0.1','localhost'} and parsed.path=='/qd_automation_test'
+        schema='automation_test_'+uuid.uuid4().hex
+>       conn=psycopg2.connect(url)
+             ^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_agent_automations_db.py:33: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+dsn = 'postgresql://qd_test:qd_test@127.0.0.1:5432/qd_automation_test'
+connection_factory = None, cursor_factory = None, kwargs = {}
+
+    def connect(dsn=None, connection_factory=None, cursor_factory=None, **kwargs):
+        """
+        Create a new database connection.
+    
+        The connection parameters can be specified as a string:
+    
+            conn = psycopg2.connect("dbname=test user=postgres password=secret")
+    
+        or using a set of keyword arguments:
+    
+            conn = psycopg2.connect(database="test", user="postgres", password="secret")
+    
+        Or as a mix of both. The basic connection parameters are:
+    
+        - *dbname*: the database name
+        - *database*: the database name (only as keyword argument)
+        - *user*: user name used to authenticate
+        - *password*: password used to authenticate
+        - *host*: database host address (defaults to UNIX socket if not provided)
+        - *port*: connection port number (defaults to 5432 if not provided)
+    
+        Using the *connection_factory* parameter a different class or connections
+        factory can be specified. It should be a callable object taking a dsn
+        argument.
+    
+        Using the *cursor_factory* parameter, a new default cursor factory will be
+        used by cursor().
+    
+        Using *async*=True an asynchronous connection will be created. *async_* is
+        a valid alias (for Python versions where ``async`` is a keyword).
+    
+        Any other keyword parameter will be passed to the underlying client
+        library: the list of supported parameters depends on the library version.
+    
+        """
+        kwasync = {}
+        if 'async' in kwargs:
+            kwasync['async'] = kwargs.pop('async')
+        if 'async_' in kwargs:
+            kwasync['async_'] = kwargs.pop('async_')
+    
+        dsn = _ext.make_dsn(dsn, **kwargs)
+>       conn = _connect(dsn, connection_factory=connection_factory, **kwasync)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       psycopg2.OperationalError: connection to server at "127.0.0.1", port 5432 failed: Connection refused
+E       	Is the server running on that host and accepting TCP/IP connections?
+
+/tmp/pm-r22-venv/lib/python3.12/site-packages/psycopg2/__init__.py:122: OperationalError
+=============================== warnings summary ===============================
+tests/test_agent_backtest_billing.py::test_celery_delivery_does_not_repeat_claimed_or_terminal_job[running]
+tests/test_agent_backtest_billing.py::test_celery_worker_uses_atomic_terminal_helpers[False]
+tests/test_agent_backtest_billing.py::test_celery_worker_uses_atomic_terminal_helpers[True]
+tests/test_strategy_evolution.py::test_celery_persists_structured_evolution_failure
+  /workspace/quantdinger/wt_r22/backend_api_python/tests/../app/tasks/agent_jobs.py:64: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    if not agent_jobs._set_status(job_id, "running", started_at=datetime.utcnow()):
+
+tests/test_crypto_kline_exchange_matrix.py::test_crypto_kline_is_pure_ohlcv_and_preserves_price_precision
+  /workspace/quantdinger/wt_r22/backend_api_python/tests/../app/data_sources/crypto.py:730: DeprecationWarning: datetime.datetime.utcfromtimestamp() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.fromtimestamp(timestamp, datetime.UTC).
+    first_ts = _dt.utcfromtimestamp(klines[0]['time']).isoformat()
+
+tests/test_crypto_kline_exchange_matrix.py::test_crypto_kline_is_pure_ohlcv_and_preserves_price_precision
+  /workspace/quantdinger/wt_r22/backend_api_python/tests/../app/data_sources/crypto.py:731: DeprecationWarning: datetime.datetime.utcfromtimestamp() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.fromtimestamp(timestamp, datetime.UTC).
+    last_ts = _dt.utcfromtimestamp(klines[-1]['time']).isoformat()
+
+tests/test_indicator_signal_alerts.py: 28 warnings
+  /workspace/quantdinger/wt_r22/backend_api_python/tests/../app/services/indicator_signal_alerts.py:763: DeprecationWarning: datetime.datetime.utcfromtimestamp() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.fromtimestamp(timestamp, datetime.UTC).
+    return datetime.utcfromtimestamp(value).isoformat()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+ERROR tests/integration/test_execution_projection_atomic.py::test_failed_projection_rolls_back_all_writes_and_replays[config]
+ERROR tests/integration/test_execution_projection_atomic.py::test_failed_projection_rolls_back_all_writes_and_replays[after_position]
+ERROR tests/integration/test_execution_projection_atomic.py::test_failed_projection_rolls_back_all_writes_and_replays[after_trade]
+ERROR tests/integration/test_execution_projection_atomic.py::test_failed_projection_rolls_back_all_writes_and_replays[runtime_sql]
+ERROR tests/integration/test_execution_projection_atomic.py::test_concurrent_duplicate_event_is_applied_once[True]
+ERROR tests/integration/test_execution_projection_atomic.py::test_concurrent_duplicate_event_is_applied_once[False]
+ERROR tests/integration/test_execution_projection_atomic.py::test_subsequent_partial_fill_keeps_quantity_and_fees_consistent
+ERROR tests/integration/test_execution_projection_atomic.py::test_rest_writer_and_ws_share_the_posted_baseline[True]
+ERROR tests/integration/test_execution_projection_atomic.py::test_rest_writer_and_ws_share_the_posted_baseline[False]
+ERROR tests/integration/test_execution_projection_atomic.py::test_observed_fill_without_ledger_recovers_after_crash
+ERROR tests/integration/test_execution_projection_atomic.py::test_late_cumulative_fee_and_rebate_do_not_add_quantity
+ERROR tests/integration/test_execution_projection_atomic.py::test_compound_order_ws_does_not_compare_one_leg_to_total
+ERROR tests/integration/test_execution_projection_atomic.py::test_missing_execution_price_does_not_reuse_previous_fill_and_can_replay
+ERROR tests/integration/test_execution_projection_atomic.py::test_cumulative_order_average_prices_only_the_new_fill
+ERROR tests/integration/test_execution_projection_atomic.py::test_futu_duplicate_order_push_after_rest_fill_does_not_add_trade
+ERROR tests/integration/test_polymarket_paper_account.py::test_persistence_report_evidence_replay_and_restart
+ERROR tests/integration/test_polymarket_paper_account.py::test_retention_bounded_preserves_open_capital_evidence
+ERROR tests/integration/test_polymarket_paper_account.py::test_maker_atomic_shared_ledger_reports_restart_and_retry
+ERROR tests/integration/test_polymarket_paper_account.py::test_recorded_maker_feed_prints_official_and_proxy_settlement
+ERROR tests/integration/test_polymarket_paper_account.py::test_maker_evidence_failure_rolls_back_account_and_ledger
+ERROR tests/integration/test_polymarket_paper_account.py::test_verification_annotation_survives_repeated_saves
+ERROR tests/test_scheduler_sql.py::test_scheduler_query_selects_monitored_rows_through_real_wrapper
+ERROR tests/test_us_shortlist_scoring.py::test_resolution_latest_completed_and_stale_partial
+ERROR tests/test_us_shortlist_scoring.py::test_runtime_rejects_before_market_or_orders[paper_auto]
+ERROR tests/test_us_shortlist_scoring.py::test_runtime_rejects_before_market_or_orders[live]
+ERROR tests/test_us_shortlist_scoring.py::test_runtime_rejects_before_market_or_orders[PAPER_AUTO]
+ERROR tests/test_us_shortlist_scoring.py::test_missing_shortlist_skips_without_decisions_or_mutations
+ERROR tests/test_us_shortlist_scoring.py::test_forward_recovery_maturity_idempotency_and_daily_metrics
+ERROR tests/test_us_shortlist_scoring.py::test_runner_resolves_run_local_symbols_and_never_executes
+ERROR tests/test_us_shortlist_scoring.py::test_save_rejects_before_account_scope
+710 passed, 19 skipped, 34 warnings, 30 errors in 58.05s

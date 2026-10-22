@@ -1,0 +1,930 @@
+{
+  "phase": "before",
+  "rate": 1896,
+  "repeat": 2,
+  "exit": 0,
+  "wall_seconds": 29.314664551000533,
+  "result": {
+    "mode": "process-per-group",
+    "weighted": true,
+    "seconds": 15.454732154999874,
+    "rate": 1896.0,
+    "backup_count": 2,
+    "ready_copies_at_start": [
+      2,
+      2,
+      2,
+      2
+    ],
+    "actual_wire_rate": 2844.0,
+    "startup": {
+      "seconds": 10.81311966999965,
+      "cpu_s": 4.294400577,
+      "stages": {
+        "up_down:BTC:15m": {
+          "stages": {
+            "primary_parse": 9.672000000000001e-05,
+            "primary_apply": 0.00018510000000000003,
+            "backup_parse": 0.00012165100000000002,
+            "backup_apply": 0.00022648399999999997,
+            "backup_fanin": 0.00010100700000000007
+          },
+          "pickle_s": 0.001872510999999992,
+          "cpu_s": 1.054054451
+        },
+        "up_down:BTC:5m": {
+          "stages": {
+            "primary_parse": 0.000130488,
+            "primary_apply": 0.000226609,
+            "backup_parse": 0.00012327999999999997,
+            "backup_apply": 0.000229701,
+            "backup_fanin": 8.403099999999993e-05
+          },
+          "pickle_s": 0.0016753320000000005,
+          "cpu_s": 1.05036121
+        },
+        "up_down:ETH:15m": {
+          "stages": {
+            "primary_parse": 9.8229e-05,
+            "primary_apply": 0.00018565899999999997,
+            "backup_parse": 0.000136485,
+            "backup_apply": 0.00024118199999999997,
+            "backup_fanin": 9.8162e-05
+          },
+          "pickle_s": 0.001941069000000004,
+          "cpu_s": 1.048889779
+        },
+        "up_down:ETH:5m": {
+          "stages": {
+            "primary_parse": 0.00011852100000000001,
+            "primary_apply": 0.00018389000000000003,
+            "backup_parse": 0.00015010800000000006,
+            "backup_apply": 0.00025173000000000003,
+            "backup_fanin": 0.000143599
+          },
+          "pickle_s": 0.0018718380000000083,
+          "cpu_s": 1.054241097
+        }
+      }
+    },
+    "measured_cpu_cores": 1.0338574888100434,
+    "logical": 14220,
+    "published": 14187,
+    "ready_ratio": 0.9995833333333334,
+    "ready_samples": 2400,
+    "ready_live_drops": 0,
+    "ready_live_drops_by_group": {
+      "up_down:BTC:15m": 0,
+      "up_down:BTC:5m": 0,
+      "up_down:ETH:15m": 0,
+      "up_down:ETH:5m": 0
+    },
+    "resyncs": 0,
+    "primary_queue_wait_ms": {
+      "p50": 0,
+      "p99": 14.181,
+      "max": 43.378,
+      "samples": 1229
+    },
+    "primary_queue_age_by_group": {
+      "up_down:BTC:15m": {
+        "p50": 0,
+        "p99": 4.19,
+        "max": 29.836000000000002,
+        "samples": 308,
+        "series_1s": [
+          {
+            "second": 0,
+            "queue_age_ms": 18.163,
+            "depth_max": 2,
+            "samples": 20
+          },
+          {
+            "second": 1,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 2,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 3,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 4,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 5,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 6,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 7,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 8,
+            "queue_age_ms": 8.28,
+            "depth_max": 3,
+            "samples": 19
+          },
+          {
+            "second": 9,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 10,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 11,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 12,
+            "queue_age_ms": 29.836,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 13,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 14,
+            "queue_age_ms": 4.19,
+            "depth_max": 8,
+            "samples": 19
+          },
+          {
+            "second": 15,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 10
+          }
+        ],
+        "series_max_ms": 29.836
+      },
+      "up_down:BTC:5m": {
+        "p50": 0,
+        "p99": 29.534000000000002,
+        "max": 43.378,
+        "samples": 307,
+        "series_1s": [
+          {
+            "second": 0,
+            "queue_age_ms": 16.671,
+            "depth_max": 11,
+            "samples": 20
+          },
+          {
+            "second": 1,
+            "queue_age_ms": 15.169,
+            "depth_max": 5,
+            "samples": 20
+          },
+          {
+            "second": 2,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 3,
+            "queue_age_ms": 33.334,
+            "depth_max": 5,
+            "samples": 20
+          },
+          {
+            "second": 4,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 5,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 6,
+            "queue_age_ms": 29.534,
+            "depth_max": 20,
+            "samples": 19
+          },
+          {
+            "second": 7,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 8,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 9,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 10,
+            "queue_age_ms": 43.378,
+            "depth_max": 3,
+            "samples": 20
+          },
+          {
+            "second": 11,
+            "queue_age_ms": 14.181,
+            "depth_max": 21,
+            "samples": 19
+          },
+          {
+            "second": 12,
+            "queue_age_ms": 19.713,
+            "depth_max": 10,
+            "samples": 20
+          },
+          {
+            "second": 13,
+            "queue_age_ms": 15.852,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 14,
+            "queue_age_ms": 33.315,
+            "depth_max": 5,
+            "samples": 20
+          },
+          {
+            "second": 15,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 9
+          }
+        ],
+        "series_max_ms": 43.378
+      },
+      "up_down:ETH:15m": {
+        "p50": 0,
+        "p99": 0,
+        "max": 3.9050000000000002,
+        "samples": 308,
+        "series_1s": [
+          {
+            "second": 0,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 1,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 2,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 3,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 4,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 5,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 6,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 7,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 8,
+            "queue_age_ms": 3.905,
+            "depth_max": 5,
+            "samples": 19
+          },
+          {
+            "second": 9,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 10,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 11,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 12,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 13,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 14,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 15,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 9
+          }
+        ],
+        "series_max_ms": 3.905
+      },
+      "up_down:ETH:5m": {
+        "p50": 0,
+        "p99": 5.626,
+        "max": 7.467,
+        "samples": 307,
+        "series_1s": [
+          {
+            "second": 0,
+            "queue_age_ms": 0.451,
+            "depth_max": 9,
+            "samples": 19
+          },
+          {
+            "second": 1,
+            "queue_age_ms": 7.467,
+            "depth_max": 5,
+            "samples": 20
+          },
+          {
+            "second": 2,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 3,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 4,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 5,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 6,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 7,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 8,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 9,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 10,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 11,
+            "queue_age_ms": 7.039,
+            "depth_max": 0,
+            "samples": 19
+          },
+          {
+            "second": 12,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 13,
+            "queue_age_ms": 5.626,
+            "depth_max": 6,
+            "samples": 20
+          },
+          {
+            "second": 14,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 20
+          },
+          {
+            "second": 15,
+            "queue_age_ms": 0.0,
+            "depth_max": 0,
+            "samples": 9
+          }
+        ],
+        "series_max_ms": 7.467
+      }
+    },
+    "primary_queue_age": {
+      "p50": 0,
+      "p99": 14.181,
+      "max": 43.378,
+      "samples": 1229,
+      "series_1s": [
+        {
+          "second": 0,
+          "queue_age_ms": 18.163,
+          "depth_max": 11,
+          "samples": 79
+        },
+        {
+          "second": 1,
+          "queue_age_ms": 15.169,
+          "depth_max": 5,
+          "samples": 80
+        },
+        {
+          "second": 2,
+          "queue_age_ms": 0.0,
+          "depth_max": 0,
+          "samples": 80
+        },
+        {
+          "second": 3,
+          "queue_age_ms": 33.334,
+          "depth_max": 5,
+          "samples": 80
+        },
+        {
+          "second": 4,
+          "queue_age_ms": 0.0,
+          "depth_max": 0,
+          "samples": 80
+        },
+        {
+          "second": 5,
+          "queue_age_ms": 0.0,
+          "depth_max": 0,
+          "samples": 80
+        },
+        {
+          "second": 6,
+          "queue_age_ms": 29.534,
+          "depth_max": 20,
+          "samples": 79
+        },
+        {
+          "second": 7,
+          "queue_age_ms": 0.0,
+          "depth_max": 0,
+          "samples": 80
+        },
+        {
+          "second": 8,
+          "queue_age_ms": 8.28,
+          "depth_max": 5,
+          "samples": 78
+        },
+        {
+          "second": 9,
+          "queue_age_ms": 0.0,
+          "depth_max": 0,
+          "samples": 80
+        },
+        {
+          "second": 10,
+          "queue_age_ms": 43.378,
+          "depth_max": 3,
+          "samples": 80
+        },
+        {
+          "second": 11,
+          "queue_age_ms": 14.181,
+          "depth_max": 21,
+          "samples": 78
+        },
+        {
+          "second": 12,
+          "queue_age_ms": 29.836,
+          "depth_max": 10,
+          "samples": 80
+        },
+        {
+          "second": 13,
+          "queue_age_ms": 15.852,
+          "depth_max": 6,
+          "samples": 80
+        },
+        {
+          "second": 14,
+          "queue_age_ms": 33.315,
+          "depth_max": 8,
+          "samples": 79
+        },
+        {
+          "second": 15,
+          "queue_age_ms": 0.0,
+          "depth_max": 0,
+          "samples": 36
+        }
+      ],
+      "series_max_ms": 43.378
+    },
+    "ready_by_group": {
+      "up_down:BTC:15m": 1.0,
+      "up_down:BTC:5m": 1.0,
+      "up_down:ETH:15m": 1.0,
+      "up_down:ETH:5m": 0.998371335504886
+    },
+    "primary_queue_age_definition": "pending_wait_seconds of ReceiveQueue (oldest frame queued or in parse), sampled every 50ms for the whole window on each group while the socket stays open, not only at a kick or disconnect. series_1s is the max of those samples in each whole second after the window start. primary_queue_wait_ms is the pooled distribution; its p99 is the pass/fail check.",
+    "backup_queue_wait_ms": {
+      "p50": 0,
+      "p99": 9.037999999999998,
+      "max": 34.973,
+      "samples": 2400
+    },
+    "failover_gaps_s": [
+      0.05371383000056085,
+      0.002578174999143812,
+      0.04993549000027997,
+      0.006365884999468108
+    ],
+    "failover_gap_max_s": 0.05371383000056085,
+    "failover_stage_traces": [
+      {
+        "key": "up_down:BTC:15m",
+        "seconds": 0.05371383000056085,
+        "seq": 682,
+        "kick_mono": 11842.671034137,
+        "submitted_mono": 11842.724754937,
+        "submit_to_parent_apply_ms": 2.30404899957648,
+        "kick_to_parent_apply_ms": 56.024849000095855
+      },
+      {
+        "key": "up_down:BTC:5m",
+        "seconds": 0.002578174999143812,
+        "seq": 2554,
+        "kick_mono": 11845.6727338,
+        "submitted_mono": 11845.675316404,
+        "submit_to_parent_apply_ms": 7.771544000206632,
+        "kick_to_parent_apply_ms": 10.354148000260466
+      },
+      {
+        "key": "up_down:ETH:15m",
+        "seconds": 0.04993549000027997,
+        "seq": 1004,
+        "kick_mono": 11848.672059377,
+        "submitted_mono": 11848.722000637,
+        "submit_to_parent_apply_ms": 3.0746879983780673,
+        "kick_to_parent_apply_ms": 53.01594799857412
+      },
+      {
+        "key": "up_down:ETH:5m",
+        "seconds": 0.006365884999468108,
+        "seq": 2219,
+        "kick_mono": 11851.671101132,
+        "submitted_mono": 11851.677473206,
+        "submit_to_parent_apply_ms": 4.501532999711344,
+        "kick_to_parent_apply_ms": 10.873606999666663
+      }
+    ],
+    "primary_failure_events": {
+      "up_down:BTC:15m": {
+        "total": 1,
+        "without_ready_backup": 0,
+        "events": [
+          {
+            "code": 1013,
+            "ready_backup_at_kick": true,
+            "ready_backups": 2,
+            "takeover_gap_ms": 102.801,
+            "receipt_gap_ms": 102.801,
+            "recovery": "ws",
+            "gap_final": true,
+            "merged_gap_ms": 94.749,
+            "merged_gap_final": true,
+            "gap_definition": "Per interruption event and asset: last merged publication before interruption to first merged publication after interruption; max across affected assets. Publication wall time, not socket receipt, detection-to-takeover, physical silence or ordinary interarrival. A final gap >1500ms is a business gap regardless of ready spares; physical silence >20s is separately alert-only. Missing baseline is unmeasured, never zero.",
+            "business_gap": false,
+            "business_gap_limit_ms": 1500,
+            "interruption_at": "2026-10-22T17:33:07.147256+00:00",
+            "business_event_id": 1,
+            "unmeasured_assets": [],
+            "gap_measurement": "measured",
+            "source_silence_ms": 49.065999999999995,
+            "physical_source_silence_alert": false,
+            "physical_source_silence_alert_only": true,
+            "merged_receipt_gap_ms": 49.065999999999995,
+            "reason": "transport",
+            "promotion_at": "2026-10-22T17:33:07.150840+00:00",
+            "detection_to_promotion_ms": 2.8065240003343206,
+            "baseline_verified": [
+              "0n",
+              "0y"
+            ],
+            "need_book_assets": [],
+            "gap_maximum": {
+              "ms": 94.749,
+              "asset": "0n",
+              "at": "2026-10-22T17:33:07.200848+00:00"
+            },
+            "detection_to_first_valid_publication_ms": 53.73263499859604,
+            "first_valid_publication_at": "2026-10-22T17:33:07.200940+00:00",
+            "detection_to_takeover_ms": 53.73263499859604
+          }
+        ]
+      },
+      "up_down:BTC:5m": {
+        "total": 1,
+        "without_ready_backup": 0,
+        "events": [
+          {
+            "code": 1013,
+            "ready_backup_at_kick": true,
+            "ready_backups": 2,
+            "takeover_gap_ms": 104.595,
+            "receipt_gap_ms": 104.595,
+            "recovery": "ws",
+            "gap_final": true,
+            "merged_gap_ms": 44.551,
+            "merged_gap_final": true,
+            "gap_definition": "Per interruption event and asset: last merged publication before interruption to first merged publication after interruption; max across affected assets. Publication wall time, not socket receipt, detection-to-takeover, physical silence or ordinary interarrival. A final gap >1500ms is a business gap regardless of ready spares; physical silence >20s is separately alert-only. Missing baseline is unmeasured, never zero.",
+            "business_gap": false,
+            "business_gap_limit_ms": 1500,
+            "interruption_at": "2026-10-22T17:33:10.148928+00:00",
+            "business_event_id": 1,
+            "unmeasured_assets": [],
+            "gap_measurement": "measured",
+            "source_silence_ms": 50.236000000000004,
+            "physical_source_silence_alert": false,
+            "physical_source_silence_alert_only": true,
+            "merged_receipt_gap_ms": 50.236000000000004,
+            "reason": "transport",
+            "gap_maximum": {
+              "ms": 44.551,
+              "asset": "1y",
+              "at": "2026-10-22T17:33:10.151406+00:00"
+            },
+            "promotion_at": "2026-10-22T17:33:10.158755+00:00",
+            "detection_to_promotion_ms": 2.9695800003537443,
+            "baseline_verified": [
+              "1n",
+              "1y"
+            ],
+            "need_book_assets": [],
+            "detection_to_first_valid_publication_ms": 54.355749000023934,
+            "first_valid_publication_at": "2026-10-22T17:33:10.203251+00:00",
+            "detection_to_takeover_ms": 54.355749000023934
+          }
+        ]
+      },
+      "up_down:ETH:15m": {
+        "total": 1,
+        "without_ready_backup": 0,
+        "events": [
+          {
+            "code": 1013,
+            "ready_backup_at_kick": true,
+            "ready_backups": 2,
+            "takeover_gap_ms": 102.14099999999999,
+            "receipt_gap_ms": 102.14099999999999,
+            "recovery": "ws",
+            "gap_final": true,
+            "merged_gap_ms": 96.97200000000001,
+            "merged_gap_final": true,
+            "gap_definition": "Per interruption event and asset: last merged publication before interruption to first merged publication after interruption; max across affected assets. Publication wall time, not socket receipt, detection-to-takeover, physical silence or ordinary interarrival. A final gap >1500ms is a business gap regardless of ready spares; physical silence >20s is separately alert-only. Missing baseline is unmeasured, never zero.",
+            "business_gap": false,
+            "business_gap_limit_ms": 1500,
+            "interruption_at": "2026-10-22T17:33:13.148255+00:00",
+            "business_event_id": 1,
+            "unmeasured_assets": [],
+            "gap_measurement": "measured",
+            "source_silence_ms": 50.722,
+            "physical_source_silence_alert": false,
+            "physical_source_silence_alert_only": true,
+            "merged_receipt_gap_ms": 50.722,
+            "reason": "transport",
+            "promotion_at": "2026-10-22T17:33:13.150004+00:00",
+            "detection_to_promotion_ms": 0.8713660008652369,
+            "baseline_verified": [],
+            "need_book_assets": [
+              "2n",
+              "2y"
+            ],
+            "gap_maximum": {
+              "ms": 96.97200000000001,
+              "asset": "2y",
+              "at": "2026-10-22T17:33:13.198092+00:00"
+            },
+            "detection_to_first_valid_publication_ms": 51.41694699887012,
+            "first_valid_publication_at": "2026-10-22T17:33:13.199638+00:00",
+            "detection_to_takeover_ms": 51.41694699887012
+          }
+        ]
+      },
+      "up_down:ETH:5m": {
+        "total": 1,
+        "without_ready_backup": 0,
+        "events": [
+          {
+            "code": 1013,
+            "ready_backup_at_kick": true,
+            "ready_backups": 2,
+            "takeover_gap_ms": 54.385000000000005,
+            "receipt_gap_ms": 54.385000000000005,
+            "recovery": "ws",
+            "gap_final": true,
+            "merged_gap_ms": 50.484,
+            "merged_gap_final": true,
+            "gap_definition": "Per interruption event and asset: last merged publication before interruption to first merged publication after interruption; max across affected assets. Publication wall time, not socket receipt, detection-to-takeover, physical silence or ordinary interarrival. A final gap >1500ms is a business gap regardless of ready spares; physical silence >20s is separately alert-only. Missing baseline is unmeasured, never zero.",
+            "business_gap": false,
+            "business_gap_limit_ms": 1500,
+            "interruption_at": "2026-10-22T17:33:16.147347+00:00",
+            "business_event_id": 1,
+            "unmeasured_assets": [],
+            "gap_measurement": "measured",
+            "source_silence_ms": 48.051,
+            "physical_source_silence_alert": false,
+            "physical_source_silence_alert_only": true,
+            "merged_receipt_gap_ms": 48.051,
+            "reason": "transport",
+            "promotion_at": "2026-10-22T17:33:16.149139+00:00",
+            "detection_to_promotion_ms": 0.6347679991449695,
+            "baseline_verified": [
+              "3n",
+              "3y"
+            ],
+            "need_book_assets": [],
+            "gap_maximum": {
+              "ms": 50.484,
+              "asset": "3y",
+              "at": "2026-10-22T17:33:16.153564+00:00"
+            },
+            "detection_to_first_valid_publication_ms": 6.333336999887251,
+            "first_valid_publication_at": "2026-10-22T17:33:16.153627+00:00",
+            "detection_to_takeover_ms": 6.333336999887251
+          }
+        ]
+      }
+    },
+    "failover_gap_definition": "failover_gaps_s is seconds from mark_kick, recorded before the 1013 on_close, until that group forwards the next merged event with a higher outbox sequence. It is not ws_continuity.merged_gap_ms and not the hot-primary-failure business_gap flag.",
+    "kicks": 4,
+    "codes_1008": 0,
+    "observed_primary_failures": 4,
+    "unexpected_primary_failures": 0,
+    "close_reasons": {
+      "slow_consumer": 4
+    },
+    "parent_mode": "ws",
+    "cpu_cores": 0.9199703499944528,
+    "parent_cpu_s": 2.5113885959999998,
+    "burner_cores": 0,
+    "restarts": {},
+    "stale_skipped": 0,
+    "cpu_breakdown": {
+      "seconds": 15.454732154999874,
+      "cores": {
+        "primary_parse": 0.07652871050355729,
+        "primary_apply": 0.1316667467667296,
+        "backup_parse": 0.08997548337000091,
+        "backup_apply": 0.1138408449499273,
+        "pickle": 0.06792385319084224,
+        "parent_apply": 0.06913720543867984,
+        "child_cpu": 0.8713578368709108,
+        "child_other": 0.3914221980898535,
+        "accounted": 0.5490728442197372
+      },
+      "by_group": {
+        "up_down:BTC:15m": {
+          "primary_parse": 0.019525652529822392,
+          "primary_apply": 0.03110322075976504,
+          "backup_parse": 0.0209776136362944,
+          "backup_apply": 0.028153251614861624,
+          "pickle": 0.01622570973634594,
+          "child_cpu": 0.21001053499008548,
+          "parent_apply": 0.01623872322619366
+        },
+        "up_down:BTC:5m": {
+          "primary_parse": 0.03508081748441061,
+          "primary_apply": 0.05995974234339672,
+          "backup_parse": 0.038169881243083265,
+          "backup_apply": 0.04918846657294259,
+          "pickle": 0.028387088148795165,
+          "child_cpu": 0.37238554866433704,
+          "parent_apply": 0.02823981791614569
+        },
+        "up_down:ETH:15m": {
+          "primary_parse": 0.008144530020811645,
+          "primary_apply": 0.015390304187384492,
+          "backup_parse": 0.011666529137592963,
+          "backup_apply": 0.014029056396804455,
+          "pickle": 0.009464472792734784,
+          "child_cpu": 0.11534429941079843,
+          "parent_apply": 0.009943310013967756
+        },
+        "up_down:ETH:5m": {
+          "primary_parse": 0.013777710468512647,
+          "primary_apply": 0.025213479476183354,
+          "backup_parse": 0.019161459353030284,
+          "backup_apply": 0.022470070365318624,
+          "pickle": 0.013846582512966344,
+          "child_cpu": 0.17361745380568983,
+          "parent_apply": 0.014715354282372719
+        }
+      }
+    },
+    "rss_bytes": {
+      "began": 55226368,
+      "drained": 66621440,
+      "status": 329367552
+    },
+    "snapshot_errors": [],
+    "drain_complete": true,
+    "mismatch_assets": [],
+    "final_book_sha256": "674201b053264b30688db7fce8dc2ac1529e35f307811adcc1e0da079db3217d",
+    "expected_book_sha256": "674201b053264b30688db7fce8dc2ac1529e35f307811adcc1e0da079db3217d",
+    "valid": true
+  }
+}

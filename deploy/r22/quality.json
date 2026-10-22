@@ -1,0 +1,14 @@
+{
+  "ruff": {
+    "exit": 0,
+    "output": "\u001b[1;32mAll checks passed!\u001b[0m\n"
+  },
+  "source_diff": {
+    "exit": 0,
+    "output": ""
+  },
+  "whitespace": {
+    "exit": 0,
+    "output": ""
+  }
+}

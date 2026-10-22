@@ -1,0 +1,81 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+_____ test_close_during_raw_processing_keeps_verified_handoff_without_rest _____
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f3c011d8230>
+
+    def test_close_during_raw_processing_keeps_verified_handoff_without_rest(monkeypatch):
+        import json
+        import threading
+        from app.services.polymarket.ws_group_process import ReplaySocket
+        from app.services.polymarket.ws_redundancy import FeedMerge
+        from app.services.polymarket.ws_warm_book import WarmBook
+        monkeypatch.setitem(__import__('sys').modules,'websocket',SimpleNamespace(WebSocketApp=ReplaySocket))
+        monkeypatch.setenv('POLYMARKET_OBSERVER_WS_REPLAY','1')
+        monkeypatch.setattr(observer,'_STOP',threading.Event())
+        monkeypatch.setattr(observer,'STATUS',dict(reconnect_count=0,slow_consumer_count=0))
+        pipeline=observer.Pipeline();pipeline.recording.enabled=False
+        pipeline.set_markets([dict(id='a',yesAssetId='ay',noAssetId='an')])
+        monkeypatch.setattr(observer,'_PIPELINE',pipeline)
+        manager=observer.MarketConnections();manager.count=manager.balancer.count=1;manager.liveness_backup=True
+        manager.balancer.assignment={a:0 for a in ['ay','an']}
+        manager.balancer.groups={a:'up_down:BTC:5m' for a in ['ay','an']}
+        manager.merges[0]=FeedMerge({});manager.redundancy_tick=lambda now:None
+        primary=dict(assets=['ay','an'],socket=None,thread=None,connected=False,lock=threading.RLock(),attempts=0,retry_at=0,ping_at=0)
+        manager.states[0]=primary
+        rest=[];manager.snapshot_recovery.request=lambda *a,**kw:rest.append(a) or False
+        entered=threading.Event();release=threading.Event()
+        def wait(predicate):
+            deadline=time.monotonic()+3
+            while not predicate():
+                assert time.monotonic()<deadline,'race handoff did not complete'
+                time.sleep(.001)
+        try:
+            manager.connect(0,primary)
+            for i in range(2):
+                spare=dict(assets=['ay','an'],required_assets={'ay','an'},primary_index=0,socket=None,thread=None,connected=False,
+                    lock=threading.RLock(),attempts=0,retry_at=0,ping_at=0,standby=True,redundant=True,busy=True,
+                    shadow=WarmBook(['ay','an']),created_at=time.monotonic())
+                (manager.backups if i==0 else manager.reserves)[0]=spare;manager.connect(0,spare)
+            states=[primary,*[s for _,s in manager.backup_items()]]
+            wait(lambda:all(s.get('connected') and not s.get('subscribe_initial',True) for s in states))
+            stamp=round(time.time()*1000)
+            initial=[dict(event_type='book',asset_id=a,timestamp=stamp,hash='initial'+a,bids=[dict(price='.4',size='2')],asks=[]) for a in ['ay','an']]
+            for s in states:s['socket'].emit(json.dumps(initial))
+            wait(lambda:len(pipeline.books)==2 and all(manager.backup_ready(s) for _,s in manager.backup_items()))
+            wait(lambda:all(s['inbox'].queue.unfinished_tasks==0 for s in states))
+            remember=manager._remember_books
+            def paused(state,event,*args,**kwargs):
+                remember(state,event,*args,**kwargs)
+                if state is primary and threading.current_thread() is primary.get('worker'):
+                    entered.set();assert release.wait(3)
+            monkeypatch.setattr(manager,'_remember_books',paused)
+            delta=dict(event_type='price_change',timestamp=stamp+20,price_changes=[dict(asset_id=a,side='BUY',price='.4',size='3',hash='next'+a) for a in ['ay','an']])
+            primary['socket'].emit(json.dumps(delta));assert entered.wait(3)
+            for _,s in manager.backup_items():s['socket'].emit(json.dumps(delta))
+            wait(lambda:all(s['inbox'].queue.unfinished_tasks==0 for _,s in manager.backup_items()))
+            primary['socket'].callbacks['on_error'](primary['socket'],RuntimeError('Connection to remote host was lost.'))
+            primary['socket'].kick(None,None);release.set()
+>           wait(lambda:manager.states[0] is not primary and all(pipeline.books[a]['bids']['.4']=='3' for a in ['ay','an']))
+
+tests/test_polymarket_ws_r22_freshness.py:144: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+predicate = <function test_close_during_raw_processing_keeps_verified_handoff_without_rest.<locals>.<lambda> at 0x7f3c00dd4c20>
+
+    def wait(predicate):
+        deadline=time.monotonic()+3
+        while not predicate():
+>           assert time.monotonic()<deadline,'race handoff did not complete'
+E           AssertionError: race handoff did not complete
+E           assert 10761.214337101 < 10761.214324098
+E            +  where 10761.214337101 = <built-in function monotonic>()
+E            +    where <built-in function monotonic> = time.monotonic
+
+tests/test_polymarket_ws_r22_freshness.py:116: AssertionError
+------------------------------ Captured log call -------------------------------
+WARNING  app.services.polymarket.observer:observer.py:2204 Polymarket WS hot primary failure group=up_down:BTC:5m shard=0 code=None ready_backups=2
+WARNING  app.services.polymarket.observer:observer.py:3794 Polymarket WS transport failure shard=0 evidence={"code": null, "reason": "Connection to remote host was lost.", "assets": 2, "connection_age_seconds": 0.005355933999453555, "role": "primary", "physical_role": "primary", "source": "feed-1", "promoted_at": null, "standby": false, "subscribe_pending": 0, "groups": ["up_down:BTC:5m"], "queue_depth": 0, "queue_high_water": 1, "queue_wait_seconds": 4.5e-05, "lock_wait_seconds": 1.4069992175791413e-06, "drops": 0, "drop_reasons": {"overflow": 0, "resync_rejected": 0, "invalid_rejected": 0, "resync_discarded": 0, "shutdown_discarded": 0}, "resyncs": 0, "callback_max_seconds": 2.4592000045231543e-05, "parse_max_seconds": 0.00022181700114742853, "process_max_seconds": 0.0005037250011810102, "lifecycle_wait_seconds": 0, "discard_max_seconds": 0, "subscribe_batches": 1, "pair_load": {"peer_connections": 2, "pair_receive_bytes_per_second": 0, "pair_read_bytes_60s": 525, "peer_queue_wait_seconds": 0, "heartbeat_phase_seconds": 10}, "handshake_headers": {}, "sample": {"read_bytes_60s": 525, "read_window_resolution_seconds": 1, "at": "2026-10-22T17:15:02.690154+00:00", "sample_gap_seconds": null, "scheduler_lag_seconds": 0, "byte_silence_seconds": 0.0017587359998287866, "read_bytes": 0, "read_calls": 0, "read_bytes_per_second": null, "pings": 0, "pongs": 0, "pong_rtt_seconds": null, "pong_age_seconds": null}, "samples": [{"read_bytes_60s": 525, "read_window_resolution_seconds": 1, "at": "2026-10-22T17:15:02.690154+00:00", "sample_gap_seconds": null, "scheduler_lag_seconds": 0, "byte_silence_seconds": 0.0017587359998287866, "read_bytes": 0, "read_calls": 0, "read_bytes_per_second": null, "pings": 0, "pongs": 0, "pong_rtt_seconds": null, "pong_age_seconds": null}]}
+=========================== short test summary info ============================
+FAILED tests/test_polymarket_ws_r22_freshness.py::test_close_during_raw_processing_keeps_verified_handoff_without_rest
+1 failed in 3.32s

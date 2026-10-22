@@ -1,0 +1,34 @@
+{"frames": 20000, "results": [{"cpu_seconds": 0.677434941, "parse_cpu_seconds": 0.23315259299999513, "apply_cpu_seconds": 0.42946727800000484, "sha256": "8add8dd2318a14cb5cf24365cdfbca107012bc84a8361d6b1bddbb887e051ca9"}, {"cpu_seconds": 0.6827761699999999, "parse_cpu_seconds": 0.23513972499996738, "apply_cpu_seconds": 0.4323496039999657, "sha256": "8add8dd2318a14cb5cf24365cdfbca107012bc84a8361d6b1bddbb887e051ca9"}, {"cpu_seconds": 0.702396732, "parse_cpu_seconds": 0.2417746610000142, "apply_cpu_seconds": 0.44513185899998975, "sha256": "8add8dd2318a14cb5cf24365cdfbca107012bc84a8361d6b1bddbb887e051ca9"}]}
+         4219884 function calls (4123884 primitive calls) in 2.178 seconds
+
+   Ordered by: cumulative time
+   List reduced from 64 to 25 due to restriction <25>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+        1    0.072    0.072    2.178    2.178 polymarket_ws_warm_profile.py:18(run)
+    20000    0.050    0.000    1.662    0.000 ws_warm_book.py:56(receive)
+    40000    0.041    0.000    1.557    0.000 ws_rotation.py:55(wrapped)
+    20000    0.515    0.000    1.164    0.000 ws_rotation.py:73(receive)
+    20000    0.194    0.000    0.346    0.000 ws_warm_book.py:17(receive)
+     8000    0.231    0.000    0.311    0.000 ws_payloads.py:33(materialized_book)
+  2096000    0.265    0.000    0.265    0.000 {method 'get' of 'dict' objects}
+    20000    0.115    0.000    0.224    0.000 ws_payloads.py:337(feed_envelope)
+    20000    0.007    0.000    0.182    0.000 ws_payloads.py:15(loads)
+    20000    0.175    0.000    0.175    0.000 {orjson.loads}
+240000/176000    0.101    0.000    0.152    0.000 recording.py:59(events)
+     8000    0.007    0.000    0.075    0.000 ws_payloads.py:47(book_bytes)
+    56000    0.040    0.000    0.067    0.000 recording.py:34(exchange_time)
+40000/8000    0.040    0.000    0.067    0.000 {built-in method builtins.sum}
+    24000    0.022    0.000    0.061    0.000 ws_payloads.py:48(<genexpr>)
+   336007    0.041    0.000    0.041    0.000 {built-in method builtins.isinstance}
+    80000    0.038    0.000    0.038    0.000 {built-in method time.process_time}
+   168000    0.031    0.000    0.031    0.000 {method 'move_to_end' of 'collections.OrderedDict' objects}
+   128002    0.027    0.000    0.027    0.000 {built-in method builtins.max}
+    40000    0.015    0.000    0.025    0.000 <frozen importlib._bootstrap>:645(parent)
+   136000    0.022    0.000    0.022    0.000 {method 'add' of 'set' objects}
+   147904    0.022    0.000    0.022    0.000 {built-in method builtins.len}
+    56000    0.021    0.000    0.021    0.000 {built-in method fromtimestamp}
+   128000    0.020    0.000    0.020    0.000 {method 'upper' of 'str' objects}
+   136000    0.018    0.000    0.018    0.000 {method 'append' of 'list' objects}
+
+

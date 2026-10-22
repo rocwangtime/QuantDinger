@@ -1,0 +1,6 @@
+Traceback (most recent call last):
+  File "/workspace/quantdinger/wt_r22/deploy/r22/run-final-replays.py", line 12, in <module>
+    subprocess.run([sys.executable,str(root/'deploy/r22'/name)],cwd=root,env=env,stdout=log,stderr=subprocess.STDOUT,check=True)
+  File "/home/box/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['/tmp/pm-r22-venv/bin/python', '/workspace/quantdinger/wt_r22/deploy/r22/run-lag-comparison.py']' returned non-zero exit status 1.

@@ -1,0 +1,9 @@
+before exit 0 valid True gap 7021.615000998281 reason None classification None
+after exit 1 valid False gap 53.65957200046978 reason upstream_lag classification upstream_lag
+quiet exit 0 valid True gap 0 reason None classification None
+pressure exit 1 valid False gap 41.00893599934352 reason ingress_pressure classification ingress_pressure
+Traceback (most recent call last):
+  File "/workspace/quantdinger/wt_r22/deploy/r22/run-lag-comparison.py", line 31, in <module>
+    assert all(r['exit']==0 and r['result']['valid'] for r in rows)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError

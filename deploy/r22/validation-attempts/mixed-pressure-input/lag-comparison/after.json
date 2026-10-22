@@ -1,0 +1,316 @@
+{
+  "phase": "after",
+  "exit": 0,
+  "wall_seconds": 66.04495558899907,
+  "result": {
+    "pressure_model": null,
+    "scenario": "upstream",
+    "seconds": 60,
+    "max_publication_gap_ms": 52.769723000892554,
+    "primary_min_bytes_per_second": 461260.4967280467,
+    "switches": [
+      {
+        "source": "feed-3",
+        "seconds": 6.540090738000799
+      },
+      {
+        "source": "feed-4",
+        "seconds": 60.02008951500102
+      },
+      {
+        "source": "feed-5",
+        "seconds": 63.02007597699958
+      }
+    ],
+    "reason": "upstream_lag",
+    "classification": "upstream_lag",
+    "cpu_seconds": 4.1067650140000005,
+    "measured_cpu_cores": 0.06317989971548708,
+    "stage_cpu_seconds": {
+      "primary_parse": 0.4059261340000003,
+      "primary_apply": 0.6108721840000002,
+      "backup_parse": 0.227767282000003,
+      "backup_apply": 0.2874901410000013,
+      "backup_fanin": 0.19545674099999627
+    },
+    "pre_kicks": [
+      {
+        "primary": "feed-3",
+        "candidates": [
+          {
+            "source": "feed-2",
+            "ready": true,
+            "asset": "ay",
+            "shadow_at": "2026-10-22 17:24:24.231000+00:00",
+            "mark": "(datetime.datetime(2026, 10, 22, 17, 24, 24, 231000, tzinfo=datetime.timezone.utc), '3001ay')",
+            "peer": "(datetime.datetime(2026, 10, 22, 17, 24, 24, 231000, tzinfo=datetime.timezone.utc), '3001ay')",
+            "live_at": "2026-10-22 17:24:24.231000+00:00",
+            "book_equal": true,
+            "peer_in_history": true,
+            "baseline": "retained"
+          },
+          {
+            "source": "feed-2",
+            "ready": true,
+            "asset": "an",
+            "shadow_at": "2026-10-22 17:24:24.231000+00:00",
+            "mark": "(datetime.datetime(2026, 10, 22, 17, 24, 24, 231000, tzinfo=datetime.timezone.utc), '3001an')",
+            "peer": "(datetime.datetime(2026, 10, 22, 17, 24, 24, 231000, tzinfo=datetime.timezone.utc), '3001an')",
+            "live_at": "2026-10-22 17:24:24.231000+00:00",
+            "book_equal": true,
+            "peer_in_history": true,
+            "baseline": "retained"
+          },
+          {
+            "source": "feed-4",
+            "ready": true,
+            "asset": "ay",
+            "shadow_at": "2026-10-22 17:24:24.231000+00:00",
+            "mark": "(datetime.datetime(2026, 10, 22, 17, 24, 24, 231000, tzinfo=datetime.timezone.utc), '3001ay')",
+            "peer": "(datetime.datetime(2026, 10, 22, 17, 24, 24, 231000, tzinfo=datetime.timezone.utc), '3001ay')",
+            "live_at": "2026-10-22 17:24:24.231000+00:00",
+            "book_equal": true,
+            "peer_in_history": true,
+            "baseline": "retained"
+          },
+          {
+            "source": "feed-4",
+            "ready": true,
+            "asset": "an",
+            "shadow_at": "2026-10-22 17:24:24.231000+00:00",
+            "mark": "(datetime.datetime(2026, 10, 22, 17, 24, 24, 231000, tzinfo=datetime.timezone.utc), '3001an')",
+            "peer": "(datetime.datetime(2026, 10, 22, 17, 24, 24, 231000, tzinfo=datetime.timezone.utc), '3001an')",
+            "live_at": "2026-10-22 17:24:24.231000+00:00",
+            "book_equal": true,
+            "peer_in_history": true,
+            "baseline": "retained"
+          }
+        ]
+      },
+      {
+        "primary": "feed-4",
+        "candidates": [
+          {
+            "source": "feed-2",
+            "ready": true,
+            "asset": "ay",
+            "shadow_at": "2026-10-22 17:24:27.231000+00:00",
+            "mark": "(datetime.datetime(2026, 10, 22, 17, 24, 27, 231000, tzinfo=datetime.timezone.utc), '3151ay')",
+            "peer": "(datetime.datetime(2026, 10, 22, 17, 24, 27, 231000, tzinfo=datetime.timezone.utc), '3151ay')",
+            "live_at": "2026-10-22 17:24:27.231000+00:00",
+            "book_equal": true,
+            "peer_in_history": true,
+            "baseline": "retained"
+          },
+          {
+            "source": "feed-2",
+            "ready": true,
+            "asset": "an",
+            "shadow_at": "2026-10-22 17:24:27.231000+00:00",
+            "mark": "(datetime.datetime(2026, 10, 22, 17, 24, 27, 231000, tzinfo=datetime.timezone.utc), '3151an')",
+            "peer": "(datetime.datetime(2026, 10, 22, 17, 24, 27, 231000, tzinfo=datetime.timezone.utc), '3151an')",
+            "live_at": "2026-10-22 17:24:27.231000+00:00",
+            "book_equal": true,
+            "peer_in_history": true,
+            "baseline": "retained"
+          },
+          {
+            "source": "feed-5",
+            "ready": true,
+            "asset": "ay",
+            "shadow_at": "2026-10-22 17:24:27.231000+00:00",
+            "mark": "(datetime.datetime(2026, 10, 22, 17, 24, 27, 231000, tzinfo=datetime.timezone.utc), '3151ay')",
+            "peer": "(datetime.datetime(2026, 10, 22, 17, 24, 27, 231000, tzinfo=datetime.timezone.utc), '3151ay')",
+            "live_at": "2026-10-22 17:24:27.231000+00:00",
+            "book_equal": true,
+            "peer_in_history": true,
+            "baseline": "retained"
+          },
+          {
+            "source": "feed-5",
+            "ready": true,
+            "asset": "an",
+            "shadow_at": "2026-10-22 17:24:27.231000+00:00",
+            "mark": "(datetime.datetime(2026, 10, 22, 17, 24, 27, 231000, tzinfo=datetime.timezone.utc), '3151an')",
+            "peer": "(datetime.datetime(2026, 10, 22, 17, 24, 27, 231000, tzinfo=datetime.timezone.utc), '3151an')",
+            "live_at": "2026-10-22 17:24:27.231000+00:00",
+            "book_equal": true,
+            "peer_in_history": true,
+            "baseline": "retained"
+          }
+        ]
+      }
+    ],
+    "rest_requests": 0,
+    "replenishments": 3,
+    "failures": [
+      {
+        "code": null,
+        "ready_backup_at_kick": true,
+        "ready_backups": 2,
+        "takeover_gap_ms": 40.459,
+        "receipt_gap_ms": 40.459,
+        "recovery": "warm_backup_fanin",
+        "gap_final": true,
+        "at": 1792689810.73237,
+        "merged_gap_ms": 19.931,
+        "merged_gap_final": true,
+        "gap_definition": "Per interruption event and asset: last merged publication before interruption to first merged publication after interruption; max across affected assets. Publication wall time, not socket receipt, detection-to-takeover, physical silence or ordinary interarrival. A final gap >1500ms is a business gap regardless of ready spares; physical silence >20s is separately alert-only. Missing baseline is unmeasured, never zero.",
+        "business_gap": false,
+        "business_gap_limit_ms": 1500,
+        "interruption_at": "2026-10-22T17:23:30.732399+00:00",
+        "business_event_id": 1,
+        "unmeasured_assets": [],
+        "gap_measurement": "measured",
+        "source_silence_ms": 21.064,
+        "physical_source_silence_alert": false,
+        "physical_source_silence_alert_only": true,
+        "merged_receipt_gap_ms": 0.958,
+        "reason": "upstream_lag",
+        "gap_maximum": {
+          "ms": 19.931,
+          "asset": "ay",
+          "at": "2026-10-22T17:23:30.751713+00:00"
+        },
+        "detection_to_first_valid_publication_ms": 19.394322000152897,
+        "first_valid_publication_at": "2026-10-22T17:23:30.751765+00:00",
+        "detection_to_takeover_ms": 19.394322000152897
+      },
+      {
+        "code": null,
+        "ready_backup_at_kick": true,
+        "ready_backups": 2,
+        "takeover_gap_ms": 21.325,
+        "receipt_gap_ms": 21.325,
+        "recovery": "ws",
+        "gap_final": true,
+        "at": 1792689864.233109,
+        "merged_gap_ms": 20.334999999999997,
+        "merged_gap_final": true,
+        "gap_definition": "Per interruption event and asset: last merged publication before interruption to first merged publication after interruption; max across affected assets. Publication wall time, not socket receipt, detection-to-takeover, physical silence or ordinary interarrival. A final gap >1500ms is a business gap regardless of ready spares; physical silence >20s is separately alert-only. Missing baseline is unmeasured, never zero.",
+        "business_gap": false,
+        "business_gap_limit_ms": 1500,
+        "interruption_at": "2026-10-22T17:24:24.233130+00:00",
+        "business_event_id": 2,
+        "unmeasured_assets": [],
+        "gap_measurement": "measured",
+        "source_silence_ms": 1.7260000000000002,
+        "physical_source_silence_alert": false,
+        "physical_source_silence_alert_only": true,
+        "merged_receipt_gap_ms": 1.7260000000000002,
+        "reason": "transport",
+        "promotion_at": "2026-10-22T17:24:24.234160+00:00",
+        "detection_to_promotion_ms": 0.9654709992901189,
+        "baseline_verified": [
+          "an",
+          "ay"
+        ],
+        "need_book_assets": [],
+        "gap_maximum": {
+          "ms": 20.334999999999997,
+          "asset": "ay",
+          "at": "2026-10-22T17:24:24.252655+00:00"
+        },
+        "detection_to_first_valid_publication_ms": 19.596008000007714,
+        "first_valid_publication_at": "2026-10-22T17:24:24.252709+00:00",
+        "detection_to_takeover_ms": 19.596008000007714
+      },
+      {
+        "code": null,
+        "ready_backup_at_kick": true,
+        "ready_backups": 2,
+        "takeover_gap_ms": 21.491,
+        "receipt_gap_ms": 21.491,
+        "recovery": "ws",
+        "gap_final": true,
+        "at": 1792689867.233882,
+        "merged_gap_ms": 20.858999999999998,
+        "merged_gap_final": true,
+        "gap_definition": "Per interruption event and asset: last merged publication before interruption to first merged publication after interruption; max across affected assets. Publication wall time, not socket receipt, detection-to-takeover, physical silence or ordinary interarrival. A final gap >1500ms is a business gap regardless of ready spares; physical silence >20s is separately alert-only. Missing baseline is unmeasured, never zero.",
+        "business_gap": false,
+        "business_gap_limit_ms": 1500,
+        "interruption_at": "2026-10-22T17:24:27.233896+00:00",
+        "business_event_id": 3,
+        "unmeasured_assets": [],
+        "gap_measurement": "measured",
+        "source_silence_ms": 2.401,
+        "physical_source_silence_alert": false,
+        "physical_source_silence_alert_only": true,
+        "merged_receipt_gap_ms": 2.401,
+        "reason": "transport",
+        "promotion_at": "2026-10-22T17:24:27.234767+00:00",
+        "detection_to_promotion_ms": 0.8309369986818638,
+        "baseline_verified": [
+          "an",
+          "ay"
+        ],
+        "need_book_assets": [],
+        "gap_maximum": {
+          "ms": 20.858999999999998,
+          "asset": "ay",
+          "at": "2026-10-22T17:24:27.252919+00:00"
+        },
+        "detection_to_first_valid_publication_ms": 19.08969000032812,
+        "first_valid_publication_at": "2026-10-22T17:24:27.252973+00:00",
+        "detection_to_takeover_ms": 19.08969000032812
+      }
+    ],
+    "double_kicks": {
+      "total": 1,
+      "count_current_hour": 1,
+      "count_rolling_hour": 1,
+      "rolling_hour_count_capped": false,
+      "business_gaps_rolling_hour": 0,
+      "business_gaps_current_hour": 0,
+      "pending_rolling_hour": 0,
+      "hourly": [
+        {
+          "hour_start_utc": 1792688400,
+          "count": 1
+        }
+      ],
+      "events": [
+        {
+          "group": "up_down:BTC:5m",
+          "at": 1792689867.233786,
+          "sources": [
+            "feed-3",
+            "feed-4"
+          ],
+          "roles": [
+            "primary",
+            "primary"
+          ],
+          "codes": [
+            null,
+            null
+          ],
+          "separation_ms": 3000.719499999832,
+          "merged_gap_ms": 20.858999999999998,
+          "merged_gap_final": true,
+          "business_gap": false,
+          "gap_definition": "Per interruption event and asset: last merged publication before interruption to first merged publication after interruption; max across affected assets. Publication wall time, not socket receipt, detection-to-takeover, physical silence or ordinary interarrival. A final gap >1500ms is a business gap regardless of ready spares; physical silence >20s is separately alert-only. Missing baseline is unmeasured, never zero. Double kick: maximum of associated interruptions across both kicks.",
+          "business_gap_limit_ms": 1500,
+          "interruption_at": "2026-10-22T17:24:27.233838+00:00",
+          "business_event_id": 3,
+          "unmeasured_assets": [],
+          "gap_measurement": "measured",
+          "supply_interrupted": false,
+          "gap_maximum": {
+            "ms": 20.858999999999998,
+            "asset": "ay",
+            "at": "2026-10-22T17:24:27.252919+00:00"
+          },
+          "window_interruption_ids": [
+            2,
+            3
+          ]
+        }
+      ],
+      "pair_window_seconds": 15
+    },
+    "sha256": "d38afba25dd30bad0307bfc822f0cf843cd4d53141623497c1f6f52384a40dc9",
+    "expected_sha256": "d38afba25dd30bad0307bfc822f0cf843cd4d53141623497c1f6f52384a40dc9",
+    "valid": true
+  }
+}

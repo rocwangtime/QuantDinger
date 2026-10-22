@@ -1,0 +1,183 @@
+{
+  "phase": "after",
+  "exit": 1,
+  "wall_seconds": 65.98006069999974,
+  "result": {
+    "scenario": "upstream",
+    "seconds": 60,
+    "max_publication_gap_ms": 38.81052399992768,
+    "primary_min_bytes_per_second": 461252.2133488894,
+    "switches": [
+      {
+        "source": "feed-3",
+        "seconds": 6.520359923999422
+      },
+      {
+        "source": "feed-4",
+        "seconds": 60.02008227099941
+      },
+      {
+        "source": "feed-2",
+        "seconds": 63.02008758499869
+      }
+    ],
+    "reason": "upstream_lag",
+    "classification": "upstream_lag",
+    "rest_requests": 2,
+    "replenishments": 1,
+    "failures": [
+      {
+        "code": null,
+        "ready_backup_at_kick": true,
+        "ready_backups": 2,
+        "takeover_gap_ms": 41.45,
+        "receipt_gap_ms": 41.45,
+        "recovery": "ws",
+        "gap_final": true,
+        "at": 1792688999.090648,
+        "merged_gap_ms": 20.122999999999998,
+        "merged_gap_final": true,
+        "gap_definition": "Per interruption event and asset: last merged publication before interruption to first merged publication after interruption; max across affected assets. Publication wall time, not socket receipt, detection-to-takeover, physical silence or ordinary interarrival. A final gap >1500ms is a business gap regardless of ready spares; physical silence >20s is separately alert-only. Missing baseline is unmeasured, never zero.",
+        "business_gap": false,
+        "business_gap_limit_ms": 1500,
+        "interruption_at": "2026-10-22T17:09:59.090682+00:00",
+        "business_event_id": 1,
+        "unmeasured_assets": [],
+        "gap_measurement": "measured",
+        "source_silence_ms": 20.663,
+        "physical_source_silence_alert": false,
+        "physical_source_silence_alert_only": true,
+        "merged_receipt_gap_ms": 20.556,
+        "reason": "upstream_lag",
+        "gap_maximum": {
+          "ms": 20.122999999999998,
+          "asset": "an",
+          "at": "2026-10-22T17:09:59.090880+00:00"
+        },
+        "promotion_at": "2026-10-22T17:09:59.091153+00:00",
+        "detection_to_promotion_ms": 0.9084779994736891,
+        "baseline_verified": [
+          "an",
+          "ay"
+        ],
+        "need_book_assets": [],
+        "detection_to_first_valid_publication_ms": 20.786082999620703,
+        "first_valid_publication_at": "2026-10-22T17:09:59.111436+00:00",
+        "detection_to_takeover_ms": 20.786082999620703
+      },
+      {
+        "code": null,
+        "ready_backup_at_kick": true,
+        "ready_backups": 2,
+        "takeover_gap_ms": null,
+        "receipt_gap_ms": null,
+        "recovery": null,
+        "gap_final": false,
+        "at": 1792689052.589922,
+        "merged_gap_ms": null,
+        "merged_gap_final": false,
+        "gap_definition": "Per interruption event and asset: last merged publication before interruption to first merged publication after interruption; max across affected assets. Publication wall time, not socket receipt, detection-to-takeover, physical silence or ordinary interarrival. A final gap >1500ms is a business gap regardless of ready spares; physical silence >20s is separately alert-only. Missing baseline is unmeasured, never zero.",
+        "business_gap": null,
+        "business_gap_limit_ms": 1500,
+        "interruption_at": "2026-10-22T17:10:52.589957+00:00",
+        "business_event_id": 2,
+        "unmeasured_assets": [],
+        "gap_measurement": "pending_publication",
+        "source_silence_ms": 19.857,
+        "physical_source_silence_alert": false,
+        "physical_source_silence_alert_only": true,
+        "merged_receipt_gap_ms": 19.857,
+        "reason": "transport",
+        "promotion_at": "2026-10-22T17:10:55.590932+00:00",
+        "detection_to_promotion_ms": 0.8226059999287827,
+        "baseline_verified": [],
+        "need_book_assets": [
+          "an",
+          "ay"
+        ]
+      },
+      {
+        "code": null,
+        "ready_backup_at_kick": true,
+        "ready_backups": 1,
+        "takeover_gap_ms": null,
+        "receipt_gap_ms": null,
+        "recovery": null,
+        "gap_final": false,
+        "at": 1792689055.590044,
+        "merged_gap_ms": null,
+        "merged_gap_final": false,
+        "gap_definition": "Per interruption event and asset: last merged publication before interruption to first merged publication after interruption; max across affected assets. Publication wall time, not socket receipt, detection-to-takeover, physical silence or ordinary interarrival. A final gap >1500ms is a business gap regardless of ready spares; physical silence >20s is separately alert-only. Missing baseline is unmeasured, never zero.",
+        "business_gap": null,
+        "business_gap_limit_ms": 1500,
+        "interruption_at": "2026-10-22T17:10:55.590062+00:00",
+        "business_event_id": 2,
+        "unmeasured_assets": [],
+        "gap_measurement": "pending_publication",
+        "source_silence_ms": 3019.9790000000003,
+        "physical_source_silence_alert": false,
+        "physical_source_silence_alert_only": true,
+        "merged_receipt_gap_ms": 3019.9790000000003,
+        "reason": "transport",
+        "promotion_at": "2026-10-22T17:10:55.590932+00:00",
+        "detection_to_promotion_ms": 0.8226059999287827,
+        "baseline_verified": [],
+        "need_book_assets": [
+          "an",
+          "ay"
+        ]
+      }
+    ],
+    "double_kicks": {
+      "total": 1,
+      "count_current_hour": 1,
+      "count_rolling_hour": 1,
+      "rolling_hour_count_capped": false,
+      "business_gaps_rolling_hour": 0,
+      "business_gaps_current_hour": 0,
+      "pending_rolling_hour": 1,
+      "hourly": [
+        {
+          "hour_start_utc": 1792688400,
+          "count": 1
+        }
+      ],
+      "events": [
+        {
+          "group": "up_down:BTC:5m",
+          "at": 1792689055.589899,
+          "sources": [
+            "feed-3",
+            "feed-4"
+          ],
+          "roles": [
+            "primary",
+            "primary"
+          ],
+          "codes": [
+            null,
+            null
+          ],
+          "separation_ms": 3000.015812998754,
+          "merged_gap_ms": null,
+          "merged_gap_final": false,
+          "business_gap": null,
+          "gap_definition": "Per interruption event and asset: last merged publication before interruption to first merged publication after interruption; max across affected assets. Publication wall time, not socket receipt, detection-to-takeover, physical silence or ordinary interarrival. A final gap >1500ms is a business gap regardless of ready spares; physical silence >20s is separately alert-only. Missing baseline is unmeasured, never zero. Double kick: maximum of associated interruptions across both kicks.",
+          "business_gap_limit_ms": 1500,
+          "interruption_at": "2026-10-22T17:10:55.589966+00:00",
+          "business_event_id": 2,
+          "unmeasured_assets": [],
+          "gap_measurement": "pending_publication",
+          "supply_interrupted": false,
+          "window_interruption_ids": [
+            2
+          ]
+        }
+      ],
+      "pair_window_seconds": 15
+    },
+    "sha256": "d030f8b7baa9f11d016e4c1b13da271baae71ad2a732dc047a439f032f092b9f",
+    "expected_sha256": "d38afba25dd30bad0307bfc822f0cf843cd4d53141623497c1f6f52384a40dc9",
+    "valid": false
+  }
+}
