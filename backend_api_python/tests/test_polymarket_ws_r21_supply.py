@@ -1,7 +1,7 @@
 """Business supply is independent of physical promotion and natural quiet."""
 import json
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from app.services.polymarket import observer
 from app.services.polymarket.ws_redundancy import FeedMerge
@@ -21,6 +21,8 @@ def setup_supply(monkeypatch):
     manager.merges[0].filter(events, primary['source'], {'ay', 'an'})
     pipeline.receive(events)
     manager._remember_books(primary, events)
+    from app.services.polymarket.ws_payloads import decoded_envelope
+    manager._feed_freshness(primary, decoded_envelope(events), datetime.now(timezone.utc))
     manager.continuity.publication(pipeline.recording.metadata, {'ay', 'an'})
     primary['inbox'].last_data_at = primary['inbox'].last_byte_at = time.monotonic()
     manager.liveness_receive(0, spare, json.dumps(events), datetime.now(timezone.utc), spare['inbox'])
@@ -37,6 +39,8 @@ def emit(manager, spare, timestamp=1100, size='3', received=None):
 def test_receiving_spare_supplies_before_four_second_physical_promotion(monkeypatch):
     m, primary, spare, pipeline, requests, retired = setup_supply(monkeypatch)
     primary['inbox'].last_data_at = primary['inbox'].last_byte_at = time.monotonic()-.3
+    for row in m.continuity.published.values():
+        row['published_at'] -= timedelta(seconds=.3)
     emit(m, spare)
     assert all(pipeline.books[a]['bids']['.4'] == '3' for a in ['ay','an'])
     assert m.states[0] is primary and not retired and not requests and m.backup_promotions == 0
@@ -60,6 +64,8 @@ def test_no_speculative_supply_on_recent_primary_or_unverified_book(monkeypatch)
     emit(m, spare)
     assert pipeline.books['ay']['bids']['.4'] == '2' and m.states[0] is primary
     primary['inbox'].last_data_at = time.monotonic()-.3
+    for row in m.continuity.published.values():
+        row['published_at'] -= timedelta(seconds=.3)
     primary['book_checkpoints'].prune(set())
     emit(m, spare, 1200)
     assert pipeline.books['ay']['bids']['.4'] == '2' and m.states[0] is primary
@@ -68,6 +74,8 @@ def test_no_speculative_supply_on_recent_primary_or_unverified_book(monkeypatch)
 def test_supply_generation_and_subscription_changes_require_new_proof(monkeypatch):
     m, primary, spare, pipeline, *_ = setup_supply(monkeypatch)
     primary['inbox'].last_data_at = time.monotonic()-.3
+    for row in m.continuity.published.values():
+        row['published_at'] -= timedelta(seconds=.3)
     emit(m, spare)
     primary['inbox'].epoch += 1
     primary['book_checkpoints'].prune(set())
@@ -81,6 +89,8 @@ def test_supply_generation_and_subscription_changes_require_new_proof(monkeypatc
 def test_supply_keeps_per_level_watermarks_and_does_not_invent_publications(monkeypatch):
     m, primary, spare, pipeline, *_ = setup_supply(monkeypatch)
     primary['inbox'].last_data_at = time.monotonic()-.3
+    for row in m.continuity.published.values():
+        row['published_at'] -= timedelta(seconds=.3)
     emit(m, spare)
     # A later delivery for another level is valid even with an earlier timestamp.
     event = dict(event_type='price_change', timestamp=1050, price_changes=[
@@ -97,6 +107,8 @@ def test_supply_keeps_per_level_watermarks_and_does_not_invent_publications(monk
 def test_subscription_change_during_detached_parse_cannot_publish(monkeypatch):
     m, primary, spare, pipeline, *_ = setup_supply(monkeypatch)
     primary['inbox'].last_data_at = time.monotonic()-.3
+    for row in m.continuity.published.values():
+        row['published_at'] -= timedelta(seconds=.3)
     shadow = spare['shadow']
     receive = shadow.receive
     def crossed(event, at):
@@ -112,6 +124,8 @@ def test_subscription_change_during_detached_parse_cannot_publish(monkeypatch):
 def test_cached_supply_proof_cannot_bypass_missing_shared_book_gate(monkeypatch):
     m, primary, spare, pipeline, *_ = setup_supply(monkeypatch)
     primary['inbox'].last_data_at = time.monotonic()-.3
+    for row in m.continuity.published.values():
+        row['published_at'] -= timedelta(seconds=.3)
     emit(m, spare)
     assert pipeline.books['ay']['bids']['.4'] == '3'
     # The no-ready-spare REST path may remove shared books without an epoch
