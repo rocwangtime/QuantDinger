@@ -101,3 +101,17 @@ def test_subscription_change_during_detached_parse_cannot_publish(monkeypatch):
     assert spare['inbox'].resync.is_set()
     assert pipeline.books['ay']['bids']['.4'] == '2'
     assert m.states[0] is primary
+
+
+def test_cached_supply_proof_cannot_bypass_missing_shared_book_gate(monkeypatch):
+    m, primary, spare, pipeline, *_ = setup_supply(monkeypatch)
+    primary['inbox'].last_data_at = time.monotonic()-.3
+    emit(m, spare)
+    assert pipeline.books['ay']['bids']['.4'] == '3'
+    # The no-ready-spare REST path may remove shared books without an epoch
+    # change. A later PONG cannot turn a bare delta into a full baseline.
+    pipeline.books.pop('ay')
+    pipeline.recording.metadata.pop('ay')
+    emit(m, spare, 1200, '99')
+    assert 'ay' not in pipeline.books
+    assert pipeline.books['an']['bids']['.4'] == '99'
