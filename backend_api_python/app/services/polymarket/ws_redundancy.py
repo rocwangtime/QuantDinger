@@ -497,6 +497,13 @@ class FeedContinuity:
         return uncertain
 
     @serialized
+    def verified_baseline(self, assets):
+        for asset in assets:
+            if self.pending.pop(asset, None) is not None:
+                self.log(dict(asset=asset, status='book_baseline_verified',
+                              historical_trades_verified=False, physical_evidence_alert_only=True))
+
+    @serialized
     def pending_assets(self):
         return set(self.pending)
 

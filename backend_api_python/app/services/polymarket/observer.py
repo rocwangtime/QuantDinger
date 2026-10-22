@@ -7,6 +7,7 @@ import sys
 import threading
 import time
 from time import process_time
+from .ws_warm_book import BookCheckpoints, WarmBook
 from contextlib import contextmanager
 from collections import deque
 from itertools import groupby
@@ -1570,10 +1571,21 @@ class MarketConnections:
         return self._liveness_link_fresh(state) and self.backup_pong_fresh(state)
 
     def liveness_receive(self, index, state, raw, received_at, inbox):
-        """Backup path that does not rebuild a book. Failover resyncs from a snapshot."""
+        """Track link health and independently maintain a bounded warm ladder."""
         from .ws_payloads import cheap_envelope
         if inbox.invalid.is_set() or state.get('retired'):
             return
+        shadow = state.get('shadow')
+        if isinstance(shadow, WarmBook):
+            parse_at = process_time()
+            event = self.parsed_frames.parse(raw)
+            self._charge('backup_parse', parse_at)
+            apply_at = process_time()
+            activated = getattr(inbox, 'activated', {})
+            event = recording.owned_events(event, {a for a in state['assets']
+                if received_at >= activated.get(a, received_at)})
+            shadow.receive(event, received_at)
+            self._charge('backup_apply', apply_at)
         assets = {str(asset) for asset in (state.get('assets') or [])}
         now = time.monotonic()
         for kind, asset, stamp, digest in cheap_envelope(raw):
@@ -1664,6 +1676,10 @@ class MarketConnections:
         return True
 
     def _remember_books(self, state, event):
+        checkpoints = state.setdefault('book_checkpoints', BookCheckpoints())
+        if state.get('assets'):
+            checkpoints.prune(set(state['assets']))
+        checkpoints.receive(event)
         marks = state.setdefault('book_marks', {})
         for kind, payload in recording.events(event):
             if kind != 'book':
@@ -1824,7 +1840,7 @@ class MarketConnections:
         threading.Thread(target=fire, name='polymarket-book-fallback', daemon=True).start()
 
     def _promote_liveness_backup(self, index, state):
-        """Hand the socket to the primary role and wait for a fresh book."""
+        """Hand off a checked warm baseline; repair only unverified assets."""
         if threading.current_thread() is not state.get('worker'):
             return False
         old = self.states.get(index)
@@ -1846,7 +1862,24 @@ class MarketConnections:
             self.continuity.switch(old.get('source'), state.get('source'), required, 'failover', book_preserved=preserved)
             extra = set(state.get('assets') or []) - set(required)
             state['assets'] = list(required)
-            state['need_book'] = set(required)
+            # A ready link can still lack a verified baseline (startup/rollover).
+            pending, baselines = set(required), []
+            shadow = state.get('shadow')
+            if isinstance(shadow, WarmBook) and _PIPELINE:
+                with _PIPELINE.lock:
+                    for asset in required:
+                        baseline = shadow.baseline(asset, old.get('book_checkpoints'),
+                            _PIPELINE.books.get(asset), self.merges.get(index).latest.get(asset)
+                            if self.merges.get(index) else None)
+                        if baseline is not None:
+                            pending.discard(asset)
+                            if isinstance(baseline, dict):
+                                baselines.append(baseline)
+            state['need_book'] = pending
+            state['baseline_handoff'] = dict(verified=sorted(set(required)-pending), rest=sorted(pending))
+            if isinstance(shadow, WarmBook):
+                state['book_checkpoints'] = shadow.checkpoints
+            self.continuity.verified_baseline(set(required)-pending)
             # The promoted socket never parsed a ladder, so it has no hash to echo.
             # Carry the primary's last book so REST can release each asset immediately.
             required_ids = {str(asset) for asset in required}
@@ -1867,7 +1900,19 @@ class MarketConnections:
             self.failover_ms = max(0, (time.monotonic() - old.get('failed_at', time.monotonic())) * 1000)
             self.update_hot_coverage(time.monotonic())
             self.retire(old)
-            self.request_snapshot(index, state, required)
+            if baselines:
+                now_wall = datetime.now(timezone.utc)
+                with _PIPELINE.lock:
+                    merged = self.merges[index].filter(baselines, state['source'], set(required))
+                    if merged:
+                        _PIPELINE.receive(merged, set(required), now_wall, state['inbox'], state['inbox'].epoch)
+                        self.continuity.publication(_PIPELINE.recording.metadata, set(required))
+                        self.complete_recovery(index, state, 'warm_backup')
+            if pending:
+                state['need_book_at'] = datetime.now(timezone.utc).isoformat()
+                self.request_snapshot(index, state, [a for a in required if a in pending])
+            else:
+                state.pop('need_book', None)
             if state.get('need_book'):
                 self._arm_book_fallback(index, state)
             self.redundancy_tick(time.monotonic())
@@ -2956,7 +3001,7 @@ class MarketConnections:
                 required_assets=set(old['assets']), primary_index=index,
                 lock=RLock(), attempts=0, retry_at=0, ping_at=0, standby=True, redundant=True,
                 busy=True, source=f'backup-{self.backup_serial}',
-                shadow=_LivenessShadow(owned_assets) if self.liveness_backup else ShadowBooks(owned_assets),
+                shadow=WarmBook(owned_assets) if self.liveness_backup else ShadowBooks(owned_assets),
                 created_at=now)
             if first:
                 self.reserves[index if index not in self.reserves else (index, self.backup_serial)] = candidate
@@ -3307,6 +3352,7 @@ class MarketConnections:
         state.pop('close_evidence_recorded', None)
         state.pop('primary_1013_recorded', None)
         state.pop('failure_recorded', None)
+        state.pop('book_checkpoints', None)
         state.pop('remote_failure_at', None)
         state.pop('remote_failure_wall', None)
         state.pop('role_at_failure', None)
@@ -3375,6 +3421,7 @@ class MarketConnections:
                             inbox.discard()
                             inbox.queue_wait_seconds = inbox.lag_seconds = 0
                             if self.liveness_backup:
+                                state['shadow'] = WarmBook(state['assets'])
                                 state['liveness_assets'] = set()
                                 state['liveness_hash'] = {}
                             else:
@@ -3439,9 +3486,7 @@ class MarketConnections:
                     parsing_at = time.monotonic()
                     standby = bool(state.get('standby'))
                     if self.liveness_backup and state.get('redundant'):
-                        parse_cpu = process_time()
                         self.liveness_receive(index, state, raw, received_at, inbox)
-                        self._charge('backup_parse', parse_cpu)
                         inbox.processing_received_at = None
                         inbox.processing_charged_bytes = 0
                         continue
@@ -3494,6 +3539,10 @@ class MarketConnections:
                                 inbox.lock_wait_seconds = lock_wait
                     self._charge('primary_apply', apply_cpu)
                 except (ValueError, TypeError, AttributeError):
+                    if state.get('redundant') and isinstance(state.get('shadow'), WarmBook):
+                        inbox.delivery_gap = True
+                        inbox.resync.set()
+                        state['ready'] = False
                     continue
                 finally:
                     inbox.queue.task_done()

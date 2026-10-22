@@ -1,0 +1,1725 @@
+{
+  "events": [
+    {
+      "group": "up_down:BTC:15m",
+      "detected": "2026-10-21T23:25:12.848282+00:00",
+      "last_publication": "2026-10-21T23:25:11.693738+00:00",
+      "first_valid_publication": "2026-10-21T23:25:13.248610+00:00",
+      "detection_to_publication_ms": 400.32800000000003,
+      "reported_detection_to_takeover_ms": 400.9482900000876,
+      "source_silence_ms": 1154.77,
+      "merged_gap_ms": 1554.872,
+      "promotion_at": null,
+      "need_book_at": null,
+      "rest_return_at": null,
+      "missing_reason": "r20 logs do not retain per-request / promotion stage timestamps",
+      "ready_backups": 2
+    },
+    {
+      "group": "up_down:ETH:15m",
+      "detected": "2026-10-22T00:14:38.455766+00:00",
+      "last_publication": "2026-10-22T00:14:37.354515+00:00",
+      "first_valid_publication": "2026-10-22T00:14:38.982561+00:00",
+      "detection_to_publication_ms": 526.795,
+      "reported_detection_to_takeover_ms": 526.9052619987633,
+      "source_silence_ms": 1101.526,
+      "merged_gap_ms": 1628.046,
+      "promotion_at": null,
+      "need_book_at": null,
+      "rest_return_at": null,
+      "missing_reason": "r20 logs do not retain per-request / promotion stage timestamps",
+      "ready_backups": 2
+    }
+  ],
+  "transport": [
+    {
+      "line": 15,
+      "code": null,
+      "source": "feed-1",
+      "role": "primary",
+      "queue_wait": 0,
+      "drops": 0,
+      "sample": {
+        "read_bytes_60s": 19569859,
+        "read_window_resolution_seconds": 1,
+        "at": "2026-10-21T23:25:12.848748+00:00",
+        "sample_gap_seconds": 0.7880176050020964,
+        "scheduler_lag_seconds": 0,
+        "byte_silence_seconds": 1.1552511530026095,
+        "read_bytes": 59372943,
+        "read_calls": 56051,
+        "read_bytes_per_second": 0.0,
+        "pings": 20,
+        "pongs": 20,
+        "pong_rtt_seconds": 0.1595807749981759,
+        "pong_age_seconds": 7.630326615002559
+      }
+    },
+    {
+      "line": 18,
+      "code": 1013,
+      "source": "feed-10003",
+      "role": "backup",
+      "queue_wait": 0,
+      "drops": 0,
+      "sample": {
+        "local_port": 39354,
+        "rcvbuf_bytes": 434221,
+        "keepalive": true,
+        "extensions": "",
+        "rtt_us": 9017,
+        "rcv_ssthresh": 186579,
+        "rcv_space": 36321,
+        "total_retrans": 0,
+        "tcp_bytes_received": 109110571,
+        "rcv_ooopack": 0,
+        "snd_wnd": 131072,
+        "rcv_wnd": 186624,
+        "snd_wscale": 13,
+        "rcv_wscale": 7,
+        "tcp_pending_bytes": 0,
+        "read_bytes_60s": 21030991,
+        "read_window_resolution_seconds": 1,
+        "at": "2026-10-21T23:26:48.966729+00:00",
+        "sample_gap_seconds": 0.18855560600059107,
+        "scheduler_lag_seconds": 0,
+        "byte_silence_seconds": 0.001922887000546325,
+        "read_bytes": 106882776,
+        "read_calls": 101082,
+        "read_bytes_per_second": 477912.07013870234,
+        "pings": 29,
+        "pongs": 29,
+        "pong_rtt_seconds": 0.41531475400188356,
+        "pong_age_seconds": 7.77878863099977
+      }
+    },
+    {
+      "line": 20,
+      "code": null,
+      "source": "feed-40002",
+      "role": "primary",
+      "queue_wait": 0,
+      "drops": 0,
+      "sample": {
+        "read_bytes_60s": 266357,
+        "read_window_resolution_seconds": 1,
+        "at": "2026-10-21T23:28:03.533638+00:00",
+        "sample_gap_seconds": 0.07821997900100541,
+        "scheduler_lag_seconds": 0,
+        "byte_silence_seconds": 0.18559743500009063,
+        "read_bytes": 1618284,
+        "read_calls": 2410,
+        "read_bytes_per_second": 0.0,
+        "pings": 37,
+        "pongs": 37,
+        "pong_rtt_seconds": 0.24585321899940027,
+        "pong_age_seconds": 7.836642564001522
+      }
+    },
+    {
+      "line": 22,
+      "code": null,
+      "source": "feed-30005",
+      "role": "backup",
+      "queue_wait": 0,
+      "drops": 0,
+      "sample": {
+        "read_bytes_60s": 9626282,
+        "read_window_resolution_seconds": 1,
+        "at": "2026-10-21T23:28:04.669576+00:00",
+        "sample_gap_seconds": 0.4101477669973974,
+        "scheduler_lag_seconds": 0,
+        "byte_silence_seconds": 3.251130878998083,
+        "read_bytes": 50767470,
+        "read_calls": 40687,
+        "read_bytes_per_second": 0.0,
+        "pings": 36,
+        "pongs": 35,
+        "pong_rtt_seconds": 0.23956661999909556,
+        "pong_age_seconds": 13.179282486999
+      }
+    },
+    {
+      "line": 24,
+      "code": null,
+      "source": "feed-10005",
+      "role": "backup",
+      "queue_wait": 0,
+      "drops": 0,
+      "sample": {
+        "read_bytes_60s": 35002095,
+        "read_window_resolution_seconds": 1,
+        "at": "2026-10-21T23:28:05.539735+00:00",
+        "sample_gap_seconds": 0.7645013740002469,
+        "scheduler_lag_seconds": 0,
+        "byte_silence_seconds": 0.18858550599907176,
+        "read_bytes": 147287455,
+        "read_calls": 123919,
+        "read_bytes_per_second": 887311.6819274428,
+        "pings": 36,
+        "pongs": 36,
+        "pong_rtt_seconds": 0.36296549400140066,
+        "pong_age_seconds": 3.403066629998648
+      }
+    },
+    {
+      "line": 29,
+      "code": 1013,
+      "source": "feed-10011",
+      "role": "backup",
+      "queue_wait": 0,
+      "drops": 0,
+      "sample": {
+        "local_port": 36332,
+        "rcvbuf_bytes": 419734,
+        "keepalive": true,
+        "extensions": "",
+        "rtt_us": 6898,
+        "rcv_ssthresh": 342423,
+        "rcv_space": 56196,
+        "total_retrans": 0,
+        "tcp_bytes_received": 94390883,
+        "rcv_ooopack": 0,
+        "snd_wnd": 131072,
+        "rcv_wnd": 342528,
+        "snd_wscale": 13,
+        "rcv_wscale": 7,
+        "tcp_pending_bytes": 0,
+        "read_bytes_60s": 25387807,
+        "read_window_resolution_seconds": 1,
+        "at": "2026-10-21T23:37:50.619976+00:00",
+        "sample_gap_seconds": 0.7340640690017608,
+        "scheduler_lag_seconds": 0,
+        "byte_silence_seconds": 0.0050943930000357796,
+        "read_bytes": 92659210,
+        "read_calls": 78531,
+        "read_bytes_per_second": 526605.2601180684,
+        "pings": 23,
+        "pongs": 23,
+        "pong_rtt_seconds": 0.1629039740000735,
+        "pong_age_seconds": 9.575355109001976
+      }
+    },
+    {
+      "line": 32,
+      "code": null,
+      "source": "feed-10009",
+      "role": "primary",
+      "queue_wait": 0,
+      "drops": 0,
+      "sample": {
+        "read_bytes_60s": 17795733,
+        "read_window_resolution_seconds": 1,
+        "at": "2026-10-21T23:40:02.381858+00:00",
+        "sample_gap_seconds": 0.3668182200017327,
+        "scheduler_lag_seconds": 0,
+        "byte_silence_seconds": 2.4753661040012958,
+        "read_bytes": 304529991,
+        "read_calls": 260580,
+        "read_bytes_per_second": 0.0,
+        "pings": 71,
+        "pongs": 71,
+        "pong_rtt_seconds": 0.15763268699811306,
+        "pong_age_seconds": 8.211303847001545
+      }
+    },
+    {
+      "line": 35,
+      "code": null,
+      "source": "feed-30003",
+      "role": "backup",
+      "queue_wait": 0,
+      "drops": 0,
+      "sample": {
+        "read_bytes_60s": 4667266,
+        "read_window_resolution_seconds": 1,
+        "at": "2026-10-21T23:43:45.996707+00:00",
+        "sample_gap_seconds": 0.29917965899949195,
+        "scheduler_lag_seconds": 0,
+        "byte_silence_seconds": 1.410003395001695,
+        "read_bytes": 174640183,
+        "read_calls": 174428,
+        "read_bytes_per_second": 0.0,
+        "pings": 131,
+        "pongs": 131,
+        "pong_rtt_seconds": 0.15962676500203088,
+        "pong_age_seconds": 4.140565077999781
+      }
+    },
+    {
+      "line": 37,
+      "code": null,
+      "source": "feed-10007",
+      "role": "backup",
+      "queue_wait": 0,
+      "drops": 0,
+      "sample": {
+        "read_bytes_60s": 2010801,
+        "read_window_resolution_seconds": 1,
+        "at": "2026-10-21T23:44:57.040472+00:00",
+        "sample_gap_seconds": 0.10253358200134244,
+        "scheduler_lag_seconds": 0,
+        "byte_silence_seconds": 0.7538188390026335,
+        "read_bytes": 421351883,
+        "read_calls": 362645,
+        "read_bytes_per_second": 0.0,
+        "pings": 109,
+        "pongs": 108,
+        "pong_rtt_seconds": 0.16010312700018403,
+        "pong_age_seconds": 9.944788073000382
+      }
+    },
+    {
+      "line": 39,
+      "code": null,
+      "source": "feed-40004",
+      "role": "primary",
+      "queue_wait": 0,
+      "drops": 0,
+      "sample": {
+        "read_bytes_60s": 104320,
+        "read_window_resolution_seconds": 1,
+        "at": "2026-10-21T23:45:12.818909+00:00",
+        "sample_gap_seconds": 0.36246613299954333,
+        "scheduler_lag_seconds": 0,
+        "byte_silence_seconds": 0.8703057269995043,
+        "read_bytes": 2843518,
+        "read_calls": 4538,
+        "read_bytes_per_second": 0.0,
+        "pings": 140,
+        "pongs": 140,
+        "pong_rtt_seconds": 0.15856076500131167,
+        "pong_age_seconds": 7.206352527999115
+      }
+    },
+    {
+      "line": 41,
+      "code": null,
+      "source": "feed-7",
+      "role": "backup",
+      "queue_wait": 0,
+      "drops": 0,
+      "sample": {
+        "read_bytes_60s": 13487641,
+        "read_window_resolution_seconds": 1,
+        "at": "2026-10-21T23:46:01.406200+00:00",
+        "sample_gap_seconds": 0.1444783369988727,
+        "scheduler_lag_seconds": 0,
+        "byte_silence_seconds": 0.578578649998235,
+        "read_bytes": 324204014,
+        "read_calls": 324658,
+        "read_bytes_per_second": 0.0,
+        "pings": 125,
+        "pongs": 125,
+        "pong_rtt_seconds": 0.16294795800058637,
+        "pong_age_seconds": 2.9836384629998065
+      }
+    },
+    {
+      "line": 43,
+      "code": null,
+      "source": "feed-30007",
+      "role": "backup",
+      "queue_wait": 0,
+      "drops": 0,
+      "sample": {
+        "read_bytes_60s": 7737828,
+        "read_window_resolution_seconds": 1,
+        "at": "2026-10-21T23:46:02.783190+00:00",
+        "sample_gap_seconds": 0.015751547998661408,
+        "scheduler_lag_seconds": 0,
+        "byte_silence_seconds": 0.4067933330006781,
+        "read_bytes": 128270799,
+        "read_calls": 140097,
+        "read_bytes_per_second": 0.0,
+        "pings": 107,
+        "pongs": 107,
+        "pong_rtt_seconds": 0.16072559700114653,
+        "pong_age_seconds": 8.857461917999899
+      }
+    },
+    {
+      "line": 46,
+      "code": 1000,
+      "source": "feed-10017",
+      "role": "backup",
+      "queue_wait": 0,
+      "drops": 0,
+      "sample": {
+        "local_port": 41724,
+        "rcvbuf_bytes": 131072,
+        "keepalive": true,
+        "extensions": "",
+        "rtt_us": 2561,
+        "rcv_ssthresh": 52965,
+        "rcv_space": 14620,
+        "total_retrans": 0,
+        "tcp_bytes_received": 315898,
+        "rcv_ooopack": 0,
+        "snd_wnd": 131072,
+        "rcv_wnd": 52992,
+        "snd_wscale": 13,
+        "rcv_wscale": 7,
+        "tcp_pending_bytes": 0,
+        "read_bytes_60s": 41090,
+        "read_window_resolution_seconds": 1,
+        "at": "2026-10-21T23:47:26.907175+00:00",
+        "sample_gap_seconds": 0.4947495369997341,
+        "scheduler_lag_seconds": 0,
+        "byte_silence_seconds": 0.0003667409982881509,
+        "read_bytes": 304867,
+        "read_calls": 320,
+        "read_bytes_per_second": 68.72164086536229,
+        "pings": 15,
+        "pongs": 15,
+        "pong_rtt_seconds": 0.24019772999963607,
+        "pong_age_seconds": 2.2554129749987624
+      }
+    },
+    {
+      "line": 48,
+      "code": null,
+      "source": "feed-10015",
+      "role": "backup",
+      "queue_wait": 0,
+      "drops": 0,
+      "sample": {
+        "read_bytes_60s": 24242813,
+        "read_window_resolution_seconds": 1,
+        "at": "2026-10-21T23:47:32.054232+00:00",
+        "sample_gap_seconds": 0.7306747599977825,
+        "scheduler_lag_seconds": 0,
+        "byte_silence_seconds": 0.4068719269998837,
+        "read_bytes": 124143419,
+        "read_calls": 116193,
+        "read_bytes_per_second": 133617.58930922466,
+        "pings": 45,
+        "pongs": 45,
+        "pong_rtt_seconds": 0.1604531010016217,
+        "pong_age_seconds": 4.574321748998045
+      }
+    },
+    {
+      "line": 50,
+      "code": null,
+      "source": "feed-3",
+      "role": "backup",
+      "queue_wait": 0,
+      "drops": 0,
+      "sample": {
+        "read_bytes_60s": 14197748,
+        "read_window_resolution_seconds": 1,
+        "at": "2026-10-21T23:48:57.491581+00:00",
+        "sample_gap_seconds": 0.8675634460014408,
+        "scheduler_lag_seconds": 0,
+        "byte_silence_seconds": 1.2555405580023944,
+        "read_bytes": 423370322,
+        "read_calls": 377811,
+        "read_bytes_per_second": 0.0,
+        "pings": 162,
+        "pongs": 162,
+        "pong_rtt_seconds": 0.2529531069994846,
+        "pong_age_seconds": 6.618701421000878
+      }
+    },
+    {
+      "line": 53,
+      "code": null,
+      "source": "feed-10013",
+      "role": "primary",
+      "queue_wait": 0,
+      "drops": 0,
+      "sample": {
+        "read_bytes_60s": 20017686,
+        "read_window_resolution_seconds": 1,
+        "at": "2026-10-21T23:51:06.730235+00:00",
+        "sample_gap_seconds": 0.49759687799814856,
+        "scheduler_lag_seconds": 0,
+        "byte_silence_seconds": 0.12727338799959398,
+        "read_bytes": 238452503,
+        "read_calls": 182671,
+        "read_bytes_per_second": 266786.2397651416,
+        "pings": 79,
+        "pongs": 79,
+        "pong_rtt_seconds": 0.163327019999997,
+        "pong_age_seconds": 8.34608382100123
+      }
+    },
+    {
+      "line": 56,
+      "code": null,
+      "source": "feed-20001",
+      "role": "primary",
+      "queue_wait": 0,
+      "drops": 0,
+      "sample": {
+        "read_bytes_60s": 5945683,
+        "read_window_resolution_seconds": 1,
+        "at": "2026-10-21T23:51:06.927747+00:00",
+        "sample_gap_seconds": 0.25987701600024593,
+        "scheduler_lag_seconds": 0,
+        "byte_silence_seconds": 0.13853999899947667,
+        "read_bytes": 166477042,
+        "read_calls": 185196,
+        "read_bytes_per_second": 23680.43197784823,
+        "pings": 176,
+        "pongs": 175,
+        "pong_rtt_seconds": 0.1592867670005944,
+        "pong_age_seconds": 11.104232449997653
+      }
+    },
+    {
+      "line": 59,
+      "code": null,
+      "source": "feed-9",
+      "role": "backup",
+      "queue_wait": 0,
+      "drops": 0,
+      "sample": {
+        "read_bytes_60s": 12020037,
+        "read_window_resolution_seconds": 1,
+        "at": "2026-10-21T23:52:15.065580+00:00",
+        "sample_gap_seconds": 0.15096772299875738,
+        "scheduler_lag_seconds": 0,
+        "byte_silence_seconds": 0.3274053029999777,
+        "read_bytes": 93961345,
+        "read_calls": 79987,
+        "read_bytes_per_second": 0.0,
+        "pings": 37,
+        "pongs": 37,
+        "pong_rtt_seconds": 0.25175254399800906,
+        "pong_age_seconds": 4.90307709300032
+      }
+    },
+    {
+      "line": 62,
+      "code": null,
+      "source": "feed-10019",
+      "role": "primary",
+      "queue_wait": 0,
+      "drops": 0,
+      "sample": {
+        "read_bytes_60s": 17615599,
+        "read_window_resolution_seconds": 1,
+        "at": "2026-10-21T23:52:52.974173+00:00",
+        "sample_gap_seconds": 0.16177688600146212,
+        "scheduler_lag_seconds": 0,
+        "byte_silence_seconds": 0.2666585250008211,
+        "read_bytes": 96803918,
+        "read_calls": 75890,
+        "read_bytes_per_second": 0.0,
+        "pings": 32,
+        "pongs": 32,
+        "pong_rtt_seconds": 0.24580622500070604,
+        "pong_age_seconds": 6.920655472000362
+      }
+    },
+    {
+      "line": 63,
+      "code": 1013,
+      "source": "feed-10025",
+      "role": "backup",
+      "queue_wait": 0,
+      "drops": 0,
+      "sample": {
+        "local_port": 51206,
+        "rcvbuf_bytes": 245136,
+        "keepalive": true,
+        "extensions": "",
+        "rtt_us": 5991,
+        "rcv_ssthresh": 90968,
+        "rcv_space": 38281,
+        "total_retrans": 0,
+        "tcp_bytes_received": 11094897,
+        "rcv_ooopack": 0,
+        "snd_wnd": 131072,
+        "rcv_wnd": 157696,
+        "snd_wscale": 13,
+        "rcv_wscale": 7,
+        "tcp_pending_bytes": 0,
+        "read_bytes_60s": 10919723,
+        "read_window_resolution_seconds": 1,
+        "at": "2026-10-21T23:53:19.922179+00:00",
+        "sample_gap_seconds": 0.05922046299747308,
+        "scheduler_lag_seconds": 0,
+        "byte_silence_seconds": 0.0018419859989080578,
+        "read_bytes": 10919723,
+        "read_calls": 7767,
+        "read_bytes_per_second": 10959.049746498818,
+        "pings": 3,
+        "pongs": 3,
+        "pong_rtt_seconds": 0.24276015299983555,
+        "pong_age_seconds": 1.8177177920006216
+      }
+    },
+    {
+      "line": 66,
+      "code": 1013,
+      "source": "feed-10023",
+      "role": "primary",
+      "queue_wait": 0,
+      "drops": 0,
+      "sample": {
+        "local_port": 33306,
+        "rcvbuf_bytes": 255916,
+        "keepalive": true,
+        "extensions": "",
+        "rtt_us": 8867,
+        "rcv_ssthresh": 109193,
+        "rcv_space": 23797,
+        "total_retrans": 0,
+        "tcp_bytes_received": 46006685,
+        "rcv_ooopack": 0,
+        "snd_wnd": 131072,
+        "rcv_wnd": 109312,
+        "snd_wscale": 13,
+        "rcv_wscale": 7,
+        "tcp_pending_bytes": 24,
+        "read_bytes_60s": 20333271,
+        "read_window_resolution_seconds": 1,
+        "at": "2026-10-21T23:53:24.844374+00:00",
+        "sample_gap_seconds": 0.061972931998752756,
+        "scheduler_lag_seconds": 0,
+        "byte_silence_seconds": 0.001521723999758251,
+        "read_bytes": 45341107,
+        "read_calls": 30071,
+        "read_bytes_per_second": 556033.0758708254,
+        "pings": 14,
+        "pongs": 14,
+        "pong_rtt_seconds": 3.061580056000821,
+        "pong_age_seconds": 0.001413739999406971
+      }
+    },
+    {
+      "line": 71,
+      "code": null,
+      "source": "feed-40003",
+      "role": "primary",
+      "queue_wait": 0,
+      "drops": 0,
+      "sample": {
+        "read_bytes_60s": 131570,
+        "read_window_resolution_seconds": 1,
+        "at": "2026-10-21T23:58:37.948958+00:00",
+        "sample_gap_seconds": 0.24976181700185407,
+        "scheduler_lag_seconds": 0,
+        "byte_silence_seconds": 24.042346440000983,
+        "read_bytes": 12620033,
+        "read_calls": 18574,
+        "read_bytes_per_second": 0.0,
+        "pings": 221,
+        "pongs": 218,
+        "pong_rtt_seconds": 0.1590757379999559,
+        "pong_age_seconds": 32.10002607900242
+      }
+    },
+    {
+      "line": 75,
+      "code": null,
+      "source": "feed-40005",
+      "role": "primary",
+      "queue_wait": 0,
+      "drops": 0,
+      "sample": {
+        "read_bytes_60s": 172319,
+        "read_window_resolution_seconds": 1,
+        "at": "2026-10-22T00:08:12.053948+00:00",
+        "sample_gap_seconds": 0.7349397189973388,
+        "scheduler_lag_seconds": 0,
+        "byte_silence_seconds": 0.5401666689976992,
+        "read_bytes": 9501581,
+        "read_calls": 14536,
+        "read_bytes_per_second": 3341.770673859706,
+        "pings": 240,
+        "pongs": 240,
+        "pong_rtt_seconds": 0.16037889200015343,
+        "pong_age_seconds": 5.575969530000293
+      }
+    },
+    {
+      "line": 77,
+      "code": null,
+      "source": "feed-40007",
+      "role": "primary",
+      "queue_wait": 0,
+      "drops": 0,
+      "sample": {
+        "read_bytes_60s": 941872,
+        "read_window_resolution_seconds": 1,
+        "at": "2026-10-22T00:10:42.914429+00:00",
+        "sample_gap_seconds": 0.19013692299995455,
+        "scheduler_lag_seconds": 0,
+        "byte_silence_seconds": 1.2742709829981322,
+        "read_bytes": 4139148,
+        "read_calls": 5972,
+        "read_bytes_per_second": 0.0,
+        "pings": 72,
+        "pongs": 72,
+        "pong_rtt_seconds": 0.15986756699930993,
+        "pong_age_seconds": 2.0308671959974163
+      }
+    },
+    {
+      "line": 79,
+      "code": null,
+      "source": "feed-40001",
+      "role": "primary",
+      "queue_wait": 0,
+      "drops": 0,
+      "sample": {
+        "read_bytes_60s": 138531,
+        "read_window_resolution_seconds": 1,
+        "at": "2026-10-22T00:11:16.494125+00:00",
+        "sample_gap_seconds": 0.6233544860006077,
+        "scheduler_lag_seconds": 0,
+        "byte_silence_seconds": 0.5903090369974962,
+        "read_bytes": 8692220,
+        "read_calls": 11378,
+        "read_bytes_per_second": 984.9933124559263,
+        "pings": 297,
+        "pongs": 296,
+        "pong_rtt_seconds": 0.16264822000084678,
+        "pong_age_seconds": 10.463135506997787
+      }
+    },
+    {
+      "line": 81,
+      "code": null,
+      "source": "feed-11",
+      "role": "backup",
+      "queue_wait": 0,
+      "drops": 0,
+      "sample": {
+        "read_bytes_60s": 2470468,
+        "read_window_resolution_seconds": 1,
+        "at": "2026-10-22T00:11:38.700591+00:00",
+        "sample_gap_seconds": 0.09362512899679132,
+        "scheduler_lag_seconds": 0,
+        "byte_silence_seconds": 0.3608675739997125,
+        "read_bytes": 197879985,
+        "read_calls": 206721,
+        "read_bytes_per_second": 0.0,
+        "pings": 136,
+        "pongs": 136,
+        "pong_rtt_seconds": 0.2465775210002903,
+        "pong_age_seconds": 1.8475861489969247
+      }
+    },
+    {
+      "line": 84,
+      "code": null,
+      "source": "feed-10029",
+      "role": "backup",
+      "queue_wait": 0,
+      "drops": 0,
+      "sample": {
+        "read_bytes_60s": 21269419,
+        "read_window_resolution_seconds": 1,
+        "at": "2026-10-22T00:13:01.513268+00:00",
+        "sample_gap_seconds": 0.6945805229988764,
+        "scheduler_lag_seconds": 0,
+        "byte_silence_seconds": 0.4936270610014617,
+        "read_bytes": 309671503,
+        "read_calls": 189084,
+        "read_bytes_per_second": 56920.686214035915,
+        "pings": 118,
+        "pongs": 117,
+        "pong_rtt_seconds": 0.24551320799946552,
+        "pong_age_seconds": 10.459310342001118
+      }
+    },
+    {
+      "line": 86,
+      "code": null,
+      "source": "feed-40006",
+      "role": "primary",
+      "queue_wait": 0,
+      "drops": 0,
+      "sample": {
+        "read_bytes_60s": 133960,
+        "read_window_resolution_seconds": 1,
+        "at": "2026-10-22T00:13:31.089387+00:00",
+        "sample_gap_seconds": 0.6807828809978673,
+        "scheduler_lag_seconds": 0,
+        "byte_silence_seconds": 0.8218851540004835,
+        "read_bytes": 2739038,
+        "read_calls": 4400,
+        "read_bytes_per_second": 0.0,
+        "pings": 169,
+        "pongs": 169,
+        "pong_rtt_seconds": 0.252019741001277,
+        "pong_age_seconds": 4.429808108998259
+      }
+    },
+    {
+      "line": 89,
+      "code": null,
+      "source": "feed-20005",
+      "role": "primary",
+      "queue_wait": 0,
+      "drops": 0,
+      "sample": {
+        "read_bytes_60s": 183959,
+        "read_window_resolution_seconds": 1,
+        "at": "2026-10-22T00:14:38.456180+00:00",
+        "sample_gap_seconds": 0.2983089219997055,
+        "scheduler_lag_seconds": 0,
+        "byte_silence_seconds": 1.1019870420022926,
+        "read_bytes": 250529644,
+        "read_calls": 271257,
+        "read_bytes_per_second": 0.0,
+        "pings": 315,
+        "pongs": 315,
+        "pong_rtt_seconds": 0.25016069000048446,
+        "pong_age_seconds": 8.050220230001287
+      }
+    },
+    {
+      "line": 92,
+      "code": null,
+      "source": "feed-10031",
+      "role": "backup",
+      "queue_wait": 0,
+      "drops": 0,
+      "sample": {
+        "read_bytes_60s": 5433736,
+        "read_window_resolution_seconds": 1,
+        "at": "2026-10-22T00:19:56.449626+00:00",
+        "sample_gap_seconds": 0.270605544999853,
+        "scheduler_lag_seconds": 0,
+        "byte_silence_seconds": 0.03980353899896727,
+        "read_bytes": 109825437,
+        "read_calls": 79238,
+        "read_bytes_per_second": 29511.590385201966,
+        "pings": 41,
+        "pongs": 41,
+        "pong_rtt_seconds": 0.23660066299999016,
+        "pong_age_seconds": 6.035418154999206
+      }
+    }
+  ],
+  "cpu_samples": [
+    {
+      "at": "2026-10-22 07:15:24",
+      "status_cpu": 0.685417243624141,
+      "mps": 1313.327593101873,
+      "docker_cpu": 0.7809999999999999
+    },
+    {
+      "at": "2026-10-22 07:15:55",
+      "status_cpu": 0.8232316198652527,
+      "mps": 1313.2056161987084,
+      "docker_cpu": 0.6901
+    },
+    {
+      "at": "2026-10-22 07:16:26",
+      "status_cpu": 1.3463961685374555,
+      "mps": 1313.5071818618226,
+      "docker_cpu": 1.04
+    },
+    {
+      "at": "2026-10-22 07:16:58",
+      "status_cpu": 1.297467898119082,
+      "mps": 1313.3337521499188,
+      "docker_cpu": 0.9212
+    },
+    {
+      "at": "2026-10-22 07:17:29",
+      "status_cpu": 1.2243639876504988,
+      "mps": 1313.638103320147,
+      "docker_cpu": 0.5650999999999999
+    },
+    {
+      "at": "2026-10-22 07:18:00",
+      "status_cpu": 0.8830741680563151,
+      "mps": 1313.3670966661446,
+      "docker_cpu": 1.0093
+    },
+    {
+      "at": "2026-10-22 07:18:31",
+      "status_cpu": 0.6598738807711315,
+      "mps": 1312.9988038516733,
+      "docker_cpu": 0.6634
+    },
+    {
+      "at": "2026-10-22 07:19:03",
+      "status_cpu": 0.6499261757011164,
+      "mps": 1312.6089319961525,
+      "docker_cpu": 0.7319
+    },
+    {
+      "at": "2026-10-22 07:19:34",
+      "status_cpu": 0.5414251369553374,
+      "mps": 1311.8325086035463,
+      "docker_cpu": 0.45990000000000003
+    },
+    {
+      "at": "2026-10-22 07:20:05",
+      "status_cpu": 0.9484218725190808,
+      "mps": 1311.1677077341049,
+      "docker_cpu": 1.3172
+    },
+    {
+      "at": "2026-10-22 07:20:37",
+      "status_cpu": 1.158379572850979,
+      "mps": 1311.59877080932,
+      "docker_cpu": 0.9372
+    },
+    {
+      "at": "2026-10-22 07:21:08",
+      "status_cpu": 0.9440256947554101,
+      "mps": 1311.359303020171,
+      "docker_cpu": 1.077
+    },
+    {
+      "at": "2026-10-22 07:21:39",
+      "status_cpu": 0.8954832956311234,
+      "mps": 1311.337389161219,
+      "docker_cpu": null
+    },
+    {
+      "at": "2026-10-22 07:22:10",
+      "status_cpu": 1.6071528772425752,
+      "mps": 1002.0694329754648,
+      "docker_cpu": 0.9131
+    },
+    {
+      "at": "2026-10-22 07:22:41",
+      "status_cpu": 1.0458686748286938,
+      "mps": 1188.109766238088,
+      "docker_cpu": 1.6723
+    },
+    {
+      "at": "2026-10-22 07:23:12",
+      "status_cpu": 0.8925127134459225,
+      "mps": 1313.1147472646846,
+      "docker_cpu": 1.6496000000000002
+    },
+    {
+      "at": "2026-10-22 07:23:43",
+      "status_cpu": 1.42653627568306,
+      "mps": 1423.5231171741468,
+      "docker_cpu": 2.3255
+    },
+    {
+      "at": "2026-10-22 07:24:14",
+      "status_cpu": 1.3632456466644476,
+      "mps": 1421.201118648634,
+      "docker_cpu": 1.145
+    },
+    {
+      "at": "2026-10-22 07:24:46",
+      "status_cpu": 0.619502595030661,
+      "mps": 1330.804268371434,
+      "docker_cpu": 0.6886
+    },
+    {
+      "at": "2026-10-22 07:25:17",
+      "status_cpu": 1.5006925792527563,
+      "mps": 1295.3792965550576,
+      "docker_cpu": 1.4547999999999999
+    },
+    {
+      "at": "2026-10-22 07:25:48",
+      "status_cpu": 1.0671092790000956,
+      "mps": 1329.1542814363702,
+      "docker_cpu": 0.16510000000000002
+    },
+    {
+      "at": "2026-10-22 07:26:19",
+      "status_cpu": 1.9214344231822882,
+      "mps": 1295.94786717735,
+      "docker_cpu": 1.0586
+    },
+    {
+      "at": "2026-10-22 07:26:50",
+      "status_cpu": 1.072006697775463,
+      "mps": 1311.287946533852,
+      "docker_cpu": 1.1952
+    },
+    {
+      "at": "2026-10-22 07:27:22",
+      "status_cpu": 1.8959508466263681,
+      "mps": 1338.933023162361,
+      "docker_cpu": 1.7096
+    },
+    {
+      "at": "2026-10-22 07:27:53",
+      "status_cpu": 1.6975876913279437,
+      "mps": 1350.0568153306442,
+      "docker_cpu": 2.4169
+    },
+    {
+      "at": "2026-10-22 07:28:24",
+      "status_cpu": 1.6245219865980955,
+      "mps": 1405.5551351878494,
+      "docker_cpu": 1.4128999999999998
+    },
+    {
+      "at": "2026-10-22 07:28:55",
+      "status_cpu": 1.6479746651399012,
+      "mps": 1415.8933237538076,
+      "docker_cpu": 1.1326
+    },
+    {
+      "at": "2026-10-22 07:29:26",
+      "status_cpu": 0.5879455286018951,
+      "mps": 1380.1639575350125,
+      "docker_cpu": 0.32049999999999995
+    },
+    {
+      "at": "2026-10-22 07:29:57",
+      "status_cpu": 0.37125638061802096,
+      "mps": 1308.4807795602987,
+      "docker_cpu": 0.3077
+    },
+    {
+      "at": "2026-10-22 07:30:29",
+      "status_cpu": 2.0120010681258664,
+      "mps": 1287.4986038313548,
+      "docker_cpu": 1.3628
+    },
+    {
+      "at": "2026-10-22 07:31:00",
+      "status_cpu": 1.6904926613612667,
+      "mps": 1297.5724690484694,
+      "docker_cpu": 1.2585
+    },
+    {
+      "at": "2026-10-22 07:31:31",
+      "status_cpu": 1.0715327515562834,
+      "mps": 1300.8000153402875,
+      "docker_cpu": 1.0112
+    },
+    {
+      "at": "2026-10-22 07:32:02",
+      "status_cpu": 2.312687510836902,
+      "mps": 1320.4594776814638,
+      "docker_cpu": 1.8097999999999999
+    },
+    {
+      "at": "2026-10-22 07:32:33",
+      "status_cpu": 0.9074497087449684,
+      "mps": 1350.5661371493086,
+      "docker_cpu": 1.7683000000000002
+    },
+    {
+      "at": "2026-10-22 07:33:05",
+      "status_cpu": 2.092196306189394,
+      "mps": 1358.5537065112187,
+      "docker_cpu": 1.8206
+    },
+    {
+      "at": "2026-10-22 07:33:36",
+      "status_cpu": 1.8507774830785602,
+      "mps": 1366.3546826593831,
+      "docker_cpu": 1.673
+    },
+    {
+      "at": "2026-10-22 07:34:07",
+      "status_cpu": 1.3827419311155782,
+      "mps": 1379.7452876504935,
+      "docker_cpu": 1.4069
+    },
+    {
+      "at": "2026-10-22 07:34:38",
+      "status_cpu": 0.6306487333587798,
+      "mps": 1384.0721926551444,
+      "docker_cpu": 0.8085
+    },
+    {
+      "at": "2026-10-22 07:35:09",
+      "status_cpu": 0.8423612450496124,
+      "mps": 1368.0709186754398,
+      "docker_cpu": 0.8439
+    },
+    {
+      "at": "2026-10-22 07:35:41",
+      "status_cpu": 1.138014058325089,
+      "mps": 1365.853903519647,
+      "docker_cpu": 1.6793
+    },
+    {
+      "at": "2026-10-22 07:36:12",
+      "status_cpu": 1.9246771715178146,
+      "mps": 1368.738729666815,
+      "docker_cpu": 1.6493
+    },
+    {
+      "at": "2026-10-22 07:36:43",
+      "status_cpu": 0.7497632609058161,
+      "mps": 1362.6480925855901,
+      "docker_cpu": 1.364
+    },
+    {
+      "at": "2026-10-22 07:37:14",
+      "status_cpu": 2.50169762163647,
+      "mps": 1370.4312301559985,
+      "docker_cpu": 2.5058000000000002
+    },
+    {
+      "at": "2026-10-22 07:37:45",
+      "status_cpu": 2.0972171011981935,
+      "mps": 1387.5633306281763,
+      "docker_cpu": 1.5702
+    },
+    {
+      "at": "2026-10-22 07:38:17",
+      "status_cpu": 0.5494185882021174,
+      "mps": 1394.6884578314803,
+      "docker_cpu": 2.3274
+    },
+    {
+      "at": "2026-10-22 07:38:48",
+      "status_cpu": 2.1494968637039356,
+      "mps": 1412.078038878925,
+      "docker_cpu": 1.2444
+    },
+    {
+      "at": "2026-10-22 07:39:19",
+      "status_cpu": 2.0751971840293164,
+      "mps": 1422.408921837755,
+      "docker_cpu": 2.0582
+    },
+    {
+      "at": "2026-10-22 07:39:50",
+      "status_cpu": 1.729821901139915,
+      "mps": 1421.3558975921503,
+      "docker_cpu": 0.9732999999999999
+    },
+    {
+      "at": "2026-10-22 07:40:21",
+      "status_cpu": 1.716529356915671,
+      "mps": 1430.583056589847,
+      "docker_cpu": 1.2095
+    },
+    {
+      "at": "2026-10-22 07:40:53",
+      "status_cpu": 2.0455064798988936,
+      "mps": 1434.8142931940786,
+      "docker_cpu": 1.9522
+    },
+    {
+      "at": "2026-10-22 07:41:24",
+      "status_cpu": 1.3122702306488565,
+      "mps": 1438.5825924887506,
+      "docker_cpu": 1.2283
+    },
+    {
+      "at": "2026-10-22 07:41:55",
+      "status_cpu": 2.171880190943265,
+      "mps": 1436.6120807040616,
+      "docker_cpu": 0.9737
+    },
+    {
+      "at": "2026-10-22 07:42:26",
+      "status_cpu": 1.6641237833887406,
+      "mps": 1440.2549406172889,
+      "docker_cpu": 1.3407
+    },
+    {
+      "at": "2026-10-22 07:42:57",
+      "status_cpu": 1.8617048288548943,
+      "mps": 1437.7001806738124,
+      "docker_cpu": 0.7837999999999999
+    },
+    {
+      "at": "2026-10-22 07:43:29",
+      "status_cpu": 1.1839333826450762,
+      "mps": 1439.8847040402677,
+      "docker_cpu": 0.9209
+    },
+    {
+      "at": "2026-10-22 07:44:00",
+      "status_cpu": 0.560522026085331,
+      "mps": 1422.6011480268921,
+      "docker_cpu": 0.3369
+    },
+    {
+      "at": "2026-10-22 07:44:31",
+      "status_cpu": 0.24840949398584677,
+      "mps": 1395.4578179085734,
+      "docker_cpu": 0.2898
+    },
+    {
+      "at": "2026-10-22 07:45:02",
+      "status_cpu": 0.24048504778310043,
+      "mps": 1367.5180740683268,
+      "docker_cpu": 1.6256
+    },
+    {
+      "at": "2026-10-22 07:45:33",
+      "status_cpu": 1.1367559853725289,
+      "mps": 1362.3448485598735,
+      "docker_cpu": 1.3769
+    },
+    {
+      "at": "2026-10-22 07:46:04",
+      "status_cpu": 1.148333235710845,
+      "mps": 1355.893618735772,
+      "docker_cpu": 0.5363
+    },
+    {
+      "at": "2026-10-22 07:46:36",
+      "status_cpu": 0.8755936674117748,
+      "mps": 1351.0511678592845,
+      "docker_cpu": 1.4304
+    },
+    {
+      "at": "2026-10-22 07:47:07",
+      "status_cpu": 1.5969002599997824,
+      "mps": 1349.2518203530474,
+      "docker_cpu": 2.1681
+    },
+    {
+      "at": "2026-10-22 07:47:38",
+      "status_cpu": 0.8057827985215265,
+      "mps": 1358.4807833242496,
+      "docker_cpu": 1.1855
+    },
+    {
+      "at": "2026-10-22 07:48:09",
+      "status_cpu": 1.078992048413279,
+      "mps": 1359.6246966899798,
+      "docker_cpu": 1.4504
+    },
+    {
+      "at": "2026-10-22 07:48:40",
+      "status_cpu": 1.4901812802968974,
+      "mps": 1356.966978900809,
+      "docker_cpu": 1.3405
+    },
+    {
+      "at": "2026-10-22 07:49:12",
+      "status_cpu": 0.812043048864474,
+      "mps": 1352.3199356651228,
+      "docker_cpu": 1.0376
+    },
+    {
+      "at": "2026-10-22 07:49:43",
+      "status_cpu": 0.9706884867601807,
+      "mps": 1346.6921274539566,
+      "docker_cpu": 0.7117
+    },
+    {
+      "at": "2026-10-22 07:50:14",
+      "status_cpu": 1.021069294020566,
+      "mps": 1344.7474558851184,
+      "docker_cpu": 1.4417
+    },
+    {
+      "at": "2026-10-22 07:50:45",
+      "status_cpu": 1.234780071870181,
+      "mps": 1342.8015002315901,
+      "docker_cpu": 0.9251999999999999
+    },
+    {
+      "at": "2026-10-22 07:51:16",
+      "status_cpu": 1.5158945979533667,
+      "mps": 1344.4943348323848,
+      "docker_cpu": 2.0055
+    },
+    {
+      "at": "2026-10-22 07:51:48",
+      "status_cpu": 1.304018538286143,
+      "mps": 1342.1250519094385,
+      "docker_cpu": 1.1036
+    },
+    {
+      "at": "2026-10-22 07:52:19",
+      "status_cpu": 1.4279810512729225,
+      "mps": 1341.2572373947633,
+      "docker_cpu": 1.4868000000000001
+    },
+    {
+      "at": "2026-10-22 07:52:50",
+      "status_cpu": 1.0485316358818364,
+      "mps": 1337.6875511823082,
+      "docker_cpu": 1.8674000000000002
+    },
+    {
+      "at": "2026-10-22 07:53:21",
+      "status_cpu": 1.8973562792438252,
+      "mps": 1336.7357329420083,
+      "docker_cpu": 1.3875
+    },
+    {
+      "at": "2026-10-22 07:53:52",
+      "status_cpu": 1.4769707877091758,
+      "mps": 1335.2910631903892,
+      "docker_cpu": 1.8324
+    },
+    {
+      "at": "2026-10-22 07:54:24",
+      "status_cpu": 1.2721446370033078,
+      "mps": 1342.785264333007,
+      "docker_cpu": 1.1489
+    },
+    {
+      "at": "2026-10-22 07:54:55",
+      "status_cpu": 0.6185900594951382,
+      "mps": 1334.9609117959792,
+      "docker_cpu": 1.3686
+    },
+    {
+      "at": "2026-10-22 07:55:26",
+      "status_cpu": 0.8698588733148662,
+      "mps": 1328.599510127051,
+      "docker_cpu": 1.7053
+    },
+    {
+      "at": "2026-10-22 07:55:57",
+      "status_cpu": 0.8853780006221764,
+      "mps": 1325.3771306068459,
+      "docker_cpu": 1.0281
+    },
+    {
+      "at": "2026-10-22 07:56:28",
+      "status_cpu": 1.1919437092320788,
+      "mps": 1320.9771188570387,
+      "docker_cpu": 1.7094
+    },
+    {
+      "at": "2026-10-22 07:57:00",
+      "status_cpu": 1.0872898485447702,
+      "mps": 1320.8016032823436,
+      "docker_cpu": 1.7767
+    },
+    {
+      "at": "2026-10-22 07:57:31",
+      "status_cpu": 0.8986278633733633,
+      "mps": 1317.5035415452983,
+      "docker_cpu": 1.3358
+    },
+    {
+      "at": "2026-10-22 07:58:02",
+      "status_cpu": 1.1811373637792089,
+      "mps": 1314.5325036709496,
+      "docker_cpu": 0.8917
+    },
+    {
+      "at": "2026-10-22 07:58:33",
+      "status_cpu": 1.2145183881234285,
+      "mps": 1315.669965772892,
+      "docker_cpu": 0.9836
+    },
+    {
+      "at": "2026-10-22 07:59:04",
+      "status_cpu": 0.9510199822860438,
+      "mps": 1305.0460697536032,
+      "docker_cpu": 0.8906000000000001
+    },
+    {
+      "at": "2026-10-22 07:59:36",
+      "status_cpu": 0.3778148238568325,
+      "mps": 1292.5657561531418,
+      "docker_cpu": 0.31920000000000004
+    },
+    {
+      "at": "2026-10-22 08:00:07",
+      "status_cpu": 1.7732961046033036,
+      "mps": 1282.7763899121132,
+      "docker_cpu": 1.6627
+    },
+    {
+      "at": "2026-10-22 08:00:38",
+      "status_cpu": 1.4691066303874476,
+      "mps": 1287.1333451502512,
+      "docker_cpu": 1.0814
+    },
+    {
+      "at": "2026-10-22 08:01:09",
+      "status_cpu": 1.5222071034886828,
+      "mps": 1285.5176461811377,
+      "docker_cpu": 1.4018000000000002
+    },
+    {
+      "at": "2026-10-22 08:01:40",
+      "status_cpu": 1.370112829435109,
+      "mps": 1282.280010096042,
+      "docker_cpu": 1.2069
+    },
+    {
+      "at": "2026-10-22 08:02:12",
+      "status_cpu": 0.7560838627347901,
+      "mps": 1282.135882202394,
+      "docker_cpu": 2.1112
+    },
+    {
+      "at": "2026-10-22 08:02:43",
+      "status_cpu": 0.35269461625643794,
+      "mps": 1280.382700937178,
+      "docker_cpu": 1.2522
+    },
+    {
+      "at": "2026-10-22 08:03:14",
+      "status_cpu": 1.4938265720631194,
+      "mps": 1275.11315400465,
+      "docker_cpu": 1.0415999999999999
+    },
+    {
+      "at": "2026-10-22 08:03:45",
+      "status_cpu": 0.9252595248548287,
+      "mps": 1269.2270104123415,
+      "docker_cpu": 0.8101
+    },
+    {
+      "at": "2026-10-22 08:04:16",
+      "status_cpu": 0.6510027159520951,
+      "mps": 1261.3157261344234,
+      "docker_cpu": 0.488
+    },
+    {
+      "at": "2026-10-22 08:04:47",
+      "status_cpu": 0.5647633862019935,
+      "mps": 1251.6952983459744,
+      "docker_cpu": 0.3592
+    },
+    {
+      "at": "2026-10-22 08:05:19",
+      "status_cpu": 0.7896020832956427,
+      "mps": 1245.861150864139,
+      "docker_cpu": 1.1614
+    },
+    {
+      "at": "2026-10-22 08:05:50",
+      "status_cpu": 1.043114288251175,
+      "mps": 1244.157161555501,
+      "docker_cpu": 0.32689999999999997
+    },
+    {
+      "at": "2026-10-22 08:06:21",
+      "status_cpu": 0.6156397436779733,
+      "mps": 1239.6795920731035,
+      "docker_cpu": 1.2604
+    },
+    {
+      "at": "2026-10-22 08:06:52",
+      "status_cpu": 0.6252742321216287,
+      "mps": 1234.139605020677,
+      "docker_cpu": 0.9074
+    },
+    {
+      "at": "2026-10-22 08:07:23",
+      "status_cpu": 0.6957020260517153,
+      "mps": 1229.2991903485508,
+      "docker_cpu": 0.6656
+    },
+    {
+      "at": "2026-10-22 08:07:55",
+      "status_cpu": 0.8354735290508782,
+      "mps": 1221.4947718592798,
+      "docker_cpu": 0.9333
+    },
+    {
+      "at": "2026-10-22 08:08:26",
+      "status_cpu": 0.7666515668140639,
+      "mps": 1213.5774986737206,
+      "docker_cpu": 0.4104
+    },
+    {
+      "at": "2026-10-22 08:08:57",
+      "status_cpu": 0.6715689421220256,
+      "mps": 1202.5007709266754,
+      "docker_cpu": 0.4155
+    },
+    {
+      "at": "2026-10-22 08:09:28",
+      "status_cpu": 0.39183238723863567,
+      "mps": 1189.0624144064154,
+      "docker_cpu": 0.2413
+    },
+    {
+      "at": "2026-10-22 08:09:59",
+      "status_cpu": 0.4373152743489283,
+      "mps": 1179.0026314430659,
+      "docker_cpu": 0.3768
+    },
+    {
+      "at": "2026-10-22 08:10:31",
+      "status_cpu": 1.2843846771116942,
+      "mps": 1176.198065997475,
+      "docker_cpu": 0.966
+    },
+    {
+      "at": "2026-10-22 08:11:02",
+      "status_cpu": 0.798613272434077,
+      "mps": 1171.4743468041731,
+      "docker_cpu": 1.0378
+    },
+    {
+      "at": "2026-10-22 08:11:33",
+      "status_cpu": 1.135723933990255,
+      "mps": 1165.874224436645,
+      "docker_cpu": 1.0737999999999999
+    },
+    {
+      "at": "2026-10-22 08:12:04",
+      "status_cpu": 1.200033952117821,
+      "mps": 1163.7134450367616,
+      "docker_cpu": 1.0682
+    },
+    {
+      "at": "2026-10-22 08:12:35",
+      "status_cpu": 1.0552036010767814,
+      "mps": 1160.8595545907635,
+      "docker_cpu": 0.7993000000000001
+    },
+    {
+      "at": "2026-10-22 08:13:07",
+      "status_cpu": 1.1851931281989103,
+      "mps": 1158.5017166584641,
+      "docker_cpu": 0.9612999999999999
+    },
+    {
+      "at": "2026-10-22 08:13:38",
+      "status_cpu": 0.8360459248069889,
+      "mps": 1156.689451067681,
+      "docker_cpu": 0.7436
+    },
+    {
+      "at": "2026-10-22 08:14:09",
+      "status_cpu": 0.5866357545606014,
+      "mps": 1153.0352342288468,
+      "docker_cpu": 0.3716
+    },
+    {
+      "at": "2026-10-22 08:14:40",
+      "status_cpu": 0.3416355295659808,
+      "mps": 1143.9201899721388,
+      "docker_cpu": 0.3109
+    },
+    {
+      "at": "2026-10-22 08:15:11",
+      "status_cpu": 1.1323616424352838,
+      "mps": 1136.4314280050926,
+      "docker_cpu": 1.2270999999999999
+    },
+    {
+      "at": "2026-10-22 08:15:42",
+      "status_cpu": 1.1880431178558801,
+      "mps": 1135.6546234779428,
+      "docker_cpu": 1.6302
+    },
+    {
+      "at": "2026-10-22 08:16:14",
+      "status_cpu": 1.192910131792984,
+      "mps": 1139.3948465468939,
+      "docker_cpu": 1.3746
+    },
+    {
+      "at": "2026-10-22 08:16:45",
+      "status_cpu": 0.8609187768003389,
+      "mps": 1139.5551680740662,
+      "docker_cpu": 1.1606999999999998
+    },
+    {
+      "at": "2026-10-22 08:17:16",
+      "status_cpu": 0.7725313104083893,
+      "mps": 1138.3816421953807,
+      "docker_cpu": 1.4961000000000002
+    },
+    {
+      "at": "2026-10-22 08:17:47",
+      "status_cpu": 1.521353227310459,
+      "mps": 1139.4820172452505,
+      "docker_cpu": 1.2723
+    },
+    {
+      "at": "2026-10-22 08:18:18",
+      "status_cpu": 1.015262233042081,
+      "mps": 1139.9562225416737,
+      "docker_cpu": 1.3178999999999998
+    },
+    {
+      "at": "2026-10-22 08:18:50",
+      "status_cpu": 1.3608461535874965,
+      "mps": 1138.4918669279723,
+      "docker_cpu": 1.3665
+    },
+    {
+      "at": "2026-10-22 08:19:21",
+      "status_cpu": 0.1863762454293581,
+      "mps": 1137.6091062996722,
+      "docker_cpu": 0.8223
+    },
+    {
+      "at": "2026-10-22 08:19:52",
+      "status_cpu": 0.5426505500290449,
+      "mps": 1131.888281064677,
+      "docker_cpu": 0.4318
+    },
+    {
+      "at": "2026-10-22 08:20:23",
+      "status_cpu": 1.0750838928318232,
+      "mps": 1133.8867647169116,
+      "docker_cpu": 1.2993999999999999
+    },
+    {
+      "at": "2026-10-22 08:20:55",
+      "status_cpu": 1.439621568882323,
+      "mps": 1134.2344353157948,
+      "docker_cpu": 0.2446
+    },
+    {
+      "at": "2026-10-22 08:21:26",
+      "status_cpu": 2.152473387031258,
+      "mps": 1136.6321298521605,
+      "docker_cpu": 1.9046
+    },
+    {
+      "at": "2026-10-22 08:21:57",
+      "status_cpu": 1.265196629315319,
+      "mps": 1140.0281173647218,
+      "docker_cpu": 1.4513999999999998
+    },
+    {
+      "at": "2026-10-22 08:22:28",
+      "status_cpu": 1.0874736543478232,
+      "mps": 1139.392458689343,
+      "docker_cpu": 1.7547
+    },
+    {
+      "at": "2026-10-22 08:22:59",
+      "status_cpu": 1.3113001799793398,
+      "mps": 1138.403628370337,
+      "docker_cpu": 1.694
+    },
+    {
+      "at": "2026-10-22 08:23:31",
+      "status_cpu": 0.8511394438024593,
+      "mps": 1139.7922282996983,
+      "docker_cpu": 1.1420000000000001
+    },
+    {
+      "at": "2026-10-22 08:24:02",
+      "status_cpu": 0.7882922620100918,
+      "mps": 1138.5569473906096,
+      "docker_cpu": 1.5475
+    },
+    {
+      "at": "2026-10-22 08:24:33",
+      "status_cpu": 0.8591481945368182,
+      "mps": 1134.8657384066614,
+      "docker_cpu": 0.5795
+    },
+    {
+      "at": "2026-10-22 08:25:04",
+      "status_cpu": 0.23502050772885708,
+      "mps": 1130.2475406770825,
+      "docker_cpu": 0.8654000000000001
+    }
+  ],
+  "rest": {
+    "warmups": 0,
+    "failures": 0,
+    "inflight": 0,
+    "requests": 44,
+    "completed": 44,
+    "throttled": 0,
+    "categories": {
+      "warmup": {
+        "total": {
+          "attempts": 0,
+          "deferred": 0,
+          "failures": 0,
+          "requests": 0,
+          "completed": 0,
+          "throttled": 0,
+          "skipped_ended": 0,
+          "stale_backoff": 0
+        },
+        "rolling_hour": {
+          "attempts": 0,
+          "deferred": 0,
+          "failures": 0,
+          "requests": 0,
+          "completed": 0,
+          "throttled": 0,
+          "skipped_ended": 0,
+          "stale_backoff": 0
+        }
+      },
+      "pressure": {
+        "total": {
+          "attempts": 0,
+          "deferred": 0,
+          "failures": 0,
+          "requests": 0,
+          "completed": 0,
+          "throttled": 0,
+          "skipped_ended": 0,
+          "stale_backoff": 0
+        },
+        "rolling_hour": {
+          "attempts": 0,
+          "deferred": 0,
+          "failures": 0,
+          "requests": 0,
+          "completed": 0,
+          "throttled": 0,
+          "skipped_ended": 0,
+          "stale_backoff": 0
+        }
+      },
+      "recovery": {
+        "total": {
+          "attempts": 29,
+          "deferred": 0,
+          "failures": 0,
+          "requests": 44,
+          "completed": 44,
+          "throttled": 0,
+          "skipped_ended": 0,
+          "stale_backoff": 0
+        },
+        "rolling_hour": {
+          "attempts": 29,
+          "deferred": 0,
+          "failures": 0,
+          "requests": 44,
+          "completed": 44,
+          "throttled": 0,
+          "skipped_ended": 0,
+          "stale_backoff": 0
+        }
+      }
+    },
+    "latency_ms": {
+      "max": 333.9085850020638,
+      "p95": 333.9085850020638,
+      "samples": 44
+    },
+    "hour_buckets": 25,
+    "last_failure": null,
+    "inflight_http": 0,
+    "limit_per_10s": 40,
+    "failure_reasons": {
+      "warmup": {},
+      "pressure": {},
+      "recovery": {}
+    },
+    "pressure_requests": 0,
+    "warm_limit_per_10s": 24,
+    "rolling_hour_seconds": 3600,
+    "pressure_limit_per_10s": 32,
+    "reserved_recovery_slots": 2,
+    "background_limit_per_hour": 120
+  },
+  "stage_metrics": {
+    "ws_parent_cpu_cores": 0.1917767799161914,
+    "ws_process_cpu_cores": 0.8511394438024593,
+    "ws_group_process_cpu_cores": {
+      "cold": 0.026016402569390824,
+      "up_down:BTC:5m": 0.1579438152759367,
+      "up_down:ETH:5m": 0.10532682864746003,
+      "up_down:BTC:15m": 0.22259226411302122,
+      "up_down:ETH:15m": 0.14748335328045903
+    }
+  },
+  "evidence_files": [
+    "/workspace/quantdinger/deploy/p35/h0818_r20/observer_status_focus.json",
+    "/workspace/quantdinger/deploy/p35/h0818_r20/observer_docker_0720_0820_sgt.dechunked.log",
+    "/workspace/quantdinger/deploy/p35/h0818_r20/p51_mon_since_0715_sgt.log"
+  ]
+}
