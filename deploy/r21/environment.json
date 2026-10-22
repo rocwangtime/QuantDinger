@@ -1,0 +1,8 @@
+{
+  "python": "3.12.15",
+  "machine": "x86_64",
+  "cpu_model": "Intel(R) Xeon(R) Processor",
+  "allowed_cpus": 8,
+  "replay_confined_cpus": 4,
+  "cgroup_cpu_max": null
+}

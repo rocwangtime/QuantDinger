@@ -1,0 +1,15 @@
+{
+  "commit": "e90ce02",
+  "observer_sha256": "5ba254eca985849122dd128596386f9e57eb49e21a1b1bdd9271a413f343330d",
+  "overlaid_functions": [
+    "ReplaySocket.send",
+    "_bootstrap",
+    "_drive",
+    "_Outbox.submit",
+    "_Outbox.run",
+    "_Feed.__init__",
+    "_Feed._handle",
+    "_Feed._apply"
+  ],
+  "production_observer_unchanged": true
+}

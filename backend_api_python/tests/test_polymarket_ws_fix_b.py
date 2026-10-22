@@ -245,6 +245,7 @@ def test_child_ready_probe_is_copied_not_summed():
 
 class _Inbox:
     def __init__(self):
+        self.epoch = 0
         self.invalid = threading.Event()
         self.resync = threading.Event()
         self.delivery_gap = False
@@ -1001,6 +1002,19 @@ def test_group_processes_keep_status_shape_and_reap(monkeypatch):
     try:
         feeds.sync(markets)
         feeds.wait_ready(20)
+        # Cadence has no maximum after only one initial snapshot. Publish a
+        # second real update before comparing populated diagnostic schemas.
+        for child in feeds.children.values():
+            assets = [a for m in child.spec['markets'] for a in (m['yesAssetId'], m['noAssetId'])]
+            child.send(dict(op='emit', role='primary',
+                raw=json.dumps(wire_event(99, 1, assets, 140, int(time.time()*1000)))))
+        deadline = time.monotonic()+3
+        while not all((((c.latest or {}).get('status') or {}).get('ws_continuity') or {}).get(
+                'receive_cadence_ms', {}).get('hot', {}).get('samples', 0) for c in feeds.children.values()):
+            assert time.monotonic() < deadline, 'cadence publication did not reach status'
+            for child in feeds.children.values():
+                child.send(dict(op='status'))
+            time.sleep(.01)
         feeds.publish_status()
         assert observer.STATUS['mode'] == 'ws'
         assert observer.STATUS['enabled'] is True and observer.STATUS['running'] is True
