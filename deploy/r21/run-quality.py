@@ -1,6 +1,6 @@
 import subprocess,pathlib,json,sys
 repo=pathlib.Path('/workspace/quantdinger/wt_r21')
-checks=[['/tmp/pm-r20-venv/bin/ruff','check','app','scripts','tests'],['/tmp/pm-r20-venv/bin/python','-m','compileall','-q','app/services/polymarket','scripts/polymarket_ws_worker_replay.py','scripts/polymarket_ws_handoff_replay.py','scripts/polymarket_ws_backup_cost.py'],['git','diff','--check']]
+checks=[['/tmp/pm-r20-venv/bin/ruff','check','app','scripts','tests'],['/tmp/pm-r20-venv/bin/python','-m','compileall','-q','app/services/polymarket','scripts/polymarket_ws_worker_replay.py','scripts/polymarket_ws_handoff_replay.py','scripts/polymarket_ws_backup_cost.py'],['git','diff','--check','e90ce02','HEAD','--','.',':!deploy/r21/*.log',':!deploy/r21/**/*.log',':!deploy/r21/*.patch',':!deploy/r21/**/*.patch']]
 rows=[]
 for args in checks:
  p=subprocess.run(args,cwd=repo/'backend_api_python',text=True,capture_output=True)

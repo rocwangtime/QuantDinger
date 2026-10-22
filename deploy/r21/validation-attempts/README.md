@@ -7,3 +7,5 @@
 - startup-boundary-before.log：新增反例先证明中途启动会错误拿市场开始作为失效基线；已限定只在真实rollover使用，startup保留单列诊断。
 
 最终采用 accepted-suite/ 及 suite-summary.json。所有测试进程均与正式性能回放串行。
+
+原始 pytest 日志和 unified-diff 夹具保留原始空白字节；最终源代码/报告的 git diff --check 排除这些 .log/.patch 证据格式。完整检查命令及结果在 ../quality.json。

@@ -28,7 +28,15 @@
     "command": [
       "git",
       "diff",
-      "--check"
+      "--check",
+      "e90ce02",
+      "HEAD",
+      "--",
+      ".",
+      ":!deploy/r21/*.log",
+      ":!deploy/r21/**/*.log",
+      ":!deploy/r21/*.patch",
+      ":!deploy/r21/**/*.patch"
     ],
     "exit": 0,
     "output": ""
