@@ -262,13 +262,13 @@ def test_latency_probe_is_public_get_and_failure_uses_configured_fallback():
     from types import SimpleNamespace
     calls = []
     latency = Latency(m.DEFAULTS)
-    client = SimpleNamespace(_json=lambda *args: calls.append(args))
+    client = SimpleNamespace(server_time=lambda: calls.append('server_time'))
     latency.measure(client, 1000)
-    assert calls == [('GET', 'https://clob.polymarket.com/time')]
+    assert calls == ['server_time']
     assert not latency.status(1000)['fallback']
     def fail(*args):
         raise ValueError('public_api_failed')
-    client._json = fail
+    client.server_time = fail
     latency.measure(client, 2000)
     assert latency.status(2000)['fallback'] and latency.status(2000)['one_way_ms'] == 150
 

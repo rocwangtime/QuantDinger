@@ -2,6 +2,7 @@
 
 import time
 import logging
+import re
 from urllib.parse import urlsplit, urlunsplit
 
 import requests
@@ -32,6 +33,30 @@ class PublicClient:
         self.failures = 0
 
     def _json(self, method, url, **kwargs):
+        return self._read(method, url, self._decode_json, 8 * 1024 * 1024, **kwargs)
+
+    @staticmethod
+    def _decode_json(response):
+        content_type = getattr(response, 'headers', {}).get('Content-Type', '').split(';')[0].lower()
+        if content_type and content_type != 'application/json' and not content_type.endswith('+json'):
+            raise ValueError('polymarket.nonJsonResponse')
+        return response.json()
+
+    def server_time(self):
+        """Public /time alone also permits a bounded plain-text epoch value."""
+        return self._read('GET', CLOB + '/time', self._decode_time, 64)
+
+    @staticmethod
+    def _decode_time(response):
+        content_type = getattr(response, 'headers', {}).get('Content-Type', '').split(';')[0].lower()
+        if content_type and content_type not in ('application/json', 'text/plain') and not content_type.endswith('+json'):
+            raise ValueError('polymarket.nonJsonResponse')
+        value = response.content.strip()
+        if not re.fullmatch(rb'[0-9]{9,13}', value):
+            raise ValueError('polymarket.invalidApiResponse')
+        return int(value)
+
+    def _read(self, method, url, decode, maximum, **kwargs):
         if time.monotonic() - self.session_started >= self.max_session_age:
             self._renew()
         response = None
@@ -40,12 +65,9 @@ class PublicClient:
             if 300 <= getattr(response, 'status_code', 200) < 400:
                 raise requests.HTTPError('redirect response')
             response.raise_for_status()
-            if len(response.content) > 8 * 1024 * 1024:
+            if len(response.content) > maximum:
                 raise ValueError("polymarket.responseTooLarge")
-            content_type = getattr(response, 'headers', {}).get('Content-Type', '').split(';')[0].lower()
-            if content_type and content_type != 'application/json' and not content_type.endswith('+json'):
-                raise ValueError('polymarket.nonJsonResponse')
-            result = response.json()
+            result = decode(response)
         except (requests.RequestException, ValueError, TypeError) as exc:
             # Public diagnostics only: no response body, URL query, userinfo, or headers.
             location = urlsplit(getattr(response, 'headers', {}).get('Location', '')) if response is not None else None
