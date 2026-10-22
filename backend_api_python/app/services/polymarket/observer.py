@@ -2422,7 +2422,9 @@ class MarketConnections:
         self.balancer.forced_hot = {k for k in self.balancer.groups.values() if k.split(':outcome:')[0] in HOT_SERIES}
         self.continuity.hot_assets = {a for a, key in self.balancer.groups.items()
                                       if key.split(':outcome:')[0] in HOT_SERIES}
-        self.continuity.prune(set(subscription_assets(markets)))
+        with self.continuity.lock:
+            self.continuity.rollover.observe(markets, self.continuity.published)
+            self.continuity.prune(set(subscription_assets(markets)))
         if set(subscription_assets(markets)) == set(self.balancer.assignment):
             self.tick()
             return
@@ -4097,7 +4099,8 @@ class MarketConnections:
                         read_calls=getattr(s.get('socket'), 'read_calls', 0),
                         transport=dict(getattr(getattr(s.get('socket'), 'transport', None), 'last', {})))
                 for i, s in self.states.items() if 'inbox' in s}
-            STATUS.update(ws_stage_cpu_seconds=dict(self.stage_cpu),
+            STATUS.update(ws_rollover_gaps=self.continuity.rollover.metrics(),
+                          ws_stage_cpu_seconds=dict(self.stage_cpu),
                           ws_backup_book_cpu_seconds={s.get('source'): dict(s.get('stage_cpu') or {})
                               for _, s in self.backup_items()},
                           ws_continuity=self.continuity.metrics(), ws_failover_ms=self.failover_ms,

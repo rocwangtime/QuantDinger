@@ -82,7 +82,7 @@ MAX_KEYS = frozenset({
 MERGE_DICTS = frozenset({
     'ws_local_100ms', 'ws_hot_backup_by_group', 'ws_hot_primary_failures',
     'ws_group_rates', 'ws_group_byte_rates', 'ws_group_ingress_byte_rates',
-    'close_reason_counts', 'ws_stage_cpu_seconds', 'ws_backup_book_cpu_seconds',
+    'ws_rollover_gaps', 'close_reason_counts', 'ws_stage_cpu_seconds', 'ws_backup_book_cpu_seconds',
 })
 _STOP_CHILD = threading.Event()
 

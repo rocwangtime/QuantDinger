@@ -283,6 +283,8 @@ class FeedContinuity:
         self.business_events = deque(maxlen=256)
         self.business_latest = {}
         self.business_serial = 0
+        from .ws_rollover_gap import RolloverGaps
+        self.rollover = RolloverGaps()
         self.serial = self.checks = self.uncertain = self.recovered = 0
 
     @serialized
@@ -290,6 +292,12 @@ class FeedContinuity:
         event.update(merged_gap_ms=None, merged_gap_final=False, gap_definition=BUSINESS_GAP_DEFINITION,
                      interruption_at=datetime.now(timezone.utc).isoformat())
         baselines = {a: dict(self.published[a]) for a in assets if a in self.published}
+        boundary_baselines = self.rollover.baselines(set(assets)-baselines.keys())
+        if boundary_baselines:
+            from .ws_rollover_gap import ROLLOVER_GAP_DEFINITION
+            baselines.update(boundary_baselines)
+            event.update(baseline_kind='scheduled_market_start', gap_definition=ROLLOVER_GAP_DEFINITION,
+                         rollover_event_ids=sorted({b['rollover_event_id'] for b in boundary_baselines.values()}))
         event['_gap_assets'] = set(assets)
         event['_gap_baselines'] = baselines
         event['_gap_results'] = {}
@@ -323,7 +331,8 @@ class FeedContinuity:
             results = event['_gap_results']
             maximum = max(results.values(), key=lambda r: r['ms'])
             event.update(merged_gap_ms=maximum['ms'], gap_maximum=maximum,
-                gap_measurement='unmeasured_no_baseline' if event['unmeasured_assets'] else 'measured',
+                gap_measurement=('unmeasured_no_baseline' if event['unmeasured_assets'] else
+                    'measured_rollover_start' if event.get('baseline_kind') == 'scheduled_market_start' else 'measured'),
                 merged_gap_final=not event['unmeasured_assets'] and event['_gap_assets'] <= results.keys())
             event['business_gap'] = bool(event.get('supply_interrupted') and event['merged_gap_final']
                                          and event['merged_gap_ms'] > 0)
@@ -386,6 +395,7 @@ class FeedContinuity:
             row = metadata.get(asset)
             if not row or row[0] is None:
                 continue
+            self.rollover.publication(asset, published_at)
             previous = self.published.get(asset)
             if previous and row[1] <= previous['received']:
                 continue
