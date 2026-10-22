@@ -199,6 +199,7 @@ class Recorder:
         self.maximum = setting('RECORDING_BUFFER_MAX', 10000, 1, 100000)
         self.dropped = 0
         self.invalid = 0
+        self.stale_by_source = {}
         self.last_twap = {}
         self.twap_cache = {}
         self.health_lock = threading.Lock()
@@ -216,7 +217,7 @@ class Recorder:
             self.dropped += 1
         self.pending.append((key, kind, [(sql, params)]))
 
-    def receive(self, event, changed, markets, asset_markets, received, owned=None, published=None):
+    def receive(self, event, changed, markets, asset_markets, received, owned=None, published=None, source=None):
         changed = set(changed)
         for kind, payload in events(event):
             if kind == 'book':
@@ -242,6 +243,9 @@ class Recorder:
                     previous = self.metadata.get(token, (None,))[0]
                     if previous is None or at is None or at >= previous:
                         self.metadata[token] = (at, received, 'ws')
+                    else:
+                        from .ws_redundancy import source_increment
+                        source_increment(self.stale_by_source, source)
             if self.enabled and kind == 'last_trade_price':
                 trade = parse_trade(payload, received)
                 if trade is None:

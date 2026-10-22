@@ -27,7 +27,7 @@ from .ws_rotation import DataHealth, ShadowBooks, reconnect_delay
 from .ws_subscriptions import SubscriptionPacer
 from .ws_recovery import SnapshotRecovery
 from .ws_payloads import ParsedFrames, materialized_book, book_bytes
-from .ws_redundancy import DoubleKicks, FeedMerge, FeedContinuity, HotBackupCoverage, DisconnectClusters
+from .ws_redundancy import DoubleKicks, FeedMerge, FeedContinuity, HotBackupCoverage, DisconnectClusters, business_gap_counts
 from .ws_balance import setting as ws_setting
 from .observer_db import metrics as database_metrics
 
@@ -797,7 +797,7 @@ class Pipeline:
         for identity in previous - self.markets.keys():
             self.capture(identity, 'observation', lambda: _end_episode(identity, datetime.now(timezone.utc)))
 
-    def receive(self, raw, owned=None, received_at=None, inbox=None, epoch=None):
+    def receive(self, raw, owned=None, received_at=None, inbox=None, epoch=None, source=None):
         if raw == 'PONG':
             return
         try:
@@ -820,7 +820,7 @@ class Pipeline:
                 event = recording.owned_events(event, owned)
                 changed = ws_apply_event(event, self.books)
                 self.recording.receive(event, changed, self.markets, self.asset_markets, received, owned,
-                                       published=published)
+                                       published=published, source=source or getattr(inbox, 'source', None))
                 if self.paper_account:
                     self.paper_account.history.record(event, int(received.timestamp() * 1000))
                 self.dirty.update(self.asset_markets[a] for a in changed if a in self.asset_markets)
@@ -2270,8 +2270,10 @@ class MarketConnections:
             groups = {self.balancer.groups.get(a, '').split(':outcome:')[0] for a in state['assets']} & HOT_SERIES
             gap_events = {key: dict(code=code, ready_backup_at_kick=bool(ready), ready_backups=ready,
                          takeover_gap_ms=None, receipt_gap_ms=None, recovery=None, gap_final=False) for key in groups}
-            for event in gap_events.values():
+            for group, event in gap_events.items():
+                event['at'] = state['outage_wall'].timestamp()
                 self.continuity.watch_gap(event, set(state['assets']))
+                self.double_kicks.watch_primary(group, state.get('source'), event, now)
             if use_rest:
                 self.request_snapshot(index, state, set(state['assets']))
             with (_PIPELINE.lock if _PIPELINE else RLock()):
@@ -2294,6 +2296,10 @@ class MarketConnections:
                 event['merged_receipt_gap_ms'] = max(0, (state['outage_wall'] - min(receipts, default=state['outage_wall'])).total_seconds() * 1000)
                 event['reason'] = state.get('failure_reason', 'transport')
                 row['events'].append(event)
+                rolling = row.setdefault('rolling_events', deque(maxlen=4096))
+                while rolling and rolling[0]['at'] <= state['outage_wall'].timestamp()-3600:
+                    rolling.popleft()
+                rolling.append(event)
                 _LOG.warning('Polymarket WS hot primary failure group=%s shard=%s code=%s ready_backups=%s',
                              key, index, code, ready)
                 state.setdefault('outage_events', []).append(event)
@@ -3622,6 +3628,7 @@ class MarketConnections:
                              updown.setting('WS_RECEIVE_QUEUE_CEILING', 16384, 1, 100000))
         state['receive_drops'] = state.get('receive_drops', 0) + (state['inbox'].dropped if state.get('inbox') else 0)
         state['inbox'] = inbox
+        inbox.source = state['source']
         inbox.activated = {a: datetime.max.replace(tzinfo=timezone.utc) for a in state['assets']}
         state['queue_logged'] = False
         state['retry_at'] = time.monotonic() + self.retry_delay(index, state, state['attempts'])
@@ -4312,6 +4319,13 @@ class MarketConnections:
                 for i, s in self.states.items() if 'inbox' in s}
             STATUS.update(ws_rollover_gaps=self.continuity.rollover.metrics(),
                           ws_stage_cpu_seconds=dict(self.stage_cpu),
+                          ws_feed_exchange_lag={s.get('source'): dict(**self.connection_role(s),
+                              classification=s.get('freshness_classification'),
+                              assets={a: dict(exchange_lag_seconds=(received-at).total_seconds(),
+                                  sample_age_seconds=(datetime.now(timezone.utc)-received).total_seconds())
+                                  for a, (at, received) in list(s.get('feed_freshness', {}).items())})
+                              for _, s in [*self.states.items(), *self.backup_items()]},
+                          ws_recording_stale_by_source=dict(_PIPELINE.recording.stale_by_source) if _PIPELINE else {},
                           ws_backup_book_cpu_seconds={s.get('source'): dict(s.get('stage_cpu') or {})
                               for _, s in self.backup_items()},
                           ws_warm_backup_supply={s.get('source'): dict(
@@ -4328,6 +4342,7 @@ class MarketConnections:
                           ws_backup_exchange_lag_grace_seconds=.75,
                           ws_backup_supply_queue_grace_seconds=1.5,
                           ws_hot_primary_failures={k: dict(total=v['total'], without_ready_backup=v['without_ready_backup'],
+                              **business_gap_counts(v.get('rolling_events', v['events']), datetime.now(timezone.utc).timestamp()),
                               events=[{field: value for field, value in e.items() if not field.startswith('_')}
                                   for e in v['events']]) for k, v in self.primary_failures.items()},
                           ws_takeover_gap_scope='failed_source_receipt_to_recovery; detection_to_takeover_ms_is_control_time',
@@ -4351,6 +4366,7 @@ class MarketConnections:
                           ws_liveness_silence={k: {f: v for f, v in row.items() if not f.startswith('_')} for k, row in self.liveness_silence.items()},
                           ws_backups={i: self.backup_metrics(i, s, now) for i, s in self.backups.items()},
                           ws_merge_metrics={i: dict(duplicates=m.duplicates, stale=m.stale, evictions=m.evictions,
+                              stale_by_source=dict(m.stale_by_source),
                               entries=len(m.seen), capacity=m.maximum, sources_per_entry_limit=4,
                               assets=len(m.latest), levels=len(m.levels)) for i, m in self.merges.items()},
                           ws_standby_slow_consumer_count=self.standby_slow_consumers,
