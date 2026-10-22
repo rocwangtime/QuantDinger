@@ -1090,6 +1090,29 @@ class ReceiveQueue:
         self.peak_at, self.peak_bytes = self.metric_at, 0
         self.invalid = Event()
         self.last_byte_at = self.last_data_at = None
+        self.wake_pending = False
+
+    def wake(self):
+        # Out-of-band notification: consumes no FIFO capacity or task counter.
+        with self.queue.not_empty:
+            self.wake_pending = True
+            self.queue.not_empty.notify_all()
+
+    def next_frame(self, timeout=.2):
+        deadline = time.monotonic() + timeout
+        with self.queue.not_empty:
+            while not self.queue._qsize():
+                if self.wake_pending:
+                    self.wake_pending = False
+                    raise Empty
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise Empty
+                self.queue.not_empty.wait(remaining)
+            self.wake_pending = False
+            item = self.queue._get()
+            self.queue.not_full.notify()
+            return item
 
     def pending_wait_seconds(self):
         with self.queue.mutex:
@@ -1839,6 +1862,15 @@ class MarketConnections:
 
         threading.Thread(target=fire, name='polymarket-book-fallback', daemon=True).start()
 
+    def wake_backups(self, index, failed):
+        # Only a confirmed failed current generation can send the hint.
+        if self.states.get(index) is not failed or failed.get('connected') or failed.get('standby'):
+            return
+        for i, candidate in self.backup_items():
+            inbox = candidate.get('inbox')
+            if i == index and inbox is not None:
+                inbox.wake()
+
     def _promote_liveness_backup(self, index, state):
         """Hand off a checked warm baseline; repair only unverified assets."""
         if threading.current_thread() is not state.get('worker'):
@@ -1893,6 +1925,12 @@ class MarketConnections:
                          rotate_failures=0, rotate_retry_at=0, backup_started=True,
                          backup_failures=0, backup_retry_at=0, last_pressure_promotion=time.monotonic())
             state['unsubscribe_pending'] = extra
+            promoted = time.monotonic()
+            for event in state.get('outage_events', []):
+                event.update(promotion_at=state['promoted_at'],
+                    detection_to_promotion_ms=max(0, (promoted-old.get('failed_at', promoted))*1000),
+                    baseline_verified=state['baseline_handoff']['verified'],
+                    need_book_assets=state['baseline_handoff']['rest'])
             self.states[index] = state
             self.remove_backup(index, state)
             self.backup_promotions += 1
@@ -2082,7 +2120,9 @@ class MarketConnections:
             if event.get('_last_receipt') is not None:
                 last = event.pop('_last_receipt', wall)
                 receipt_gap = max(0, (datetime.now(timezone.utc) - last).total_seconds() * 1000)
-                event.update(takeover_gap_ms=receipt_gap, detection_to_takeover_ms=event.get('detection_to_takeover_ms', gap),
+                event.update(takeover_gap_ms=receipt_gap, detection_to_first_valid_publication_ms=gap,
+                             first_valid_publication_at=datetime.now(timezone.utc).isoformat(),
+                             detection_to_takeover_ms=event.get('detection_to_takeover_ms', gap),
                              recovery=event.get('recovery', method) or method,
                              receipt_gap_ms=receipt_gap, gap_final=True)
         state.pop('outage_at', None)
@@ -3459,7 +3499,7 @@ class MarketConnections:
                         self.subscriptions.enqueue(state, state['assets'])
                     _LOG.warning('Polymarket WS snapshot recovery shard=%s drops=%s', index, inbox.dropped)
                 try:
-                    raw, received_at, epoch = inbox.queue.get(timeout=.2)
+                    raw, received_at, epoch = inbox.next_frame(timeout=.2)
                     inbox.processing_received_at = received_at
                     inbox.processing_charged_bytes = WireQueue.charge((raw, received_at, epoch))
                     inbox.queue_wait_seconds = (datetime.now(timezone.utc) - received_at).total_seconds()
@@ -3643,6 +3683,7 @@ class MarketConnections:
             inbox.delivery_gap = True
             state['connected'] = False
             state.setdefault('failed_at', time.monotonic())
+            self.wake_backups(index, state)
             self.update_hot_coverage(time.monotonic())
             code, reason = remote_close(error)
             self.record_primary_1013(index, state, code)
@@ -3703,6 +3744,7 @@ class MarketConnections:
             inbox.delivery_gap = True
             state['connected'] = False
             state.setdefault('failed_at', time.monotonic())
+            self.wake_backups(index, state)
             self.update_hot_coverage(time.monotonic())
             counted = state.pop('slow_error', False)
             with _LOCK:
