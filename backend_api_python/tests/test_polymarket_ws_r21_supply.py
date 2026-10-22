@@ -45,6 +45,12 @@ def test_receiving_spare_supplies_before_four_second_physical_promotion(monkeypa
         emit(m, spare, n, str(n))
     primary['inbox'].last_byte_at = time.monotonic()-5
     emit(m, spare, 3200, '7')
+    from unittest.mock import patch
+    now = time.monotonic()
+    with patch.object(observer.time, 'monotonic', return_value=now+.5):
+        emit(m, spare, 3201, '7')
+    with patch.object(observer.time, 'monotonic', return_value=now+1.1):
+        emit(m, spare, 3202, '7')
     assert m.states[0] is spare and not requests and not spare.get('need_book')
     assert pipeline.books['ay']['bids']['.4'] == '7'
 

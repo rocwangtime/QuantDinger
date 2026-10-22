@@ -1,0 +1,15 @@
+{
+  "cases": 1000,
+  "seed": 21,
+  "last_primary_pong_age_uniform_s": [
+    0,
+    10
+  ],
+  "normal_copy_delay_uniform_s": [
+    0,
+    0.8
+  ],
+  "premature_promotions": 638,
+  "conditional_false_promotion_ratio": 0.638,
+  "scope": "Synthetic first quote after quiet; not a production false-promotion probability or confidence bound."
+}

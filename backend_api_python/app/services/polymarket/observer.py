@@ -1740,9 +1740,9 @@ class MarketConnections:
         runs that, so without this a dead link waits for the 22s PONG timeout
         (09:36 ETH15m on 2026-10-20: 24s gap while the spare read 205 KB/s).
         Requires the primary to be byte-quiet (data and PONG) for the hot
-        silence window and this spare to have an envelope newer than the
-        primary's last byte within 1s. A quiet market silences both, so it
-        never fires. Idempotence belongs to the failed physical generation;
+        silence window and at least 1s of continuing newer spare envelopes.
+        A single early copy after natural quiet cannot retire the primary.
+        Any primary byte resets this evidence. Idempotence belongs to the failed physical generation;
         a newly promoted socket must never inherit another socket's cooldown.
         """
         now = time.monotonic() if now is None else now
@@ -1760,24 +1760,41 @@ class MarketConnections:
             return False
         quiet = min(5, ws_setting('HOT_BYTE_SILENCE_SECONDS', 4, 3))
         mine = state.get('liveness_at')
-        if now - last_byte < quiet or mine is None or mine <= last_byte or now - mine > 1:
+        if now - last_byte < .25 or mine is None or mine <= last_byte or now - mine > 1:
             return False
         received = getattr(state.get('inbox'), 'last_data_at', None)
         if received is not None and received <= last_byte:
             return False
-        groups = sorted({self.balancer.groups.get(a, '').split(':outcome:')[0] for a in old.get('assets') or []} - {''})
-        key = groups[0] if groups else str(index)
-        row = self.liveness_silence.setdefault(key, dict(promotions=0, suppressed=0, last_at=None, last_silence_s=None))
-        silence = round(now - last_byte, 3)
-        row.update(promotions=row['promotions'] + 1, last_at=datetime.now(timezone.utc).isoformat(),
-                   last_silence_s=silence, _last_monotonic=now)
-        old.update(data_suspect=True, failure_reason=self.silence_reason(old))
-        row.update(old['silence_evidence'])
-        old.setdefault('failed_at', now)
-        _LOG.warning('Polymarket WS primary byte silence group=%s shard=%s silence_s=%s spare=%s',
-                     key, index, silence, state.get('source'))
-        self.record_primary_failure(index, old, None)
-        return True
+        prior_byte, since, previous = old.get('_peer_silence_evidence', (None, now, now))
+        if prior_byte != last_byte or now-previous > 1:
+            since = now
+        old['_peer_silence_evidence'] = (last_byte, since, now)
+        if now-last_byte < quiet or now-since < 1:
+            return False
+        with self.lifecycle_lock:
+            current_byte = max((at for at in (getattr(old_inbox, 'last_byte_at', None),
+                getattr(transport, 'last_read_at', None)) if at is not None), default=None)
+            if (self.states.get(index) is not old or old.get('inbox') is not old_inbox
+                    or not old.get('connected') or old.get('data_suspect') or old.get('retired')
+                    or current_byte != last_byte or not self.backup_ready(state)):
+                return False
+            # Mark before evidence I/O releases the GIL. Another spare must
+            # not count the same physical generation a second time.
+            old['data_suspect'] = True
+            old['failure_reason'] = self.silence_reason(old)
+            groups = sorted({self.balancer.groups.get(a, '').split(':outcome:')[0]
+                             for a in old.get('assets') or []} - {''})
+            key = groups[0] if groups else str(index)
+            row = self.liveness_silence.setdefault(key, dict(promotions=0, suppressed=0, last_at=None, last_silence_s=None))
+            silence = round(now - last_byte, 3)
+            row.update(promotions=row['promotions'] + 1, last_at=datetime.now(timezone.utc).isoformat(),
+                       last_silence_s=silence, _last_monotonic=now)
+            row.update(old['silence_evidence'])
+            old.setdefault('failed_at', now)
+            _LOG.warning('Polymarket WS primary byte silence group=%s shard=%s silence_s=%s spare=%s',
+                         key, index, silence, state.get('source'))
+            self.record_primary_failure(index, old, None)
+            return True
 
     def _remember_books(self, state, event):
         checkpoints = state.setdefault('book_checkpoints', BookCheckpoints())
@@ -4220,6 +4237,7 @@ class MarketConnections:
                           ws_rotation_last_failure=self.rotation_last_failure,
                           ws_hot_rotate_seconds=ws_setting('HOT_ROTATE_SECONDS', 0, 0),
                           ws_hot_byte_silence_seconds=min(5, ws_setting('HOT_BYTE_SILENCE_SECONDS', 4, 3)),
+                          ws_hot_byte_silence_peer_evidence_seconds=1.0,
                           ws_backup_promotions=self.backup_promotions,
                           ws_liveness_silence={k: {f: v for f, v in row.items() if not f.startswith('_')} for k, row in self.liveness_silence.items()},
                           ws_backups={i: self.backup_metrics(i, s, now) for i, s in self.backups.items()},
