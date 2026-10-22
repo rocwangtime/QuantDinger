@@ -1,0 +1,53 @@
+{
+  "scenario": "no-code-close-warm-book",
+  "silence_s": 1.15,
+  "rest_delay_s": 0.33,
+  "ready_backups": 2,
+  "code": null,
+  "need_book_seen": false,
+  "need_book_wait_ms": 0,
+  "rest_requests": 0,
+  "promotion_ms": 1.6882790005183779,
+  "detection_to_first_valid_publication_ms": 252.22157199823414,
+  "event": {
+    "code": null,
+    "ready_backup_at_kick": true,
+    "ready_backups": 2,
+    "takeover_gap_ms": 1412.749,
+    "receipt_gap_ms": 1412.749,
+    "recovery": "ws",
+    "gap_final": true,
+    "merged_gap_ms": 276.389,
+    "merged_gap_final": true,
+    "gap_definition": "Per interruption event and asset: last merged publication before interruption to first merged publication after interruption; max across affected assets. Publication wall time, not socket receipt, detection-to-takeover, physical silence or ordinary interarrival. A final gap >1500ms is a business gap regardless of ready spares; physical silence >20s is separately alert-only. Missing baseline is unmeasured, never zero.",
+    "business_gap": false,
+    "business_gap_limit_ms": 1500,
+    "interruption_at": "2026-10-22T05:20:23.568428+00:00",
+    "business_event_id": 1,
+    "unmeasured_assets": [],
+    "gap_measurement": "measured",
+    "source_silence_ms": 1161.265,
+    "physical_source_silence_alert": false,
+    "physical_source_silence_alert_only": true,
+    "merged_receipt_gap_ms": 25.208000000000002,
+    "reason": "transport",
+    "promotion_at": "2026-10-22T05:20:23.569743+00:00",
+    "detection_to_promotion_ms": 1.2288910002098419,
+    "baseline_verified": [
+      "an",
+      "ay"
+    ],
+    "need_book_assets": [],
+    "gap_maximum": {
+      "ms": 276.389,
+      "asset": "ay",
+      "at": "2026-10-22T05:20:23.819809+00:00"
+    },
+    "detection_to_first_valid_publication_ms": 251.48188300227048,
+    "first_valid_publication_at": "2026-10-22T05:20:23.819872+00:00",
+    "detection_to_takeover_ms": 251.48188300227048
+  },
+  "final_book_sha256": "91822f206eb21dddf01ac44b8b242883278d0e4262b7fe086d83b72b1e57b464",
+  "expected_book_sha256": "91822f206eb21dddf01ac44b8b242883278d0e4262b7fe086d83b72b1e57b464",
+  "valid": true
+}

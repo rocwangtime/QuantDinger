@@ -1,0 +1,12 @@
+replay emit failed role=backup
+Traceback (most recent call last):
+  File "/workspace/quantdinger/wt_r21/backend_api_python/app/services/polymarket/ws_group_process.py", line 946, in _drive
+    if not copy.stopped.is_set():
+           ^^^^^^^^^^^^
+AttributeError: 'NoneType' object has no attribute 'stopped'
+replay emit failed role=backup
+Traceback (most recent call last):
+  File "/workspace/quantdinger/wt_r21/backend_api_python/app/services/polymarket/ws_group_process.py", line 946, in _drive
+    if not copy.stopped.is_set():
+           ^^^^^^^^^^^^
+AttributeError: 'NoneType' object has no attribute 'stopped'

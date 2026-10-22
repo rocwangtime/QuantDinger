@@ -1,0 +1,59 @@
+{
+  "generations": 60,
+  "frames_per_generation": 500,
+  "physical_sockets": 120,
+  "elapsed_seconds": 36.88863444500021,
+  "samples": [
+    {
+      "generations": 10,
+      "current_python_bytes": 384460,
+      "peak_python_bytes": 13287433,
+      "rss_bytes": 82706432,
+      "live_retired_managers": 0,
+      "threads": 1
+    },
+    {
+      "generations": 20,
+      "current_python_bytes": 386371,
+      "peak_python_bytes": 13368846,
+      "rss_bytes": 92663808,
+      "live_retired_managers": 0,
+      "threads": 1
+    },
+    {
+      "generations": 30,
+      "current_python_bytes": 389760,
+      "peak_python_bytes": 13368846,
+      "rss_bytes": 96849920,
+      "live_retired_managers": 0,
+      "threads": 1
+    },
+    {
+      "generations": 40,
+      "current_python_bytes": 391051,
+      "peak_python_bytes": 13370336,
+      "rss_bytes": 100925440,
+      "live_retired_managers": 0,
+      "threads": 1
+    },
+    {
+      "generations": 50,
+      "current_python_bytes": 392324,
+      "peak_python_bytes": 13370336,
+      "rss_bytes": 103026688,
+      "live_retired_managers": 0,
+      "threads": 1
+    },
+    {
+      "generations": 60,
+      "current_python_bytes": 393329,
+      "peak_python_bytes": 13370364,
+      "rss_bytes": 103165952,
+      "live_retired_managers": 0,
+      "threads": 1
+    }
+  ],
+  "python_growth_after_warmup": 6958,
+  "limitation": "Synthetic sockets; cannot exclude production TLS/native retention. RSS is not a Python heap size.",
+  "valid": true
+}

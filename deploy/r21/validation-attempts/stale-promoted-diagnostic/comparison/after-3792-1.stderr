@@ -1,0 +1,19 @@
+Exception in thread polymarket-feed-control:
+Traceback (most recent call last):
+  File "/tmp/pm-r20-python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/threading.py", line 1075, in _bootstrap_inner
+    self.run()
+  File "/tmp/pm-r20-python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/threading.py", line 1012, in run
+    self._target(*self._args, **self._kwargs)
+  File "/workspace/quantdinger/wt_r21/backend_api_python/app/services/polymarket/ws_group_process.py", line 1078, in _control_loop
+    sock.kick(message.get('code', 1013), message.get('reason') or 'slow consumer')
+  File "/workspace/quantdinger/wt_r21/backend_api_python/app/services/polymarket/ws_group_process.py", line 634, in kick
+    self.callbacks['on_close'](self, code, reason)
+  File "/workspace/quantdinger/wt_r21/backend_api_python/app/services/polymarket/observer.py", line 3857, in closed
+    self.update_hot_coverage(time.monotonic())
+  File "/workspace/quantdinger/wt_r21/backend_api_python/app/services/polymarket/observer.py", line 3196, in update_hot_coverage
+    reasons.update(self.readiness_blockers(candidate))
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/quantdinger/wt_r21/backend_api_python/app/services/polymarket/observer.py", line 2116, in readiness_blockers
+    shadow = state['shadow']
+             ~~~~~^^^^^^^^^^
+KeyError: 'shadow'

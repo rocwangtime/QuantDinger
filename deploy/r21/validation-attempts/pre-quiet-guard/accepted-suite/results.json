@@ -1,0 +1,52 @@
+[
+  {
+    "shard": 0,
+    "exit": 0,
+    "summary": "823 passed, 13 skipped, 43 warnings in 34.94s",
+    "files": 69,
+    "elapsed": 36.1013992090011
+  },
+  {
+    "shard": 1,
+    "exit": 0,
+    "summary": "780 passed, 2 warnings in 20.11s",
+    "files": 68,
+    "elapsed": 21.10616849500002
+  },
+  {
+    "shard": 2,
+    "exit": 0,
+    "summary": "821 passed, 6 skipped, 3 warnings in 86.98s (0:01:26)",
+    "files": 69,
+    "elapsed": 88.4858901560001,
+    "reason": "final behavior test added after initial group run"
+  },
+  {
+    "shard": 3,
+    "exit": 0,
+    "summary": "882 passed, 2 warnings in 17.87s",
+    "files": 69,
+    "elapsed": 18.754293026002415
+  },
+  {
+    "shard": 4,
+    "exit": 0,
+    "summary": "793 passed, 5 skipped, 17 warnings in 51.88s",
+    "files": 67,
+    "elapsed": 52.745892365001055
+  },
+  {
+    "shard": 5,
+    "exit": 0,
+    "summary": "908 passed, 2 warnings in 59.53s",
+    "files": 68,
+    "elapsed": 60.51442257799863
+  },
+  {
+    "shard": 6,
+    "exit": 0,
+    "summary": "29 passed in 4.17s",
+    "files": 1,
+    "elapsed": 4.588444594999601
+  }
+]

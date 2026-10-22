@@ -1,0 +1,36 @@
+[
+  {
+    "command": [
+      "/tmp/pm-r20-venv/bin/ruff",
+      "check",
+      "app",
+      "scripts",
+      "tests"
+    ],
+    "exit": 0,
+    "output": "\u001b[1;32mAll checks passed!\u001b[0m\n"
+  },
+  {
+    "command": [
+      "/tmp/pm-r20-venv/bin/python",
+      "-m",
+      "compileall",
+      "-q",
+      "app/services/polymarket",
+      "scripts/polymarket_ws_worker_replay.py",
+      "scripts/polymarket_ws_handoff_replay.py",
+      "scripts/polymarket_ws_backup_cost.py"
+    ],
+    "exit": 0,
+    "output": ""
+  },
+  {
+    "command": [
+      "git",
+      "diff",
+      "--check"
+    ],
+    "exit": 0,
+    "output": ""
+  }
+]

@@ -64,17 +64,18 @@
              at = int(time.time() * 1000)
              # A liveness-only replay still gives the primary a book (REST marks
              # and the post-kick echo). The spare gets a price change only.
-@@ -882,7 +893,8 @@
+@@ -882,7 +893,9 @@
              manager.tick(status=False)
          except Exception:
              _LOG.exception('feed bootstrap tick failed')
 -        if manager.backups and all(manager.backup_ready(row) for _, row in manager.backup_items()):
-+        if (len(manager.backup_items()) >= manager.backup_target()*len(manager.states)
++        required_copies = sum(manager.backup_target() for index in manager.states if manager.hot_shard(index))
++        if (len(manager.backup_items()) >= required_copies
 +                and all(manager.backup_ready(row) for _, row in manager.backup_items())):
              return True
          time.sleep(0.01)
      return False
-@@ -922,11 +934,11 @@
+@@ -922,11 +935,11 @@
          delay_per_frame = float(os.getenv('QD_REPLAY_PRODUCER_DELAY', '0'))
          if delay_per_frame > 0:
              time.sleep(delay_per_frame)
@@ -91,7 +92,7 @@
              continue
          try:
              raw = json.dumps(wire_event(*args), separators=(',', ':'))
-@@ -934,7 +946,8 @@
+@@ -934,7 +947,8 @@
                  raw = _as_price_change(raw)
              else:
                  _remember_replay_frame(raw)
@@ -101,7 +102,7 @@
          except Exception:
              _LOG.exception('replay emit failed role=%s', role)
  
-@@ -1242,6 +1255,7 @@
+@@ -1242,6 +1256,7 @@
          self.applied_seq = 0
          self.drain_target = None
          self.drain_ready = threading.Event()
@@ -109,7 +110,7 @@
  
      def send(self, message):
          conn = self.control
-@@ -1286,7 +1300,10 @@
+@@ -1286,7 +1301,10 @@
              if ready is not None:
                  ready.set()
          elif op == 'gap':
@@ -121,7 +122,7 @@
          elif op == 'dropped':
              self.dropped = message.get('total') or self.dropped
              self.feeds.note_drop(self.spec['key'], message.get('assets') or [], self.dropped)
-@@ -1326,9 +1343,14 @@
+@@ -1326,9 +1344,14 @@
              received = datetime.fromtimestamp((item.get('t') or 0) / 1000, timezone.utc)
              owned = None if item.get('o') is None else frozenset(item['o'])
              try:

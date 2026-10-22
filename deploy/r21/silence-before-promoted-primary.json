@@ -2,84 +2,84 @@
   "phase": "before",
   "scenario": "promoted-primary",
   "exit": 0,
-  "wall_seconds": 39.135541455998464,
+  "wall_seconds": 39.08098474600047,
   "result": {
     "scenario": "promoted-primary",
-    "wall_seconds": 38.6928645270018,
+    "wall_seconds": 38.639462959999946,
     "switches": [
       {
         "source": "feed-3",
-        "seconds": 4.086447733003297
+        "seconds": 4.031905148000078
       },
       {
         "source": "feed-2",
-        "seconds": 38.36488796900085
+        "seconds": 38.312313256999914
       }
     ],
-    "second_stall_seconds": 7.087858569000673,
-    "max_publication_gap_ms": 31608.333893000236,
+    "second_stall_seconds": 7.032599132999167,
+    "max_publication_gap_ms": 31611.37243799749,
     "rest_requests": 2,
     "failures": [
       {
         "code": null,
         "ready_backup_at_kick": true,
         "ready_backups": 2,
-        "takeover_gap_ms": 4395.2660000000005,
-        "receipt_gap_ms": 4395.2660000000005,
+        "takeover_gap_ms": 4340.826,
+        "receipt_gap_ms": 4340.826,
         "recovery": "rest_snapshot",
         "gap_final": true,
-        "merged_gap_ms": 4394.559,
+        "merged_gap_ms": 4340.273,
         "merged_gap_final": true,
         "gap_definition": "Per interruption event and asset: last merged publication before interruption to first merged publication after interruption; max across affected assets. Publication wall time, not socket receipt, detection-to-takeover, physical silence or ordinary interarrival. Missing baseline is unmeasured, never zero.",
-        "interruption_at": "2026-10-22T01:39:26.797775+00:00",
+        "interruption_at": "2026-10-22T05:18:52.028878+00:00",
         "business_event_id": 1,
         "unmeasured_assets": [],
         "gap_measurement": "measured",
-        "source_silence_ms": 4013.5560000000005,
-        "merged_receipt_gap_ms": 4013.5560000000005,
+        "source_silence_ms": 4009.48,
+        "merged_receipt_gap_ms": 4009.48,
         "reason": "byte_silence",
         "gap_maximum": {
-          "ms": 4394.559,
+          "ms": 4340.273,
           "asset": "ay",
-          "at": "2026-10-22T01:39:27.179301+00:00"
+          "at": "2026-10-22T05:18:52.360083+00:00"
         },
         "business_gap": false,
-        "detection_to_takeover_ms": 381.7076369996357
+        "detection_to_takeover_ms": 331.34455399704166
       },
       {
         "code": null,
         "ready_backup_at_kick": true,
         "ready_backups": 1,
-        "takeover_gap_ms": 31608.983,
-        "receipt_gap_ms": 31608.983,
+        "takeover_gap_ms": 31611.868000000002,
+        "receipt_gap_ms": 31611.868000000002,
         "recovery": "rest_snapshot",
         "gap_final": true,
-        "merged_gap_ms": 31608.334,
+        "merged_gap_ms": 31611.375,
         "merged_gap_final": true,
         "gap_definition": "Per interruption event and asset: last merged publication before interruption to first merged publication after interruption; max across affected assets. Publication wall time, not socket receipt, detection-to-takeover, physical silence or ordinary interarrival. Missing baseline is unmeasured, never zero.",
-        "interruption_at": "2026-10-22T01:40:01.125874+00:00",
+        "interruption_at": "2026-10-22T05:19:26.308485+00:00",
         "business_event_id": 2,
         "unmeasured_assets": [],
         "gap_measurement": "measured",
-        "source_silence_ms": 31276.678,
-        "merged_receipt_gap_ms": 31276.678,
+        "source_silence_ms": 31279.459,
+        "merged_receipt_gap_ms": 31279.459,
         "reason": "pong_timeout",
         "gap_maximum": {
-          "ms": 31608.334,
+          "ms": 31611.375,
           "asset": "ay",
-          "at": "2026-10-22T01:40:01.457995+00:00"
+          "at": "2026-10-22T05:19:26.640723+00:00"
         },
         "business_gap": false,
-        "detection_to_takeover_ms": 332.3089869991236
+        "detection_to_takeover_ms": 332.41929299765616
       }
     ],
     "silence": {
       "up_down:ETH:5m": {
         "promotions": 1,
-        "suppressed": 1081,
-        "last_at": "2026-10-22T01:39:26.797256+00:00",
-        "last_silence_s": 4.013,
-        "_last_monotonic": 21468.974779172,
+        "suppressed": 1083,
+        "last_at": "2026-10-22T05:18:52.028498+00:00",
+        "last_silence_s": 4.009,
+        "_last_monotonic": 25946.476711751,
         "reason": "byte_silence",
         "tcp_pending_bytes": null,
         "queue_wait_seconds": 0,

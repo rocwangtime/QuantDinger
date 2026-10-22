@@ -11,5 +11,9 @@
     "_Feed._handle",
     "_Feed._apply"
   ],
-  "production_observer_unchanged": true
+  "production_observer_unchanged": true,
+  "production_files_checked": 25,
+  "production_files_differing": [
+    "backend_api_python/app/services/polymarket/ws_group_process.py"
+  ]
 }
