@@ -1933,7 +1933,7 @@ class MarketConnections:
             promoted = time.monotonic()
             for event in state.get('outage_events', []):
                 event.update(promotion_at=state['promoted_at'],
-                    detection_to_promotion_ms=max(0, (promoted-old.get('failed_at', promoted))*1000),
+                    detection_to_promotion_ms=max(0, (promoted-old.get('outage_at', old.get('failed_at', promoted)))*1000),
                     baseline_verified=state['baseline_handoff']['verified'],
                     need_book_assets=state['baseline_handoff']['rest'])
             self.states[index] = state
