@@ -6,7 +6,7 @@ import socket
 import sys
 import threading
 import time
-from time import process_time
+from time import process_time, thread_time
 from .ws_warm_book import BookCheckpoints, WarmBook
 from contextlib import contextmanager
 from collections import deque
@@ -1499,12 +1499,15 @@ class MarketConnections:
         shadow = state.get('shadow')
         return set(shadow.books.keys()) if shadow is not None else set()
 
-    def _charge(self, name, started):
+    def _charge(self, name, started, state=None):
         if started is None:
             return
-        spent = process_time() - started
+        spent = thread_time() - started
         with self.stage_lock:
             self.stage_cpu[name] = self.stage_cpu.get(name, 0.0) + spent
+            if state is not None:
+                stages = state.setdefault('stage_cpu', {})
+                stages[name] = stages.get(name, 0.0) + spent
 
     def _liveness_required(self, index, state):
         primary = self.states.get(index) if index is not None else None
@@ -1595,23 +1598,25 @@ class MarketConnections:
 
     def liveness_receive(self, index, state, raw, received_at, inbox):
         """Track link health and independently maintain a bounded warm ladder."""
-        from .ws_payloads import cheap_envelope
+        from .ws_payloads import cheap_envelope, decoded_envelope, loads
         if inbox.invalid.is_set() or state.get('retired'):
             return
         shadow = state.get('shadow')
+        tips = None
         if isinstance(shadow, WarmBook):
-            parse_at = process_time()
-            event = self.parsed_frames.parse(raw)
-            self._charge('backup_parse', parse_at)
-            apply_at = process_time()
+            parse_at = thread_time()
+            event = loads(raw) if isinstance(raw, (str, bytes, bytearray)) else raw
+            tips = decoded_envelope(event)
+            self._charge('backup_parse', parse_at, state)
+            apply_at = thread_time()
             activated = getattr(inbox, 'activated', {})
             event = recording.owned_events(event, {a for a in state['assets']
                 if received_at >= activated.get(a, received_at)})
             shadow.receive(event, received_at)
-            self._charge('backup_apply', apply_at)
+            self._charge('backup_apply', apply_at, state)
         assets = {str(asset) for asset in (state.get('assets') or [])}
         now = time.monotonic()
-        for kind, asset, stamp, digest in cheap_envelope(raw):
+        for kind, asset, stamp, digest in tips if tips is not None else cheap_envelope(raw):
             if asset not in assets or not stamp:
                 continue
             state.setdefault('liveness_assets', set()).add(asset)
@@ -3530,11 +3535,11 @@ class MarketConnections:
                         inbox.processing_received_at = None
                         inbox.processing_charged_bytes = 0
                         continue
-                    parse_cpu = process_time()
+                    parse_cpu = thread_time()
                     event = self.parsed_frames.parse(raw)
                     self._charge('backup_parse' if standby else 'primary_parse', parse_cpu)
                     inbox.parse_max_seconds = max(inbox.parse_max_seconds, time.monotonic() - parsing_at)
-                    apply_cpu = process_time()
+                    apply_cpu = thread_time()
                     if standby:
                         self.shadow_receive(index, state, event, received_at, inbox, epoch)
                         self._charge('backup_apply', apply_cpu)
@@ -4092,7 +4097,10 @@ class MarketConnections:
                         read_calls=getattr(s.get('socket'), 'read_calls', 0),
                         transport=dict(getattr(getattr(s.get('socket'), 'transport', None), 'last', {})))
                 for i, s in self.states.items() if 'inbox' in s}
-            STATUS.update(ws_continuity=self.continuity.metrics(), ws_failover_ms=self.failover_ms,
+            STATUS.update(ws_stage_cpu_seconds=dict(self.stage_cpu),
+                          ws_backup_book_cpu_seconds={s.get('source'): dict(s.get('stage_cpu') or {})
+                              for _, s in self.backup_items()},
+                          ws_continuity=self.continuity.metrics(), ws_failover_ms=self.failover_ms,
                           ws_hot_backup_by_group=hot_coverage,
                           ws_child_ready=self.child_ready_probe(now),
                           ws_double_kicks=self.double_kicks.metrics(datetime.now(timezone.utc).timestamp()),

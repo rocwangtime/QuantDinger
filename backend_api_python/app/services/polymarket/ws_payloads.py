@@ -331,6 +331,11 @@ def _fast_envelope(raw):
         data = orjson.loads(raw)
     except Exception:
         return None
+    return decoded_envelope(data)
+
+
+def decoded_envelope(data):
+    """Same public envelope validation, reusing an already decoded frame."""
     objects = data if type(data) is list else (data,)
     tips = []
     for event in objects:
