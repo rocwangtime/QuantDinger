@@ -1,5 +1,7 @@
 """Independent, bounded WS ladders and common-watermark handoff checks."""
 from collections import OrderedDict
+from threading import RLock
+from .ws_rotation import shadow_locked
 
 from . import recording
 from .ws_rotation import ShadowBooks
@@ -8,9 +10,11 @@ from .ws_rotation import ShadowBooks
 class BookCheckpoints:
     """Only book-changing hashes count; trade timestamps cannot prove a ladder."""
     def __init__(self):
+        self.lock = RLock()
         self.history = {}
         self.latest = {}
 
+    @shadow_locked
     def receive(self, event):
         for kind, payload in recording.events(event):
             if kind not in ('book', 'price_change'):
@@ -18,10 +22,11 @@ class BookCheckpoints:
             at = recording.exchange_time(payload.get('timestamp'))
             rows = (payload.get('price_changes', payload.get('priceChanges', []))
                     if kind == 'price_change' else [payload])
-            for row in rows:
+            final = {str(row.get('asset_id') or row.get('assetId') or ''): row for row in rows}
+            for row in final.values():
                 asset = str(row.get('asset_id') or row.get('assetId') or '')
                 digest = row.get('hash')
-                if not asset or at is None or not isinstance(digest, str) or not digest:
+                if not asset or at is None or not isinstance(digest, str) or not 0 < len(digest) <= 128:
                     continue
                 mark = (at, digest)
                 history = self.history.setdefault(asset, OrderedDict())
@@ -32,9 +37,15 @@ class BookCheckpoints:
                 if asset not in self.latest or at >= self.latest[asset][0]:
                     self.latest[asset] = mark
 
+    @shadow_locked
     def prune(self, assets):
         self.history = {a: h for a, h in self.history.items() if a in assets}
         self.latest = {a: m for a, m in self.latest.items() if a in assets}
+
+
+    @shadow_locked
+    def charged_bytes(self):
+        return 1024 * sum(map(len, self.history.values()))
 
 
 class WarmBook(ShadowBooks):
@@ -44,6 +55,11 @@ class WarmBook(ShadowBooks):
 
     def receive(self, event, received):
         with self.lock:
+            for kind, payload in recording.events(event):
+                if kind == 'book' and (not isinstance(payload.get('bids'), list)
+                        or not isinstance(payload.get('asks'), list)
+                        or recording.exchange_time(payload.get('timestamp')) is None):
+                    raise ValueError('incomplete warm book snapshot')
             super().receive(event, received)
             self.checkpoints.receive(event)
 
@@ -59,7 +75,9 @@ class WarmBook(ShadowBooks):
         replayed deltas. If ahead, a common primary watermark proves overlap.
         No checkpoint, snapshot, timestamp or intact generation => no shortcut.
         """
-        with self.lock:
+        if primary is None:
+            return None
+        with self.lock, primary.lock:
             book = self.books.get(asset)
             mark = self.checkpoints.latest.get(asset)
             peer = primary.latest.get(asset) if primary else None
@@ -78,3 +96,19 @@ class WarmBook(ShadowBooks):
             return dict(event_type='book', asset_id=asset, timestamp=round(at.timestamp() * 1000),
                         hash=mark[1], bids=[dict(price=p, size=q) for p, q in book['bids'].items()],
                         asks=[dict(price=p, size=q) for p, q in book['asks'].items()])
+
+    def handoff_watermarks(self, merge, assets):
+        """An assembled ladder is not a new exchange snapshot of every level.
+
+        Keep the original snapshot floor plus each level's actual timestamp,
+        so later out-of-order deltas for untouched levels remain applicable.
+        """
+        with self.lock:
+            for asset in assets:
+                merge.snapshots[asset] = self.merge.snapshots[asset]
+                for key in list(merge.levels):
+                    if key[0] == asset:
+                        del merge.levels[key]
+                for key, at in self.merge.levels.items():
+                    if key[0] == asset:
+                        merge.levels[key] = at

@@ -1948,9 +1948,12 @@ class MarketConnections:
                 with _PIPELINE.lock:
                     merged = self.merges[index].filter(baselines, state['source'], set(required))
                     if merged:
+                        shadow.handoff_watermarks(self.merges[index],
+                            {str(payload.get('asset_id')) for kind, payload in recording.events(merged) if kind == 'book'})
                         _PIPELINE.receive(merged, set(required), now_wall, state['inbox'], state['inbox'].epoch)
                         self.continuity.publication(_PIPELINE.recording.metadata, set(required))
                         self.complete_recovery(index, state, 'warm_backup')
+            state.pop('shadow', None)
             if pending:
                 state['need_book_at'] = datetime.now(timezone.utc).isoformat()
                 self.request_snapshot(index, state, [a for a in required if a in pending])
@@ -2208,11 +2211,15 @@ class MarketConnections:
                 with inbox.queue.mutex:
                     queues += inbox.queue.charged_bytes
                 processing += inbox.processing_charged_bytes
+        checkpoints = {id(c): c for state in states if (c := state.get('book_checkpoints')) is not None}
+        checkpoints.update({id(shadow.checkpoints): shadow.checkpoints for shadow in shadows.values()
+                            if isinstance(shadow, WarmBook)})
+        checkpoint_bytes = sum(c.charged_bytes() for c in checkpoints.values())
         frames = self.parsed_frames.metrics()['charged_bytes']
-        self.aux_memory = dict(shadow_charged_bytes=shadow_bytes, dedup_charged_bytes=dedup,
+        self.aux_memory = dict(book_checkpoint_charged_bytes=checkpoint_bytes, shadow_charged_bytes=shadow_bytes, dedup_charged_bytes=dedup,
             continuity_charged_bytes=continuity, parsed_frames_charged_bytes=frames,
             queue_charged_bytes=queues, processing_frame_charged_bytes=processing,
-            auxiliary_charged_bytes=shadow_bytes + dedup + continuity + frames + queues + processing,
+            auxiliary_charged_bytes=checkpoint_bytes + shadow_bytes + dedup + continuity + frames + queues + processing,
             accounting='conservative_retained_cache_estimates_not_rss')
         return self.aux_memory
 
