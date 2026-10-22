@@ -2075,6 +2075,10 @@ class MarketConnections:
             for a in self.states[index]['assets'])
 
     def backup_ready(self, candidate):
+        # Readers may hold a backup_items() snapshot across worker promotion.
+        # The same physical object is now primary and is never its own spare.
+        if candidate and self.states.get(candidate.get('primary_index')) is candidate:
+            return False
         inbox = candidate.get('inbox') if candidate else None
         required = set(candidate.get('required_assets', candidate.get('assets', []))) if candidate else set()
         if candidate and candidate.get('primary_index') in self.states:
@@ -2098,8 +2102,13 @@ class MarketConnections:
 
     def readiness_blockers(self, state):
         """Explain publication readiness separately from adding subscriptions."""
-        inbox = state['inbox']
-        required = set(self.states[state['primary_index']]['assets'])
+        if self.states.get(state.get('primary_index')) is state:
+            return ['not_backup']
+        inbox = state.get('inbox')
+        if inbox is None:
+            return ['disconnected']
+        primary = self.states.get(state.get('primary_index'))
+        required = set(primary['assets'] if primary else state.get('required_assets', state.get('assets', [])))
         if self.liveness_backup and state.get('redundant'):
             seen = {str(asset) for asset in (state.get('liveness_assets') or ())}
             return [name for name, blocked in (
@@ -2113,7 +2122,9 @@ class MarketConnections:
                 ('stale_envelope', not self._liveness_link_fresh(state)),
                 ('stale_pong', not self.backup_pong_fresh(state)),
 ) if blocked]
-        shadow = state['shadow']
+        shadow = state.get('shadow')
+        if shadow is None:
+            return ['not_backup'] if not state.get('redundant') else ['missing_snapshot']
         return [name for name, blocked in (
             ('disconnected', not state.get('connected')),
             ('stale_pong', not self.backup_pong_fresh(state)),

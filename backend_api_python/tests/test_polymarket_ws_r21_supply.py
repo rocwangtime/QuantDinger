@@ -121,3 +121,21 @@ def test_cached_supply_proof_cannot_bypass_missing_shared_book_gate(monkeypatch)
     emit(m, spare, 1200, '99')
     assert 'ay' not in pipeline.books
     assert pipeline.books['an']['bids']['.4'] == '99'
+
+
+def test_diagnostic_snapshot_of_promoted_spare_is_not_a_ready_backup(monkeypatch):
+    m, primary, spare, _, _, _ = setup_supply(monkeypatch)
+    # A close callback may already hold a backup_items() reference when the
+    # worker promotes that object and releases its private ladder.
+    primary['connected'] = False
+    assert m._promote_liveness_backup(0, spare)
+    assert m.states[0] is spare
+    assert not m.backup_ready(spare)
+    assert m.readiness_blockers(spare)
+
+
+def test_diagnostics_accept_a_registered_spare_before_its_queue_is_connected(monkeypatch):
+    m, _, _, _, _, _ = setup_supply(monkeypatch)
+    pending = dict(primary_index=0, assets=['ay', 'an'], redundant=True, connected=False)
+    assert not m.backup_ready(pending)
+    assert 'disconnected' in m.readiness_blockers(pending)
