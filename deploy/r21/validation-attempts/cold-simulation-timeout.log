@@ -1,0 +1,83 @@
+........................................................................ [  8%]
+........................................................................ [ 16%]
+........................................................................ [ 25%]
+........................................................................ [ 33%]
+........................................................................ [ 42%]
+........................................................................ [ 50%]
+........................................................................ [ 59%]
+........................................................................ [ 67%]
+...................................F.................................... [ 76%]
+........................................................................ [ 84%]
+........................................................................ [ 93%]
+.........................................................                [100%]
+=================================== FAILURES ===================================
+_____________ test_measured_cold_start_reaches_physical_peak_bound _____________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fe8132b8f20>
+
+    def test_measured_cold_start_reaches_physical_peak_bound(monkeypatch):
+>       ratios, moves, m = simulate(monkeypatch)
+                           ^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_polymarket_ws_replay.py:104: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_polymarket_ws_replay.py:86: in simulate
+    m.tick()
+app/services/polymarket/observer.py:3810: in tick
+    self.publish_status()
+app/services/polymarket/observer.py:4065: in publish_status
+    STATUS.update(self.balancer.metrics())
+                  ^^^^^^^^^^^^^^^^^^^^^^^
+app/services/polymarket/ws_balance.py:388: in metrics
+    self.current_owners(), self.hot_groups(self.current_owners())),
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+app/services/polymarket/ws_balance.py:263: in hot_groups
+    self.planning_weight(k) >= threshold * (1 - self.threshold if k in self.dedicated else 1)]
+    ^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <app.services.polymarket.ws_balance.RateBalancer object at 0x7fe8132b9160>
+key = 'market:yn-5721586'
+
+    def planning_weight(self, key):
+>       return max(self.weight(key), self.byte_weight(key) / self.max_bytes * self.max_load)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: Timeout (>120.0s) from pytest-timeout.
+
+app/services/polymarket/ws_balance.py:174: Failed
+------------------------------ Captured log call -------------------------------
+2026-10-22 08:53:45,250 - app.services.polymarket.observer - INFO - Polymarket WS migration prepare assets=16 destinations=[0, 1, 2, 3, 4]
+2026-10-22 08:53:45,304 - app.services.polymarket.observer - INFO - Polymarket WS migration cancelled reason=failed_or_timeout
+2026-10-22 08:53:45,596 - app.services.polymarket.observer - INFO - Polymarket WS migration prepare assets=16 destinations=[0, 1, 2, 3, 4]
+2026-10-22 08:53:45,650 - app.services.polymarket.observer - INFO - Polymarket WS migration cancelled reason=failed_or_timeout
+2026-10-22 08:53:45,939 - app.services.polymarket.observer - INFO - Polymarket WS migration prepare assets=16 destinations=[0, 1, 2, 3, 4]
+2026-10-22 08:53:46,000 - app.services.polymarket.observer - INFO - Polymarket WS migration cancelled reason=failed_or_timeout
+2026-10-22 08:53:46,279 - app.services.polymarket.observer - INFO - Polymarket WS migration prepare assets=16 destinations=[0, 1, 2, 3, 4]
+2026-10-22 08:53:46,343 - app.services.polymarket.observer - INFO - Polymarket WS migration cancelled reason=failed_or_timeout
+2026-10-22 08:53:46,636 - app.services.polymarket.observer - INFO - Polymarket WS migration prepare assets=16 destinations=[0, 1, 2, 3, 4]
+2026-10-22 08:53:46,692 - app.services.polymarket.observer - INFO - Polymarket WS migration cancelled reason=failed_or_timeout
+2026-10-22 08:53:46,995 - app.services.polymarket.observer - INFO - Polymarket WS migration prepare assets=16 destinations=[0, 1, 2, 3, 4]
+2026-10-22 08:53:47,048 - app.services.polymarket.observer - INFO - Polymarket WS migration cancelled reason=failed_or_timeout
+2026-10-22 08:53:47,350 - app.services.polymarket.observer - INFO - Polymarket WS migration prepare assets=16 destinations=[0, 1, 2, 3, 4]
+2026-10-22 08:53:47,416 - app.services.polymarket.observer - INFO - Polymarket WS migration cancelled reason=failed_or_timeout
+2026-10-22 08:53:47,724 - app.services.polymarket.observer - INFO - Polymarket WS migration prepare assets=16 destinations=[0, 1, 2, 3, 4]
+2026-10-22 08:53:47,777 - app.services.polymarket.observer - INFO - Polymarket WS migration cancelled reason=failed_or_timeout
+2026-10-22 08:53:48,059 - app.services.polymarket.observer - INFO - Polymarket WS migration prepare assets=16 destinations=[0, 1, 2, 3, 4]
+2026-10-22 08:53:48,121 - app.services.polymarket.observer - INFO - Polymarket WS migration cancelled reason=failed_or_timeout
+2026-10-22 08:53:48,403 - app.services.polymarket.observer - INFO - Polymarket WS migration prepare assets=16 destinations=[0, 1, 2, 3, 4]
+2026-10-22 08:53:48,464 - app.services.polymarket.observer - INFO - Polymarket WS migration cancelled reason=failed_or_timeout
+2026-10-22 08:53:48,748 - app.services.polymarket.observer - INFO - Polymarket WS migration prepare assets=16 destinations=[0, 1, 2, 3, 4]
+2026-10-22 08:53:48,800 - app.services.polymarket.observer - INFO - Polymarket WS migration cancelled reason=failed_or_timeout
+2026-10-22 08:53:49,091 - app.services.polymarket.observer - INFO - Polymarket WS migration prepare assets=16 destinations=[0, 1, 2, 3, 4]
+2026-10-22 08:53:49,144 - app.services.polymarket.observer - INFO - Polymarket WS migration cancelled reason=failed_or_timeout
+2026-10-22 08:53:49,436 - app.services.polymarket.observer - INFO - Polymarket WS migration prepare assets=16 destinations=[0, 1, 2, 3, 4]
+=============================== warnings summary ===============================
+tests/test_agent_scoring_db.py::test_persist_recover_score_and_refresh_daily_report[plan_only-HKStock-01810.HK-200-0]
+tests/test_agent_scoring_db.py::test_persist_recover_score_and_refresh_daily_report[plan_only-HKStock-01810.HK-200-0]
+  /tmp/pm-r20-venv/lib/python3.12/site-packages/exchange_calendars/exchange_calendar_xhkg.py:363: DeprecationWarning: The 'generic' unit for NumPy timedelta is deprecated, and will raise an error in the future. This includes implicit conversion of bare integers (e.g. `+ 1`).Please use a specific unit instead.
+    easter_monday = EasterMonday.dates(years[0], years[-1] + 1)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_polymarket_ws_replay.py::test_measured_cold_start_reaches_physical_peak_bound
+1 failed, 848 passed, 2 warnings in 400.88s (0:06:40)

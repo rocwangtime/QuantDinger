@@ -1,0 +1,43 @@
+--- worker.py
++++ capacity-output.py
+@@ -356,6 +356,7 @@
+         child.stage_token = token
+         child.stage_ready = threading.Event()
+         child.stage_latest = None
++        child.send(dict(op='status'))
+         child.send(dict(op='stages', token=token))
+     deadline = time.monotonic() + timeout
+     for child in feeds.children.values():
+@@ -544,6 +545,8 @@
+         wall0 = time.time()
+         began = time.monotonic()
+         stages_before = _snapshot_stages(feeds)
++        copies_before = {key: ((c.latest or {}).get('status') or {}).get('ws_backup_book_cpu_seconds', {})
++                         for key, c in feeds.children.items()}
+         apply_before = {key: child.apply_s for key, child in feeds.children.items()}
+         cpu = time.process_time()
+         burner_at = _proc_cpu_seconds(burner.pid) if burner is not None else None
+@@ -564,6 +567,8 @@
+         parent_cpu = time.process_time() - cpu
+         elapsed = time.monotonic() - began
+         stages_after = _snapshot_stages(feeds)
++        copies_after = {key: ((c.latest or {}).get('status') or {}).get('ws_backup_book_cpu_seconds', {})
++                        for key, c in feeds.children.items()}
+         apply_after = {key: child.apply_s for key, child in feeds.children.items()}
+         background_stop.set()
+         for thread in threads:
+@@ -630,7 +635,13 @@
+         gap_max = max(gaps) if gaps else None
+         codes_1008 = sum(code == 1008 for code in codes)
+         gap_ok = (not kick_at) or (len(gaps) >= len(kick_at) and gap_max is not None and gap_max <= 1.5)
+-        result = dict(mode='process-per-group', weighted=weighted, seconds=elapsed, rate=rate,
++        per_copy = {}
++        for key, copies in copies_after.items():
++            for source, costs in copies.items():
++                first = copies_before.get(key, {}).get(source, {})
++                per_copy[key+'/'+source] = {name: max(0, value-first.get(name, 0))/elapsed
++                    for name, value in costs.items()}
++        result = dict(backup_book_cores_by_copy=per_copy, mode='process-per-group', weighted=weighted, seconds=elapsed, rate=rate,
+                       backup_count=backup_count, ready_copies_at_start=counts,
+                       actual_wire_rate=rate*(1+backup_count)/2,
+                       startup=dict(seconds=startup_seconds, cpu_s=startup_cpu, stages=startup_stages),

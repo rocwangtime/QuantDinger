@@ -1,0 +1,43 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+__________ test_simultaneous_spare_checks_record_one_physical_failure __________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f3a0571fad0>
+
+    def test_simultaneous_spare_checks_record_one_physical_failure(monkeypatch):
+        import threading
+        clock = [100.0]
+        monkeypatch.setattr(observer.time, 'monotonic', lambda: clock[0])
+        m, primary, spare, *_ = _wired()
+        primary['inbox'].last_byte_at = 94
+        _feed(m, spare)
+        clock[0] = 100.5
+        _feed(m, spare)
+        clock[0] = spare['liveness_at'] = spare['inbox'].last_data_at = 101
+        actual_reason = m.silence_reason
+        def reason(state):
+            time.sleep(.01)  # TCP evidence collection can release the GIL too.
+            return actual_reason(state)
+        monkeypatch.setattr(m, 'silence_reason', reason)
+        barrier = threading.Barrier(2)
+        results = []
+        def check():
+            barrier.wait()
+            results.append(m._liveness_byte_silence(0, spare))
+        threads = [threading.Thread(target=check) for _ in range(2)]
+        for thread in threads:thread.start()
+        for thread in threads:thread.join(1)
+>       assert sorted(results) == [False, True]
+E       assert [True, True] == [False, True]
+E         
+E         At index 0 diff: True != False
+E         Use -v to get more diff
+
+backend_api_python/tests/test_polymarket_liveness_silence.py:215: AssertionError
+------------------------------ Captured log call -------------------------------
+WARNING  app.services.polymarket.observer:observer.py:1783 Polymarket WS primary byte silence group=up_down:BTC:5m shard=0 silence_s=7 spare=backup
+WARNING  app.services.polymarket.observer:observer.py:2182 Polymarket WS hot primary failure group=up_down:BTC:5m shard=0 code=None ready_backups=1
+WARNING  app.services.polymarket.observer:observer.py:1783 Polymarket WS primary byte silence group=up_down:BTC:5m shard=0 silence_s=7 spare=backup
+=========================== short test summary info ============================
+FAILED backend_api_python/tests/test_polymarket_liveness_silence.py::test_simultaneous_spare_checks_record_one_physical_failure
+1 failed in 0.13s

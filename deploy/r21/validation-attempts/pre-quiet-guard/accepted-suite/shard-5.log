@@ -1,0 +1,21 @@
+........................................................................ [  7%]
+........................................................................ [ 15%]
+........................................................................ [ 23%]
+........................................................................ [ 31%]
+........................................................................ [ 39%]
+........................................................................ [ 47%]
+........................................................................ [ 55%]
+........................................................................ [ 63%]
+........................................................................ [ 71%]
+........................................................................ [ 79%]
+........................................................................ [ 87%]
+........................................................................ [ 95%]
+............................................                             [100%]
+=============================== warnings summary ===============================
+tests/test_agent_symbol_config.py::test_percent_edges_cooldown_daily_cap_blackout_and_stale
+tests/test_agent_symbol_config.py::test_percent_edges_cooldown_daily_cap_blackout_and_stale
+  /tmp/pm-r20-venv/lib/python3.12/site-packages/exchange_calendars/exchange_calendar_xhkg.py:363: DeprecationWarning: The 'generic' unit for NumPy timedelta is deprecated, and will raise an error in the future. This includes implicit conversion of bare integers (e.g. `+ 1`).Please use a specific unit instead.
+    easter_monday = EasterMonday.dates(years[0], years[-1] + 1)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+908 passed, 2 warnings in 59.53s

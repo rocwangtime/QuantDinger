@@ -1,0 +1,93 @@
+{
+  "phase": "before",
+  "scenario": "promoted-primary",
+  "exit": 0,
+  "wall_seconds": 39.08098474600047,
+  "result": {
+    "scenario": "promoted-primary",
+    "wall_seconds": 38.639462959999946,
+    "switches": [
+      {
+        "source": "feed-3",
+        "seconds": 4.031905148000078
+      },
+      {
+        "source": "feed-2",
+        "seconds": 38.312313256999914
+      }
+    ],
+    "second_stall_seconds": 7.032599132999167,
+    "max_publication_gap_ms": 31611.37243799749,
+    "rest_requests": 2,
+    "failures": [
+      {
+        "code": null,
+        "ready_backup_at_kick": true,
+        "ready_backups": 2,
+        "takeover_gap_ms": 4340.826,
+        "receipt_gap_ms": 4340.826,
+        "recovery": "rest_snapshot",
+        "gap_final": true,
+        "merged_gap_ms": 4340.273,
+        "merged_gap_final": true,
+        "gap_definition": "Per interruption event and asset: last merged publication before interruption to first merged publication after interruption; max across affected assets. Publication wall time, not socket receipt, detection-to-takeover, physical silence or ordinary interarrival. Missing baseline is unmeasured, never zero.",
+        "interruption_at": "2026-10-22T05:18:52.028878+00:00",
+        "business_event_id": 1,
+        "unmeasured_assets": [],
+        "gap_measurement": "measured",
+        "source_silence_ms": 4009.48,
+        "merged_receipt_gap_ms": 4009.48,
+        "reason": "byte_silence",
+        "gap_maximum": {
+          "ms": 4340.273,
+          "asset": "ay",
+          "at": "2026-10-22T05:18:52.360083+00:00"
+        },
+        "business_gap": false,
+        "detection_to_takeover_ms": 331.34455399704166
+      },
+      {
+        "code": null,
+        "ready_backup_at_kick": true,
+        "ready_backups": 1,
+        "takeover_gap_ms": 31611.868000000002,
+        "receipt_gap_ms": 31611.868000000002,
+        "recovery": "rest_snapshot",
+        "gap_final": true,
+        "merged_gap_ms": 31611.375,
+        "merged_gap_final": true,
+        "gap_definition": "Per interruption event and asset: last merged publication before interruption to first merged publication after interruption; max across affected assets. Publication wall time, not socket receipt, detection-to-takeover, physical silence or ordinary interarrival. Missing baseline is unmeasured, never zero.",
+        "interruption_at": "2026-10-22T05:19:26.308485+00:00",
+        "business_event_id": 2,
+        "unmeasured_assets": [],
+        "gap_measurement": "measured",
+        "source_silence_ms": 31279.459,
+        "merged_receipt_gap_ms": 31279.459,
+        "reason": "pong_timeout",
+        "gap_maximum": {
+          "ms": 31611.375,
+          "asset": "ay",
+          "at": "2026-10-22T05:19:26.640723+00:00"
+        },
+        "business_gap": false,
+        "detection_to_takeover_ms": 332.41929299765616
+      }
+    ],
+    "silence": {
+      "up_down:ETH:5m": {
+        "promotions": 1,
+        "suppressed": 1083,
+        "last_at": "2026-10-22T05:18:52.028498+00:00",
+        "last_silence_s": 4.009,
+        "_last_monotonic": 25946.476711751,
+        "reason": "byte_silence",
+        "tcp_pending_bytes": null,
+        "queue_wait_seconds": 0,
+        "remote_silence_confirmed": false
+      }
+    },
+    "final_book_sha256": "246ea666894c7e2af4b49ef2cf9b330c62726214c0ccae4a56f554264e7af114",
+    "expected_book_sha256": "246ea666894c7e2af4b49ef2cf9b330c62726214c0ccae4a56f554264e7af114",
+    "valid": true
+  }
+}

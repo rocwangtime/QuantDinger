@@ -1,0 +1,5 @@
+{
+  "scenario": "quiet market: first spare quote, primary copy arrives 300ms later; last primary PONG 6s ago",
+  "promoted_before_primary_copy": true,
+  "connected_primary_before_quote": true
+}

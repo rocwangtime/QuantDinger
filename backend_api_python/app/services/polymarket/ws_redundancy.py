@@ -226,7 +226,9 @@ def serialized(method):
 CADENCE_BOUNDS_MS = (1, 5, 10, 25, 50, 100, 250, 500, 1000, 1500, 5000, 20000, 60000, 300000, float('inf'))
 BUSINESS_GAP_DEFINITION = ('Per interruption event and asset: last merged publication before interruption to first '
     'merged publication after interruption; max across affected assets. Publication wall time, not socket receipt, '
-    'detection-to-takeover, physical silence or ordinary interarrival. Missing baseline is unmeasured, never zero.')
+    'detection-to-takeover, physical silence or ordinary interarrival. A final gap >1500ms is a business gap '
+    'regardless of ready spares; physical silence >20s is separately alert-only. '
+    'Missing baseline is unmeasured, never zero.')
 
 
 def cadence_metrics(rows):
@@ -283,13 +285,22 @@ class FeedContinuity:
         self.business_events = deque(maxlen=256)
         self.business_latest = {}
         self.business_serial = 0
+        from .ws_rollover_gap import RolloverGaps
+        self.rollover = RolloverGaps()
         self.serial = self.checks = self.uncertain = self.recovered = 0
 
     @serialized
     def watch_gap(self, event, assets):
         event.update(merged_gap_ms=None, merged_gap_final=False, gap_definition=BUSINESS_GAP_DEFINITION,
+                     business_gap=None, business_gap_limit_ms=1500,
                      interruption_at=datetime.now(timezone.utc).isoformat())
         baselines = {a: dict(self.published[a]) for a in assets if a in self.published}
+        boundary_baselines = self.rollover.baselines(set(assets)-baselines.keys())
+        if boundary_baselines:
+            from .ws_rollover_gap import ROLLOVER_GAP_DEFINITION
+            baselines.update(boundary_baselines)
+            event.update(baseline_kind='scheduled_market_start', gap_definition=ROLLOVER_GAP_DEFINITION,
+                         rollover_event_ids=sorted({b['rollover_event_id'] for b in boundary_baselines.values()}))
         event['_gap_assets'] = set(assets)
         event['_gap_baselines'] = baselines
         event['_gap_results'] = {}
@@ -323,10 +334,10 @@ class FeedContinuity:
             results = event['_gap_results']
             maximum = max(results.values(), key=lambda r: r['ms'])
             event.update(merged_gap_ms=maximum['ms'], gap_maximum=maximum,
-                gap_measurement='unmeasured_no_baseline' if event['unmeasured_assets'] else 'measured',
+                gap_measurement=('unmeasured_no_baseline' if event['unmeasured_assets'] else
+                    'measured_rollover_start' if event.get('baseline_kind') == 'scheduled_market_start' else 'measured'),
                 merged_gap_final=not event['unmeasured_assets'] and event['_gap_assets'] <= results.keys())
-            event['business_gap'] = bool(event.get('supply_interrupted') and event['merged_gap_final']
-                                         and event['merged_gap_ms'] > 0)
+            event['business_gap'] = (event['merged_gap_ms'] > 1500 if event['merged_gap_final'] else None)
 
     @serialized
     def prune(self, assets):
@@ -354,7 +365,8 @@ class FeedContinuity:
         peer = row.get('_business_ref')
         if peer is not None:
             for key in ('business_event_id', 'merged_gap_ms', 'merged_gap_final', 'gap_definition',
-                        'gap_measurement', 'gap_maximum', 'unmeasured_assets', 'interruption_at'):
+                        'gap_measurement', 'gap_maximum', 'unmeasured_assets', 'interruption_at',
+                        'business_gap', 'business_gap_limit_ms'):
                 if key in peer:
                     row[key] = peer[key]
 
@@ -389,6 +401,7 @@ class FeedContinuity:
             previous = self.published.get(asset)
             if previous and row[1] <= previous['received']:
                 continue
+            self.rollover.publication(asset, published_at)
             gap = max(0, (row[1] - previous['received']).total_seconds() * 1000) if previous else 0
             self.published[asset] = dict(received=row[1], exchange_at=row[0], published_at=published_at, receipt_gap_ms=gap,
                 max_receipt_gap_ms=max(gap, previous['max_receipt_gap_ms'] if previous else 0))
@@ -497,6 +510,13 @@ class FeedContinuity:
         return uncertain
 
     @serialized
+    def verified_baseline(self, assets):
+        for asset in assets:
+            if self.pending.pop(asset, None) is not None:
+                self.log(dict(asset=asset, status='book_baseline_verified',
+                              historical_trades_verified=False, physical_evidence_alert_only=True))
+
+    @serialized
     def pending_assets(self):
         return set(self.pending)
 
@@ -567,8 +587,8 @@ class DoubleKicks:
         return dict(total=self.total, count_current_hour=self.hourly.get(hour, 0),
                     count_rolling_hour=len(events),
                     rolling_hour_count_capped=bool(self.total > len(self.events) and self.events and self.events[0]['at'] > wall-3600),
-                    business_gaps_rolling_hour=sum(e['business_gap'] for e in events),
-                    business_gaps_current_hour=sum(e['business_gap'] for e in events if e['at'] >= hour),
+                    business_gaps_rolling_hour=sum(e.get('business_gap') is True for e in events),
+                    business_gaps_current_hour=sum(e.get('business_gap') is True for e in events if e['at'] >= hour),
                     pending_rolling_hour=sum(not e['merged_gap_final'] for e in events),
                     hourly=[dict(hour_start_utc=h, count=n) for h, n in self.hourly.items()],
                     events=[{k: v for k, v in e.items() if not k.startswith('_')} for e in self.events], pair_window_seconds=15)

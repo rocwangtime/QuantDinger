@@ -1,0 +1,75 @@
+FF                                                                       [100%]
+=================================== FAILURES ===================================
+_______ test_diagnostic_snapshot_of_promoted_spare_is_not_a_ready_backup _______
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f8223b63530>
+
+    def test_diagnostic_snapshot_of_promoted_spare_is_not_a_ready_backup(monkeypatch):
+        m, primary, spare, _, _, _ = setup_supply(monkeypatch)
+        # A close callback may already hold a backup_items() reference when the
+        # worker promotes that object and releases its private ladder.
+        primary['connected'] = False
+        assert m._promote_liveness_backup(0, spare)
+        assert m.states[0] is spare
+        assert not m.backup_ready(spare)
+>       assert m.readiness_blockers(spare)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+backend_api_python/tests/test_polymarket_ws_r21_supply.py:134: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <app.services.polymarket.observer.MarketConnections object at 0x7f82235d8dd0>
+state = {'redundant': False, 'connected': True, 'standby': False, 'assets': ['ay', 'an'], ...}
+
+        def readiness_blockers(self, state):
+            """Explain publication readiness separately from adding subscriptions."""
+            inbox = state['inbox']
+            required = set(self.states[state['primary_index']]['assets'])
+            if self.liveness_backup and state.get('redundant'):
+                seen = {str(asset) for asset in (state.get('liveness_assets') or ())}
+                return [name for name, blocked in (
+                    ('disconnected', not state.get('connected')),
+                    ('invalid', inbox.invalid.is_set()), ('resync', inbox.resync.is_set()),
+                    ('delivery_gap', inbox.delivery_gap),
+                    ('data_suspect', bool(state.get('data_suspect'))),
+                    ('current_subscription', bool(state.get('subscribe_initial')
+                        or required.intersection(state.get('subscribe_pending') or []))),
+                    ('missing_envelope', not required <= seen),
+                    ('stale_envelope', not self._liveness_link_fresh(state)),
+                    ('stale_pong', not self.backup_pong_fresh(state)),
+    ) if blocked]
+>           shadow = state['shadow']
+                     ^^^^^^^^^^^^^^^
+E           KeyError: 'shadow'
+
+backend_api_python/app/services/polymarket/observer.py:2116: KeyError
+------------------------------ Captured log call -------------------------------
+WARNING  app.services.polymarket.observer:observer.py:2193 Polymarket WS hot primary failure group=up_down:BTC:5m shard=0 code=None ready_backups=1
+___ test_diagnostics_accept_a_registered_spare_before_its_queue_is_connected ___
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f82227865a0>
+
+    def test_diagnostics_accept_a_registered_spare_before_its_queue_is_connected(monkeypatch):
+        m, _, _, _, _, _ = setup_supply(monkeypatch)
+        pending = dict(primary_index=0, assets=['ay', 'an'], redundant=True, connected=False)
+        assert not m.backup_ready(pending)
+>       assert 'disconnected' in m.readiness_blockers(pending)
+                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+backend_api_python/tests/test_polymarket_ws_r21_supply.py:141: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <app.services.polymarket.observer.MarketConnections object at 0x7f8222787590>
+state = {'primary_index': 0, 'assets': ['ay', 'an'], 'redundant': True, 'connected': False}
+
+    def readiness_blockers(self, state):
+        """Explain publication readiness separately from adding subscriptions."""
+>       inbox = state['inbox']
+                ^^^^^^^^^^^^^^
+E       KeyError: 'inbox'
+
+backend_api_python/app/services/polymarket/observer.py:2101: KeyError
+=========================== short test summary info ============================
+FAILED backend_api_python/tests/test_polymarket_ws_r21_supply.py::test_diagnostic_snapshot_of_promoted_spare_is_not_a_ready_backup
+FAILED backend_api_python/tests/test_polymarket_ws_r21_supply.py::test_diagnostics_accept_a_registered_spare_before_its_queue_is_connected
+2 failed in 0.28s

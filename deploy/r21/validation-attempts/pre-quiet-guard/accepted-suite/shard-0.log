@@ -1,0 +1,49 @@
+........................................................................ [  8%]
+........................................................................ [ 17%]
+..................................................................ssssss [ 25%]
+sssssss................................................................. [ 34%]
+........................................................................ [ 43%]
+........................................................................ [ 51%]
+........................................................................ [ 60%]
+........................................................................ [ 68%]
+........................................................................ [ 77%]
+........................................................................ [ 86%]
+........................................................................ [ 94%]
+............................................                             [100%]
+=============================== warnings summary ===============================
+tests/test_agent_backtest_billing.py::test_celery_delivery_does_not_repeat_claimed_or_terminal_job[running]
+tests/test_agent_backtest_billing.py::test_celery_worker_uses_atomic_terminal_helpers[False]
+tests/test_agent_backtest_billing.py::test_celery_worker_uses_atomic_terminal_helpers[True]
+  /workspace/quantdinger/wt_r21/backend_api_python/tests/../app/tasks/agent_jobs.py:64: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    if not agent_jobs._set_status(job_id, "running", started_at=datetime.utcnow()):
+
+tests/test_crypto_kline_exchange_matrix.py::test_crypto_kline_is_pure_ohlcv_and_preserves_price_precision
+  /workspace/quantdinger/wt_r21/backend_api_python/tests/../app/data_sources/crypto.py:730: DeprecationWarning: datetime.datetime.utcfromtimestamp() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.fromtimestamp(timestamp, datetime.UTC).
+    first_ts = _dt.utcfromtimestamp(klines[0]['time']).isoformat()
+
+tests/test_crypto_kline_exchange_matrix.py::test_crypto_kline_is_pure_ohlcv_and_preserves_price_precision
+  /workspace/quantdinger/wt_r21/backend_api_python/tests/../app/data_sources/crypto.py:731: DeprecationWarning: datetime.datetime.utcfromtimestamp() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.fromtimestamp(timestamp, datetime.UTC).
+    last_ts = _dt.utcfromtimestamp(klines[-1]['time']).isoformat()
+
+tests/test_indicator_signal_alerts.py: 28 warnings
+  /workspace/quantdinger/wt_r21/backend_api_python/tests/../app/services/indicator_signal_alerts.py:763: DeprecationWarning: datetime.datetime.utcfromtimestamp() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.fromtimestamp(timestamp, datetime.UTC).
+    return datetime.utcfromtimestamp(value).isoformat()
+
+tests/test_strategy_v2_bar_phase_ordering.py::test_opening_callback_entry_is_protected_on_its_entry_bar[101-90-stop_loss_pct=0.05-stop_loss-95-before_trading_start-1d]
+tests/test_strategy_v2_bar_phase_ordering.py::test_opening_callback_entry_is_protected_on_its_entry_bar[101-90-stop_loss_pct=0.05-stop_loss-95-rebalance-1d]
+tests/test_strategy_v2_bar_phase_ordering.py::test_opening_callback_entry_is_protected_on_its_entry_bar[101-90-stop_loss_pct=0.05-stop_loss-95-on_rebalance-1d]
+tests/test_strategy_v2_bar_phase_ordering.py::test_opening_callback_entry_is_protected_on_its_entry_bar[110-99-take_profit_pct=0.05-take_profit-105-before_trading_start-1d]
+tests/test_strategy_v2_bar_phase_ordering.py::test_opening_callback_entry_is_protected_on_its_entry_bar[110-99-take_profit_pct=0.05-take_profit-105-rebalance-1d]
+tests/test_strategy_v2_bar_phase_ordering.py::test_opening_callback_entry_is_protected_on_its_entry_bar[110-99-take_profit_pct=0.05-take_profit-105-on_rebalance-1d]
+tests/test_strategy_v2_bar_phase_ordering.py::test_intrabar_stop_is_visible_at_close_but_cannot_trigger_same_open_reentry
+tests/test_strategy_v2_bar_phase_ordering.py::test_close_callback_can_consume_stop_reason_and_queues_for_next_bar
+  /workspace/quantdinger/wt_r21/backend_api_python/tests/test_strategy_v2_bar_phase_ordering.py:14: Pandas4Warning: 'd' is deprecated and will be removed in a future version, please use 'D' instead.
+    index=pd.date_range("2026-01-01", periods=len(rows), freq=frequency),
+
+tests/test_strategy_v2_market_data.py::test_gate_hk_stock_backtest_uses_underlying_hk_market
+tests/test_strategy_v2_market_data.py::test_gate_hk_stock_backtest_uses_underlying_hk_market
+  /tmp/pm-r20-venv/lib/python3.12/site-packages/exchange_calendars/exchange_calendar_xhkg.py:363: DeprecationWarning: The 'generic' unit for NumPy timedelta is deprecated, and will raise an error in the future. This includes implicit conversion of bare integers (e.g. `+ 1`).Please use a specific unit instead.
+    easter_monday = EasterMonday.dates(years[0], years[-1] + 1)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+823 passed, 13 skipped, 43 warnings in 34.94s

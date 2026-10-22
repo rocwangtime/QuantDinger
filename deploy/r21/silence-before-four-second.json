@@ -1,0 +1,63 @@
+{
+  "phase": "before",
+  "scenario": "four-second",
+  "exit": 0,
+  "wall_seconds": 5.136052566002036,
+  "result": {
+    "scenario": "four-second",
+    "wall_seconds": 4.690951880002103,
+    "switches": [
+      {
+        "source": "feed-3",
+        "seconds": 4.363147000000026
+      }
+    ],
+    "second_stall_seconds": null,
+    "max_publication_gap_ms": 4669.507630998851,
+    "rest_requests": 1,
+    "failures": [
+      {
+        "code": null,
+        "ready_backup_at_kick": true,
+        "ready_backups": 2,
+        "takeover_gap_ms": 4671.822,
+        "receipt_gap_ms": 4671.822,
+        "recovery": "rest_snapshot",
+        "gap_final": true,
+        "merged_gap_ms": 4670.796,
+        "merged_gap_final": true,
+        "gap_definition": "Per interruption event and asset: last merged publication before interruption to first merged publication after interruption; max across affected assets. Publication wall time, not socket receipt, detection-to-takeover, physical silence or ordinary interarrival. Missing baseline is unmeasured, never zero.",
+        "interruption_at": "2026-10-22T05:18:46.915021+00:00",
+        "business_event_id": 1,
+        "unmeasured_assets": [],
+        "gap_measurement": "measured",
+        "source_silence_ms": 4012.804,
+        "merged_receipt_gap_ms": 4012.804,
+        "reason": "byte_silence",
+        "gap_maximum": {
+          "ms": 4670.796,
+          "asset": "an",
+          "at": "2026-10-22T05:18:47.573878+00:00"
+        },
+        "business_gap": false,
+        "detection_to_takeover_ms": 659.0165779998642
+      }
+    ],
+    "silence": {
+      "up_down:ETH:5m": {
+        "promotions": 1,
+        "suppressed": 0,
+        "last_at": "2026-10-22T05:18:46.914506+00:00",
+        "last_silence_s": 4.012,
+        "_last_monotonic": 25941.362696797,
+        "reason": "byte_silence",
+        "tcp_pending_bytes": null,
+        "queue_wait_seconds": 0,
+        "remote_silence_confirmed": false
+      }
+    },
+    "final_book_sha256": "66f48152ae2056fc820f9af189975f6263da4a7d1ca47e8adaff4b0d14fa9bd8",
+    "expected_book_sha256": "66f48152ae2056fc820f9af189975f6263da4a7d1ca47e8adaff4b0d14fa9bd8",
+    "valid": true
+  }
+}

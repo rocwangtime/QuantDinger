@@ -1,0 +1,102 @@
+........................................................................ [  8%]
+........................................................................ [ 17%]
+........................................................................ [ 26%]
+........................................................................ [ 35%]
+........................................................................ [ 44%]
+................................F................F...................... [ 53%]
+........................................................................ [ 62%]
+........................................................................ [ 71%]
+........................................................................ [ 80%]
+........................................................................ [ 88%]
+........................................................................ [ 97%]
+.................                                                        [100%]
+=================================== FAILURES ===================================
+_____________ test_liveness_backup_promotes_and_holds_until_a_book _____________
+
+    def test_liveness_backup_promotes_and_holds_until_a_book():
+        manager = observer.MarketConnections()
+        manager.liveness_backup = True
+        manager.update_hot_coverage = lambda now: None
+        retired, snaps = [], []
+        manager.retire = lambda state: retired.append(state)
+        manager.request_snapshot = lambda index, state, assets, pressure=False: snaps.append(list(assets))
+        manager.redundancy_tick = lambda now: None
+        manager._arm_book_fallback = lambda index, state: None
+        inbox = _Inbox()
+        backup = dict(redundant=True, connected=True, standby=True, assets=['ay', 'an'],
+                      worker=threading.current_thread(), inbox=inbox, source='backup',
+                      subscribe_pending=[], recover_assets=[])
+        primary = dict(connected=True, assets=['ay', 'an'], inbox=_Inbox(), source='primary')
+        from app.services.polymarket.ws_transport import TransportDiagnostics
+        if not backup.get('socket'):
+            backup['socket'] = type('Socket', (), {'transport': TransportDiagnostics()})()
+            backup['socket'].transport.pong()
+        manager.states[0] = primary
+        manager.backups[0] = backup
+        raw = json.dumps([dict(event_type='book', asset_id=asset, timestamp=5, hash=f'h{asset}',
+                               bids=[dict(price='.4', size='1')], asks=[]) for asset in ('ay', 'an')])
+>       manager.liveness_receive(0, backup, raw, datetime.now(timezone.utc), inbox)
+
+tests/test_polymarket_ws_fix_b.py:278: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <app.services.polymarket.observer.MarketConnections object at 0x7f99f14e4560>
+index = 0
+state = {'redundant': True, 'connected': True, 'standby': True, 'assets': ['ay', 'an'], ...}
+raw = '[{"event_type": "book", "asset_id": "ay", "timestamp": 5, "hash": "hay", "bids": [{"price": ".4", "size": "1"}], "ask...t_type": "book", "asset_id": "an", "timestamp": 5, "hash": "han", "bids": [{"price": ".4", "size": "1"}], "asks": []}]'
+received_at = datetime.datetime(2026, 10, 22, 1, 42, 47, 770331, tzinfo=datetime.timezone.utc)
+inbox = <tests.test_polymarket_ws_fix_b._Inbox object at 0x7f99f14e4530>
+epoch = None
+
+    def liveness_receive(self, index, state, raw, received_at, inbox, epoch=None):
+        """Track link health and independently maintain a bounded warm ladder."""
+        from .ws_payloads import cheap_envelope, decoded_envelope, loads
+>       epoch = inbox.epoch if epoch is None else epoch
+                ^^^^^^^^^^^
+E       AttributeError: '_Inbox' object has no attribute 'epoch'
+
+app/services/polymarket/observer.py:1602: AttributeError
+______________ test_liveness_books_count_as_snapshots_for_repair _______________
+
+    def test_liveness_books_count_as_snapshots_for_repair():
+        manager = observer.MarketConnections()
+        manager.liveness_backup = True
+        state = dict(redundant=True, assets=['ay', 'an'], liveness_assets={'ay'}, shadow=type('S', (), {'books': {}})())
+        assert manager.redundant_seen(state) == {'ay'}
+        inbox = _Inbox()
+        state.update(connected=True, worker=threading.current_thread(), inbox=inbox,
+                     subscribe_pending=[], recover_assets={'ay', 'an'})
+        manager.states[0] = dict(connected=True, assets=['ay', 'an'], inbox=_Inbox())
+        raw = json.dumps([dict(event_type='book', asset_id='ay', timestamp=5, hash='hay', bids=[], asks=[])])
+>       manager.liveness_receive(0, state, raw, datetime.now(timezone.utc), inbox)
+
+tests/test_polymarket_ws_fix_b.py:808: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <app.services.polymarket.observer.MarketConnections object at 0x7f99f1252000>
+index = 0
+state = {'redundant': True, 'assets': ['ay', 'an'], 'liveness_assets': {'ay'}, 'shadow': <tests.test_polymarket_ws_fix_b.S object at 0x7f99f1250bc0>, ...}
+raw = '[{"event_type": "book", "asset_id": "ay", "timestamp": 5, "hash": "hay", "bids": [], "asks": []}]'
+received_at = datetime.datetime(2026, 10, 22, 1, 42, 48, 91066, tzinfo=datetime.timezone.utc)
+inbox = <tests.test_polymarket_ws_fix_b._Inbox object at 0x7f99f1251970>
+epoch = None
+
+    def liveness_receive(self, index, state, raw, received_at, inbox, epoch=None):
+        """Track link health and independently maintain a bounded warm ladder."""
+        from .ws_payloads import cheap_envelope, decoded_envelope, loads
+>       epoch = inbox.epoch if epoch is None else epoch
+                ^^^^^^^^^^^
+E       AttributeError: '_Inbox' object has no attribute 'epoch'
+
+app/services/polymarket/observer.py:1602: AttributeError
+=============================== warnings summary ===============================
+tests/test_agent_scoring.py::test_horizons_skip_weekend_and_hk_holiday
+tests/test_agent_scoring.py::test_horizons_skip_weekend_and_hk_holiday
+  /tmp/pm-r20-venv/lib/python3.12/site-packages/exchange_calendars/exchange_calendar_xhkg.py:363: DeprecationWarning: The 'generic' unit for NumPy timedelta is deprecated, and will raise an error in the future. This includes implicit conversion of bare integers (e.g. `+ 1`).Please use a specific unit instead.
+    easter_monday = EasterMonday.dates(years[0], years[-1] + 1)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_polymarket_ws_fix_b.py::test_liveness_backup_promotes_and_holds_until_a_book
+FAILED tests/test_polymarket_ws_fix_b.py::test_liveness_books_count_as_snapshots_for_repair
+2 failed, 807 passed, 2 warnings in 25.65s

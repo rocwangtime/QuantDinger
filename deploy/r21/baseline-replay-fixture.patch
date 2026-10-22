@@ -1,0 +1,141 @@
+--- e90ce02/backend_api_python/app/services/polymarket/ws_group_process.py
++++ replay-instrumentation/backend_api_python/app/services/polymarket/ws_group_process.py
+@@ -595,7 +595,12 @@
+     def send(self, raw):
+         if raw == 'PING':
+             if not self.stalled():
+-                self.transport.pong()
++                self.transport.read(4)
++                callback = self.callbacks.get('on_message')
++                if callback is not None:
++                    callback(self, 'PONG')
++                else:
++                    self.transport.pong()
+             return
+         message = json.loads(raw)
+         if message.get('operation') == 'unsubscribe':
+@@ -677,7 +682,8 @@
+                 self.urgent.append(dict(op='dropped', n=drop, total=self.dropped, assets=assets))
+                 dropped_assets = assets
+             if gap is not None:
+-                self.urgent.append(dict(op='gap', seconds=gap, seq=seq))
++                self.urgent.append(dict(op='gap', seconds=gap, seq=seq,
++                                        kick_mono=self.kick_at, submitted_mono=time.monotonic()))
+             if len(self.pubs) >= 32 or dropped_assets:
+                 self.cv.notify()
+         if dropped_assets and self.on_drop:
+@@ -712,14 +718,14 @@
+                 closed = self.closed
+             try:
+                 for message in urgent:
+-                    started = time.process_time()
++                    started = time.thread_time()
+                     _send(self.conn, message)
+-                    self.pickle_s += time.process_time() - started
++                    self.pickle_s += time.thread_time() - started
+                 if pubs:
+-                    started = time.process_time()
++                    started = time.thread_time()
+                     items = [dict(e=event, o=owned, t=stamp, seq=seq) for event, owned, stamp, seq in pubs]
+                     _send(self.conn, dict(op='pub', items=items))
+-                    self.pickle_s += time.process_time() - started
++                    self.pickle_s += time.thread_time() - started
+                     self.batches += 1
+                 if closed and not pubs:
+                     return
+@@ -855,7 +861,8 @@
+ 
+ 
+ def _bootstrap(manager):
+-    deadline = time.monotonic() + 8
++    deadline = time.monotonic() + 25
++    booted = set()
+     while time.monotonic() < deadline and not _STOP_CHILD.is_set():
+         manager.backup_next_connect_at = 0
+         for state in list(manager.states.values()) + [row for _, row in manager.backup_items()]:
+@@ -863,6 +870,10 @@
+             assets = list(getattr(sock, 'assets', None) or [])
+             if not sock or not assets or not hasattr(sock, 'emit'):
+                 continue
++            identity = (id(sock), tuple(assets))
++            if identity in booted:
++                continue
++            booted.add(identity)
+             at = int(time.time() * 1000)
+             # A liveness-only replay still gives the primary a book (REST marks
+             # and the post-kick echo). The spare gets a price change only.
+@@ -882,7 +893,9 @@
+             manager.tick(status=False)
+         except Exception:
+             _LOG.exception('feed bootstrap tick failed')
+-        if manager.backups and all(manager.backup_ready(row) for _, row in manager.backup_items()):
++        required_copies = sum(manager.backup_target() for index in manager.states if manager.hot_shard(index))
++        if (len(manager.backup_items()) >= required_copies
++                and all(manager.backup_ready(row) for _, row in manager.backup_items())):
+             return True
+         time.sleep(0.01)
+     return False
+@@ -922,11 +935,11 @@
+         delay_per_frame = float(os.getenv('QD_REPLAY_PRODUCER_DELAY', '0'))
+         if delay_per_frame > 0:
+             time.sleep(delay_per_frame)
+-        sock = _socket_for(manager, role)
+-        if sock is None or not hasattr(sock, 'emit'):
+-            continue
+-        stopped = getattr(sock, 'stopped', None)
+-        if stopped is not None and stopped.is_set():
++        sockets = ([state.get('socket') for _, state in manager.backup_items()]
++                   if role == 'backup' else [_socket_for(manager, role)])
++        sockets = [sock for sock in sockets if sock is not None and hasattr(sock, 'emit')
++                   and not sock.stopped.is_set()]
++        if not sockets:
+             continue
+         try:
+             raw = json.dumps(wire_event(*args), separators=(',', ':'))
+@@ -934,7 +947,8 @@
+                 raw = _as_price_change(raw)
+             else:
+                 _remember_replay_frame(raw)
+-            sock.emit(raw)
++            for sock in sockets:
++                sock.emit(raw)
+         except Exception:
+             _LOG.exception('replay emit failed role=%s', role)
+ 
+@@ -1242,6 +1256,7 @@
+         self.applied_seq = 0
+         self.drain_target = None
+         self.drain_ready = threading.Event()
++        self.gap_pending = {}
+ 
+     def send(self, message):
+         conn = self.control
+@@ -1286,7 +1301,10 @@
+             if ready is not None:
+                 ready.set()
+         elif op == 'gap':
+-            self.feeds.gaps.append(dict(key=self.spec['key'], seconds=message.get('seconds'), seq=message.get('seq')))
++            row = dict(key=self.spec['key'], seconds=message.get('seconds'), seq=message.get('seq'),
++                       kick_mono=message.get('kick_mono'), submitted_mono=message.get('submitted_mono'))
++            self.feeds.gaps.append(row)
++            self.gap_pending[row['seq']] = row
+         elif op == 'dropped':
+             self.dropped = message.get('total') or self.dropped
+             self.feeds.note_drop(self.spec['key'], message.get('assets') or [], self.dropped)
+@@ -1326,9 +1344,14 @@
+             received = datetime.fromtimestamp((item.get('t') or 0) / 1000, timezone.utc)
+             owned = None if item.get('o') is None else frozenset(item['o'])
+             try:
+-                started = time.process_time()
++                started = time.thread_time()
+                 pipeline.receive(event, owned, received)
+-                self.apply_s += time.process_time() - started
++                self.apply_s += time.thread_time() - started
++                gap = self.gap_pending.pop(item.get('seq'), None)
++                if gap is not None and gap.get('submitted_mono') is not None:
++                    applied = time.monotonic()
++                    gap['submit_to_parent_apply_ms'] = (applied-gap['submitted_mono'])*1000
++                    gap['kick_to_parent_apply_ms'] = (applied-gap['kick_mono'])*1000
+             except Exception:
+                 _LOG.exception('parent apply failed key=%s', self.spec['key'])
+             self.feeds.published += 1

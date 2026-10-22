@@ -409,7 +409,7 @@ def _burn(fraction, stop):
 
 
 def run_processes(seconds=20, rate=3300, levels=140, cold_pairs=19, market_loop=True,
-                  background_load=0.0, weighted=True, kicks=1, confine_cpus=0):
+                  background_load=0.0, weighted=True, kicks=1, confine_cpus=0, backup_count=2):
     """Multi-process replay. Children parse; the parent only applies merged events."""
     import multiprocessing
     import os
@@ -424,7 +424,7 @@ def run_processes(seconds=20, rate=3300, levels=140, cold_pairs=19, market_loop=
         burner = ctx.Process(target=_burn, args=(background_load, stop_burn), name='replay-background', daemon=True)
         burner.start()
     try:
-        return _run_processes_inner(seconds, rate, levels, cold_pairs, market_loop, weighted, kicks, burner, stop_burn)
+        return _run_processes_inner(seconds, rate, levels, cold_pairs, market_loop, weighted, kicks, burner, stop_burn, backup_count)
     finally:
         if burner is not None:
             stop_burn.set()
@@ -434,7 +434,7 @@ def run_processes(seconds=20, rate=3300, levels=140, cold_pairs=19, market_loop=
                 burner.join(1)
 
 
-def _run_processes_inner(seconds, rate, levels, cold_pairs, market_loop, weighted, kicks, burner, stop_burn):
+def _run_processes_inner(seconds, rate, levels, cold_pairs, market_loop, weighted, kicks, burner, stop_burn, backup_count):
     from app.services.polymarket.ws_group_process import (
         FAILOVER_GAP_DEFINITION, HOT_ORDER, PRIMARY_QUEUE_AGE_DEFINITION,
         PROD_FRAME_WEIGHTS, GroupFeeds, planned_events, queue_age_series,
@@ -442,7 +442,7 @@ def _run_processes_inner(seconds, rate, levels, cold_pairs, market_loop, weighte
     with ExitStack() as stack:
         stack.enter_context(patch.dict('os.environ', {
             'POLYMARKET_OBSERVER_WS_SHARDS': '4',
-            'POLYMARKET_OBSERVER_WS_HOT_BACKUP_COUNT': '1',
+            'POLYMARKET_OBSERVER_WS_HOT_BACKUP_COUNT': str(backup_count),
             'POLYMARKET_OBSERVER_WS_HOT_BACKUP_STAGGER_SECONDS': '0',
             'POLYMARKET_OBSERVER_WS_COLD_ROTATION_ENABLED': '0',
             'POLYMARKET_OBSERVER_WS_REPLAY': '1',
@@ -468,9 +468,28 @@ def _run_processes_inner(seconds, rate, levels, cold_pairs, market_loop, weighte
         pipeline.set_markets(markets)
         cold = [dict(event_type='book', asset_id=f'cold{i}', timestamp=int(time.time() * 1000),
                      bids=[], asks=[dict(price='.6', size='1')]) for i in range(cold_pairs * 2)]
+        startup_wall = time.monotonic()
+        startup_parent_cpu = time.process_time()
         feeds.sync(markets)
         feeds.start_supervisor()
-        feeds.wait_ready(20)
+        feeds.wait_ready(30)
+        ready_deadline = time.monotonic()+30
+        while True:
+            hot = [c for c in feeds.children.values() if c.spec.get('hot')]
+            counts = []
+            for child in hot:
+                status = (child.latest or {}).get('status') or {}
+                copies = [*(status.get('ws_backups') or {}).values(), *(status.get('ws_reserves') or {}).values()]
+                counts.append(sum(bool(c.get('ready')) for c in copies))
+            if counts and min(counts) >= backup_count:
+                break
+            if time.monotonic() >= ready_deadline:
+                raise TimeoutError(f'required {backup_count} ready copies, got {counts}')
+            time.sleep(.05)
+        startup_stages = _snapshot_stages(feeds)
+        startup_cpu = time.process_time()-startup_parent_cpu + sum(
+            r.get('cpu_s', 0) for r in startup_stages.values())
+        startup_seconds = time.monotonic()-startup_wall
         feeds.publish_status()
         snapshot_errors = []
         background_stop = threading.Event()
@@ -602,6 +621,8 @@ def _run_processes_inner(seconds, rate, levels, cold_pairs, market_loop, weighte
         resyncs = 0
         for row in (status.get('ws_backups') or {}).values():
             resyncs += row.get('resyncs') or 0
+        observed_failures = sum(len(row.get('events') or []) for row in
+            (status.get('ws_hot_primary_failures') or {}).values())
         published = pipeline.messages - published_before
         ready_ratio = (sum(bool(row.get('ready')) for row in ready_rows) / len(ready_rows)) if ready_rows else None
         ready_live_drops = ready_drops_while_receiving(ready_rows)
@@ -610,6 +631,12 @@ def _run_processes_inner(seconds, rate, levels, cold_pairs, market_loop, weighte
         codes_1008 = sum(code == 1008 for code in codes)
         gap_ok = (not kick_at) or (len(gaps) >= len(kick_at) and gap_max is not None and gap_max <= 1.5)
         result = dict(mode='process-per-group', weighted=weighted, seconds=elapsed, rate=rate,
+                      backup_count=backup_count, ready_copies_at_start=counts,
+                      actual_wire_rate=rate*(1+backup_count)/2,
+                      startup=dict(seconds=startup_seconds, cpu_s=startup_cpu, stages=startup_stages),
+                      measured_cpu_cores=parent_cpu/elapsed + sum(
+                          max(0, (stages_after.get(k) or {}).get('cpu_s', 0)-(stages_before.get(k) or {}).get('cpu_s', 0))
+                          for k in stages_after)/elapsed,
                       logical=logical, published=published,
                       ready_ratio=ready_ratio, ready_samples=len(ready_rows),
                       ready_live_drops=ready_live_drops,
@@ -625,8 +652,12 @@ def _run_processes_inner(seconds, rate, levels, cold_pairs, market_loop, weighte
                                                 p99=pct(backup, .99) * 1000 if backup else None,
                                                 max=max(backup) * 1000 if backup else None, samples=len(backup)),
                       failover_gaps_s=gaps, failover_gap_max_s=gap_max,
+                      failover_stage_traces=list(feeds.gaps),
+                      primary_failure_events=status.get('ws_hot_primary_failures'),
                       failover_gap_definition=FAILOVER_GAP_DEFINITION,
                       kicks=len(kick_at), codes_1008=codes_1008,
+                      observed_primary_failures=observed_failures,
+                      unexpected_primary_failures=max(0, observed_failures-len(kick_at)),
                       close_reasons=status.get('close_reason_counts'),
                       parent_mode=status.get('mode'),
                       cpu_cores=status.get('ws_process_cpu_cores'), parent_cpu_s=parent_cpu,
@@ -644,7 +675,8 @@ def _run_processes_inner(seconds, rate, levels, cold_pairs, market_loop, weighte
                              and codes_1008 == 0 and not feeds.restarts and status.get('mode') == 'ws'
                              and ready_ratio is not None and ready_ratio >= 0.95
                              and ready_live_drops == 0
-                             and primary_p99 is not None and primary_p99 < 250 and gap_ok))
+                             and primary_p99 is not None and primary_p99 < 250 and gap_ok
+                             and observed_failures == len(kick_at)))
         return result
 
 
@@ -665,6 +697,7 @@ if __name__ == '__main__':
     parser.add_argument('--even', action='store_true')
     parser.add_argument('--kicks', type=int, default=1)
     parser.add_argument('--confine-cpus', type=int, default=0)
+    parser.add_argument('--backup-count', type=int, choices=(1, 2), default=2)
     args = parser.parse_args()
     logging.getLogger('app.services.polymarket').setLevel(logging.ERROR)
     if (args.seconds < 1 or args.rate < 1 or not 2 <= args.levels <= 600 or args.cold_pairs < 0
@@ -674,7 +707,7 @@ if __name__ == '__main__':
     if args.process_per_group:
         result = run_processes(args.seconds, args.rate, args.levels, args.cold_pairs, market_loop=True,
                                background_load=args.background_load, weighted=not args.even, kicks=args.kicks,
-                               confine_cpus=args.confine_cpus)
+                               confine_cpus=args.confine_cpus, backup_count=args.backup_count)
     else:
         result = run(args.seconds, args.rate, args.levels, args.cold_pairs, args.stage_profile, args.lock_timing,
                      args.market_loop, args.rest_hour_buckets, args.prod_gil, args.gil_load)

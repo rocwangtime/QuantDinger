@@ -1,0 +1,95 @@
+........................................................................ [  8%]
+........................................................................ [ 17%]
+........................................................................ [ 26%]
+........................................................................ [ 35%]
+........................................................................ [ 44%]
+.................................................................F...... [ 53%]
+........................................................................ [ 62%]
+........................................................................ [ 71%]
+........................................................................ [ 80%]
+........................................................................ [ 88%]
+........................................................................ [ 97%]
+.................                                                        [100%]
+=================================== FAILURES ===================================
+_ test_prewarmed_rollover_keeps_both_sockets_ready_without_evaluating_future[up_down:BTC:15m] _
+
+feed_manager = (<app.services.polymarket.observer.MarketConnections object at 0x7fcb72d63bf0>, <app.services.polymarket.observer.Pipe...pp object at 0x7fcb72d9fa40>, <app.services.polymarket.observer.read_ahead_app.<locals>.App object at 0x7fcb72d9f4d0>])
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fcb79b0a300>
+key = 'up_down:BTC:15m'
+
+    @pytest.mark.parametrize('key', sorted(observer.HOT_SERIES))
+    def test_prewarmed_rollover_keeps_both_sockets_ready_without_evaluating_future(feed_manager, monkeypatch, key):
+        m, p, sockets, first, reserve, current, upcoming, end = rollover_setup(feed_manager, monkeypatch, key)
+>       admit_prewarm(m, first, reserve)
+
+tests/test_polymarket_ws_round11.py:54: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+m = <app.services.polymarket.observer.MarketConnections object at 0x7fcb72d63bf0>
+first = {'assets': ['ay', 'an', 'ny', 'nn'], 'socket': <app.services.polymarket.observer.read_ahead_app.<locals>.App object at 0x7fcb72d602c0>, 'thread': <Thread(polymarket-receive-0, stopped daemon 140510777824960)>, 'connected': False, ...}
+reserve = {'assets': ['ay', 'an', 'ny', 'nn'], 'socket': <app.services.polymarket.observer.read_ahead_app.<locals>.App object at 0x7fcb72d9fa40>, 'thread': <Thread(polymarket-receive-0, started daemon 140511763486400)>, 'connected': True, ...}
+
+    def admit_prewarm(m, first, reserve):
+        for _ in range(3):
+            m.subscriptions.next_at = 0
+            m.tick()
+>       assert not first['subscribe_pending'] and not reserve['subscribe_pending']
+E       AssertionError: assert (not ['nn', 'ny'])
+
+tests/test_polymarket_ws_round11.py:48: AssertionError
+------------------------------ Captured log setup ------------------------------
+2026-10-22 09:45:22,317 - app.services.polymarket.observer - INFO - Polymarket WS open shard=0 standby=False assets=2
+------------------------------ Captured log call -------------------------------
+2026-10-22 09:45:22,324 - app.services.polymarket.observer - INFO - Polymarket WS redundant prepare shard=0 assets=2 reserve=False
+2026-10-22 09:45:22,325 - app.services.polymarket.observer - INFO - Polymarket WS open shard=0 standby=True assets=2
+2026-10-22 09:45:57,361 - app.services.polymarket.observer - WARNING - Polymarket WS hot primary failure group=up_down:BTC:5m shard=0 code=None ready_backups=0
+2026-10-22 09:45:57,361 - app.services.polymarket.observer - WARNING - Polymarket WS transport failure shard=0 evidence={"code": null, "reason": "", "assets": 2, "connection_age_seconds": 156.0442986550006, "role": "primary", "physical_role": "primary", "source": "feed-1", "promoted_at": null, "standby": false, "subscribe_pending": 0, "groups": ["up_down:BTC:5m"], "queue_depth": 0, "queue_high_water": 1, "queue_wait_seconds": 0, "lock_wait_seconds": 7.140006346162409e-07, "drops": 0, "drop_reasons": {"overflow": 0, "resync_rejected": 0, "invalid_rejected": 0, "resync_discarded": 0, "shutdown_discarded": 0}, "resyncs": 0, "callback_max_seconds": 1.881800199043937e-05, "parse_max_seconds": 0.00012285900083952583, "process_max_seconds": 0.00027666300229611807, "lifecycle_wait_seconds": 0, "discard_max_seconds": 0, "subscribe_batches": 1, "pair_load": {"peer_connections": 1, "pair_receive_bytes_per_second": 0, "pair_read_bytes_60s": 0, "peer_queue_wait_seconds": 0, "heartbeat_phase_seconds": 10}, "handshake_headers": {}, "sample": {"read_bytes_60s": 0, "read_window_resolution_seconds": 1, "at": "2026-10-22T01:45:57.361358+00:00", "sample_gap_seconds": null, "scheduler_lag_seconds": 0, "byte_silence_seconds": null, "read_bytes": 0, "read_calls": 0, "read_bytes_per_second": null, "pings": 0, "pongs": 1, "pong_rtt_seconds": null, "pong_age_seconds": 35.043440646997624}, "samples": [{"read_bytes_60s": 0, "read_window_resolution_seconds": 1, "at": "2026-10-22T01:45:57.361358+00:00", "sample_gap_seconds": null, "scheduler_lag_seconds": 0, "byte_silence_seconds": null, "read_bytes": 0, "read_calls": 0, "read_bytes_per_second": null, "pings": 0, "pongs": 1, "pong_rtt_seconds": null, "pong_age_seconds": 35.043440646997624}]}
+2026-10-22 09:45:57,361 - app.services.polymarket.observer - INFO - Polymarket WS redundant prepare shard=0 assets=2 reserve=True
+2026-10-22 09:45:57,366 - app.services.polymarket.observer - INFO - Polymarket WS open shard=0 standby=True assets=2
+2026-10-22 09:45:57,367 - app.services.polymarket.ws_redundancy - INFO - Polymarket WS continuity {"asset": "ay", "reason": "reconnect", "status": "unverified", "gap_ms": null, "receipt_gap_ms": 35041.280999999995, "source_silence_ms": 35041.278, "destination_silence_ms": null, "destination_exchange_gap_ms": null, "merged_receipt_age_ms": 35041.278, "merged_max_receipt_gap_ms": 7.895, "book_preserved": false, "book_unavailable_ms": null, "market_silence_compatible": false, "historical_trades_verified": false, "exchange_at": "2026-10-22T01:45:22.325000+00:00", "fingerprint": "183a67da1e711d836efc59f652238b45", "business_event_id": 1, "merged_gap_ms": null, "merged_gap_final": false, "gap_definition": "Per interruption event and asset: last merged publication before interruption to first merged publication after interruption; max across affected assets. Publication wall time, not socket receipt, detection-to-takeover, physical silence or ordinary interarrival. A final gap >1500ms is a business gap regardless of ready spares; physical silence >20s is separately alert-only. Missing baseline is unmeasured, never zero.", "gap_measurement": "pending_publication", "unmeasured_assets": [], "interruption_at": "2026-10-22T01:45:57.360876+00:00", "business_gap": null, "business_gap_limit_ms": 1500, "event_id": 1, "physical_evidence_alert_only": true}
+2026-10-22 09:45:57,367 - app.services.polymarket.ws_redundancy - INFO - Polymarket WS continuity {"asset": "an", "reason": "reconnect", "status": "unverified", "gap_ms": null, "receipt_gap_ms": 35041.457, "source_silence_ms": 35041.454000000005, "destination_silence_ms": null, "destination_exchange_gap_ms": null, "merged_receipt_age_ms": 35041.454000000005, "merged_max_receipt_gap_ms": 7.895, "book_preserved": false, "book_unavailable_ms": null, "market_silence_compatible": false, "historical_trades_verified": false, "exchange_at": "2026-10-22T01:45:22.325000+00:00", "fingerprint": "dada829e6274a0b7a8b2447a978f146c", "business_event_id": 1, "merged_gap_ms": null, "merged_gap_final": false, "gap_definition": "Per interruption event and asset: last merged publication before interruption to first merged publication after interruption; max across affected assets. Publication wall time, not socket receipt, detection-to-takeover, physical silence or ordinary interarrival. A final gap >1500ms is a business gap regardless of ready spares; physical silence >20s is separately alert-only. Missing baseline is unmeasured, never zero.", "gap_measurement": "pending_publication", "unmeasured_assets": [], "interruption_at": "2026-10-22T01:45:57.360876+00:00", "business_gap": null, "business_gap_limit_ms": 1500, "event_id": 2, "physical_evidence_alert_only": true}
+2026-10-22 09:45:57,377 - app.services.polymarket.observer - INFO - Polymarket WS open shard=0 standby=False assets=2
+2026-10-22 09:45:57,382 - app.services.polymarket.ws_redundancy - INFO - Polymarket WS continuity {"asset": "an", "reason": "reconnect", "status": "snapshot_restored", "gap_ms": 0, "receipt_gap_ms": 0.023, "exchange_at": "2026-10-22T01:45:22.325000+00:00", "hash": null, "historical_trades_recovered": false, "business_event_id": 1, "merged_gap_ms": null, "merged_gap_final": false, "gap_definition": "Per interruption event and asset: last merged publication before interruption to first merged publication after interruption; max across affected assets. Publication wall time, not socket receipt, detection-to-takeover, physical silence or ordinary interarrival. A final gap >1500ms is a business gap regardless of ready spares; physical silence >20s is separately alert-only. Missing baseline is unmeasured, never zero.", "gap_measurement": "pending_publication", "unmeasured_assets": [], "interruption_at": "2026-10-22T01:45:57.360876+00:00", "business_gap": null, "business_gap_limit_ms": 1500, "event_id": 3, "physical_evidence_alert_only": true}
+2026-10-22 09:45:57,383 - app.services.polymarket.ws_redundancy - INFO - Polymarket WS continuity {"asset": "ay", "reason": "reconnect", "status": "snapshot_restored", "gap_ms": 0, "receipt_gap_ms": 0.023, "exchange_at": "2026-10-22T01:45:22.325000+00:00", "hash": null, "historical_trades_recovered": false, "business_event_id": 1, "merged_gap_ms": null, "merged_gap_final": false, "gap_definition": "Per interruption event and asset: last merged publication before interruption to first merged publication after interruption; max across affected assets. Publication wall time, not socket receipt, detection-to-takeover, physical silence or ordinary interarrival. A final gap >1500ms is a business gap regardless of ready spares; physical silence >20s is separately alert-only. Missing baseline is unmeasured, never zero.", "gap_measurement": "pending_publication", "unmeasured_assets": [], "interruption_at": "2026-10-22T01:45:57.360876+00:00", "business_gap": null, "business_gap_limit_ms": 1500, "event_id": 4, "physical_evidence_alert_only": true}
+2026-10-22 09:45:57,384 - app.services.polymarket.observer - WARNING - Polymarket WS transport failure shard=0 evidence={"code": null, "reason": "", "assets": 2, "connection_age_seconds": 35.05930794300002, "role": "backup", "physical_role": "backup", "source": "feed-3", "promoted_at": null, "standby": true, "subscribe_pending": 0, "groups": ["up_down:BTC:5m"], "queue_depth": 0, "queue_high_water": 1, "queue_wait_seconds": 0, "lock_wait_seconds": 8.110000635497272e-07, "drops": 0, "drop_reasons": {"overflow": 0, "resync_rejected": 0, "invalid_rejected": 0, "resync_discarded": 0, "shutdown_discarded": 0}, "resyncs": 0, "callback_max_seconds": 7.110000296961516e-06, "parse_max_seconds": 1.869200059445575e-05, "process_max_seconds": 0.00029508599982364103, "lifecycle_wait_seconds": 0.013853628999640932, "discard_max_seconds": 0, "subscribe_batches": 1, "pair_load": {"peer_connections": 2, "pair_receive_bytes_per_second": 6.964057154734953, "pair_read_bytes_60s": 0, "peer_queue_wait_seconds": 0, "heartbeat_phase_seconds": 3.477301741957146}, "handshake_headers": {}, "sample": {"read_bytes_60s": 0, "read_window_resolution_seconds": 1, "at": "2026-10-22T01:45:57.384342+00:00", "sample_gap_seconds": null, "scheduler_lag_seconds": 0, "byte_silence_seconds": null, "read_bytes": 0, "read_calls": 0, "read_bytes_per_second": null, "pings": 0, "pongs": 1, "pong_rtt_seconds": null, "pong_age_seconds": 35.058525583997834}, "samples": [{"read_bytes_60s": 0, "read_window_resolution_seconds": 1, "at": "2026-10-22T01:45:57.384342+00:00", "sample_gap_seconds": null, "scheduler_lag_seconds": 0, "byte_silence_seconds": null, "read_bytes": 0, "read_calls": 0, "read_bytes_per_second": null, "pings": 0, "pongs": 1, "pong_rtt_seconds": null, "pong_age_seconds": 35.058525583997834}]}
+2026-10-22 09:45:57,384 - app.services.polymarket.observer - INFO - Polymarket WS standby close shard=0 code=None slow_consumer=False
+2026-10-22 09:45:57,385 - app.services.polymarket.observer - INFO - Polymarket WS rotation aborted details={"shard": 0, "reason": "backup_wire_failure", "stage": "subscribe", "retry_seconds": 2.0105438336042956, "consecutive_failures": 1}
+---------------------------- Captured log teardown -----------------------------
+2026-10-22 10:14:46,922 - app.services.polymarket.observer - INFO - Polymarket WS manager local shutdown primary_shards=1
+=============================== warnings summary ===============================
+tests/test_agent_scoring.py::test_horizons_skip_weekend_and_hk_holiday
+tests/test_agent_scoring.py::test_horizons_skip_weekend_and_hk_holiday
+  /tmp/pm-r20-venv/lib/python3.12/site-packages/exchange_calendars/exchange_calendar_xhkg.py:363: DeprecationWarning: The 'generic' unit for NumPy timedelta is deprecated, and will raise an error in the future. This includes implicit conversion of bare integers (e.g. `+ 1`).Please use a specific unit instead.
+    easter_monday = EasterMonday.dates(years[0], years[-1] + 1)
+
+tests/test_polymarket_ws_round11.py::test_prewarmed_rollover_keeps_both_sockets_ready_without_evaluating_future[up_down:BTC:15m]
+  /tmp/pm-r20-venv/lib/python3.12/site-packages/_pytest/threadexception.py:58: PytestUnhandledThreadExceptionWarning: Exception in thread polymarket-receive-0
+  
+  Traceback (most recent call last):
+    File "/tmp/pm-r20-python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/threading.py", line 1075, in _bootstrap_inner
+      self.run()
+    File "/tmp/pm-r20-python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/threading.py", line 1012, in run
+      self._target(*self._args, **self._kwargs)
+    File "/workspace/quantdinger/wt_r21/backend_api_python/tests/../app/services/polymarket/observer.py", line 3871, in <lambda>
+      state['thread'] = threading.Thread(target=lambda: sock.run_forever(ping_interval=10, skip_utf8_validation=True,
+                                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "/workspace/quantdinger/wt_r21/backend_api_python/tests/test_polymarket_ws_rotation.py", line 57, in run_forever
+      self.callbacks['on_close'](self, None, None)
+    File "/workspace/quantdinger/wt_r21/backend_api_python/tests/../app/services/polymarket/observer.py", line 3840, in closed
+      self.update_hot_coverage(time.monotonic())
+    File "/workspace/quantdinger/wt_r21/backend_api_python/tests/../app/services/polymarket/observer.py", line 3179, in update_hot_coverage
+      reasons.update(self.readiness_blockers(candidate))
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "/workspace/quantdinger/wt_r21/backend_api_python/tests/../app/services/polymarket/observer.py", line 2084, in readiness_blockers
+      inbox = state['inbox']
+              ~~~~~^^^^^^^^^
+  KeyError: 'inbox'
+  
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+    warnings.warn(pytest.PytestUnhandledThreadExceptionWarning(msg))
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_polymarket_ws_round11.py::test_prewarmed_rollover_keeps_both_sockets_ready_without_evaluating_future[up_down:BTC:15m]
+1 failed, 808 passed, 3 warnings in 66.15s (0:01:06)
