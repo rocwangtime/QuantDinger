@@ -969,3 +969,46 @@ imbalance even at the caps, including inventory above newly reduced limits.
 Pairing fills cannot overshoot into opposite one-leg exposure. Once paired,
 both sides can quote again. Existing cash reservation and paper-only execution
 remain in place; no wallet, signer or real-order integration is involved.
+
+## Paper maker selection recovery and capital reset (2026-10-23)
+
+V3 selection now records each DATA_FAULTS reason in market summaries and scores.
+`STALE_METRIC=book_stale` uses `MAX_BOOK_STALE_SHARE=.02`; `STALE_METRIC=stale`
+restores the aggregate gate (`MAX_STALE_SHARE=.02`). Legacy or partially covered
+summaries conservatively use aggregate stale for missing reason coverage. The
+5m quotable minimum is separately configurable (`MIN_QUOTABLE_SHARE_5M=.075`,
+observed share 7–9%); other intervals remain `.20`. Z hard max remains `.03`,
+and quote-time bad-book and toxicity guards remain in effect.
+
+All maker variables use `POLYMARKET_PAPER_MAKER_`. Default cold priors are
+BTC/ETH 5m/15m in full mode. Explicit preopen entries downgrade to full with
+`reason=preopen_without_lookahead` at selection when observer lookahead is zero.
+When the recorded-scope active set is below `REENTRY_MIN_ACTIVE=2`, mature
+unadmitted cells can enter with `source=reentry`, full mode, and a two-calendar-day
+probation (`REENTRY_PROBATION_DAYS=2`). Existing cooloff, breakers, total and
+per-coin caps apply; every quote still uses probation size multiplier `.5`.
+On expiry a failed cell exits into cooloff; it cannot extend its probation at
+each review. `REENTRY_MIN_ACTIVE=0` disables this recovery path. Formal admission
+still requires filters, positive LCB, adequate shares and acceptable AS/edge.
+Selection audit events record the source, reason and probation end.
+
+Capital reset is an explicit operator operation, never an automatic startup task:
+
+```sh
+# First stop polymarket-observer (or confirm the paper worker is stopped).
+# Run in the backend environment with its normal DB configuration:
+python -m app.commands.polymarket_paper_capital_reset
+# Then start polymarket-observer.
+```
+
+The command defaults to `global`, refuses contaminated account IDs, existing
+worker leases, missing accounts, pending trades, holdings, nonzero balances or
+maker exposure. A single transaction updates state/current daily and appends
+`capital_reset` with before/after/reason/actor. It resets to configured account
+`initial_capital` (default 5000). It runs no retention DELETE and preserves old
+trades/legs/daily/ledger and maker shadow statistics. Reset clears maker selection
+blocks, forces review and records a risk baseline so historical cumulative PnL
+does not immediately retrigger stops. Prior PnL statistics remain historical;
+use the reset ledger/equity as the new evaluation epoch. Normal worker retention
+still applies after restart. No migration, live order integration or PAPER_AUTO
+change is required. Shadow toxicity A/B/C is deferred to a separate PR.
