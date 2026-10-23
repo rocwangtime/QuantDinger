@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
 
@@ -77,11 +78,15 @@ def main() -> None:
                     )
                     if not leader:
                         break
-                repository.record_worker_heartbeat(
-                    worker_id=worker_id,
-                    role="polymarket-observer",
-                    metadata={"leader": leader, "polymarket_observer": snapshot()},
-                )
+                try:
+                    repository.record_worker_heartbeat(
+                        worker_id=worker_id,
+                        role="polymarket-observer",
+                        metadata={"leader": leader, "polymarket_observer": snapshot()},
+                    )
+                except Exception as exc:
+                    logging.getLogger(__name__).warning(
+                        "Polymarket heartbeat persistence failed (%s)", type(exc).__name__)
                 shutdown.event.wait(10)
         finally:
             if observer_owned:
