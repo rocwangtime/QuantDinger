@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.utils.db import get_db_connection
+from app.utils.json_safe import sanitize_json
 
 
 TERMINAL_COMMAND_STATUSES = frozenset({"succeeded", "failed", "cancelled"})
@@ -336,7 +337,7 @@ class StrategyCommandRepository:
                         heartbeat_at = NOW(), updated_at = NOW()
                     RETURNING worker_id
                     """,
-                    (worker_id, role, json.dumps(metadata or {}, default=str)),
+                    (worker_id, role, json.dumps(sanitize_json(metadata or {}), default=str, allow_nan=False)),
                 )
                 db.commit()
             finally:

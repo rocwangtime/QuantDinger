@@ -41,7 +41,7 @@ import threading
 import time
 from datetime import datetime, timezone
 
-from .ws_balance import balance_key, ratio
+from .ws_balance import balance_key, metric_ratio
 from .ws_balance import RateBalancer
 from .ws_payloads import ParsedFrames
 
@@ -394,7 +394,7 @@ def merge_feed_status(parts):
         if finite:
             mean = sum(finite) / len(finite)
             merged['ws_load_imbalance'] = (max(finite) - min(finite)) / mean if mean else 0
-            merged['ws_load_ratio'] = ratio(finite)
+            merged['ws_load_ratio'] = metric_ratio(finite)
             merged['ws_peak_lower_bound'] = max(mean, max(finite))
     return merged
 

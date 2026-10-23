@@ -16,6 +16,8 @@ from queue import Queue, Full, Empty
 from threading import RLock, Event
 from datetime import datetime, timezone
 
+from app.utils.json_safe import sanitize_json
+
 from .observer_db import connection as get_db_connection
 from .account_history import max_pair_skew_ms, pair_rejection
 from .client import PublicClient
@@ -132,15 +134,18 @@ def ws_apply_event(event, books):
 
 
 def _persist_status():
-    _DAILY_STATS.persist()
-    status = json.dumps(snapshot())
-    with get_db_connection() as db:
-        cur = db.cursor()
-        try:
-            cur.execute("INSERT INTO qd_polymarket_observer_status (singleton,status,updated_at) VALUES (true,%s::jsonb,NOW()) ON CONFLICT (singleton) DO UPDATE SET status=EXCLUDED.status,updated_at=NOW()", (status,))
-            db.commit()
-        finally:
-            cur.close()
+    try:
+        _DAILY_STATS.persist()
+        status = json.dumps(sanitize_json(snapshot()), allow_nan=False)
+        with get_db_connection() as db:
+            cur = db.cursor()
+            try:
+                cur.execute("INSERT INTO qd_polymarket_observer_status (singleton,status,updated_at) VALUES (true,%s::jsonb,NOW()) ON CONFLICT (singleton) DO UPDATE SET status=EXCLUDED.status,updated_at=NOW()", (status,))
+                db.commit()
+            finally:
+                cur.close()
+    except Exception as exc:
+        _LOG.warning("Polymarket status persistence failed (%s)", type(exc).__name__)
 
 
 def get_status():

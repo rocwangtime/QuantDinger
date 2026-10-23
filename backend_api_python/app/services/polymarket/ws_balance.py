@@ -49,6 +49,12 @@ def ratio(loads):
     return max(loads) / min(loads) if min(loads) > 0 else math.inf
 
 
+def metric_ratio(loads):
+    """Expose undefined ratios as null; keep ratio() for planning decisions."""
+    value = ratio(loads)
+    return value if math.isfinite(value) else None
+
+
 class RateBalancer:
     """Ingress frame rates per balance group and bounded whole-group moves.
 
@@ -378,7 +384,7 @@ class RateBalancer:
             loads = self.loads()
             live = set(self.groups.values())
             return dict(ws_shard_loads=loads, ws_load_imbalance=self.imbalance(loads),
-                        ws_load_ratio=ratio(loads) if math.isfinite(ratio(loads)) else None,
+                        ws_load_ratio=metric_ratio(loads),
                         ws_rebalance_hysteresis=self.threshold, ws_rebalance_ratio=self.trigger,
                         ws_rebalance_target_ratio=self.target,
                         ws_peak_lower_bound=max([sum(loads) / self.count,
