@@ -40,12 +40,14 @@ DATA_FAULTS = ('book_missing', 'book_stale', 'updown_skew', 'crossed', 'spot_sta
 FEE_SOURCE = 'https://docs.polymarket.com/trading/fees'
 REBATE_SOURCE = 'https://docs.polymarket.com/programs/maker-rebates'
 TEXT = ('universe_assets', 'universe_intervals', 'cold_start', 'review_utc', 'preopen_windows', 'phases',
-        'event_times', 'complementary_prints')
+        'event_times', 'complementary_prints', 'stale_metric')
 DEFAULTS = dict(
     # selection (shadow layer covers the whole universe; active layer <= max_active cells)
     universe_assets='BTC,ETH,SOL,XRP', universe_intervals='5m,15m,1h,4h,1d',
     # cold start only on cells the observer records by default (BTC/ETH 5m/15m); see pm_maker_v3_tuning_20261016.md
-    cold_start='BTC:15m,ETH:15m,BTC:5m:preopen,ETH:5m:preopen',
+    cold_start='BTC:15m,ETH:15m,BTC:5m,ETH:5m',
+    reentry_min_active='2', reentry_probation_days='2', min_quotable_share_5m='.075',
+    stale_metric='book_stale', max_book_stale_share='.02',
     review_utc='00:05', lookback_days='7', halflife_days='3', min_markets='150', min_filled_shares='1000',
     as_edge_ratio_max='.7', max_active='6', max_active_per_coin='3', probation_days='3', probation_size_mult='.5',
     exit_cooloff_days='3', exit_min_markets='50', min_quotable_share='.20', min_taker_volume='2000',
@@ -128,6 +130,9 @@ def params(c):
         raise ValueError('review_utc')
     p.review_minutes = hours * 60 + minutes
     p.events = [timestamp(x.strip()).timestamp() for x in c['event_times'].split(',') if x.strip()]
+    p.stale_metric = c['stale_metric']
+    if p.stale_metric not in ('stale', 'book_stale'):
+        raise ValueError('stale_metric')
     p.complementary = c['complementary_prints']
     if p.complementary not in ('verify', 'count'):
         raise ValueError('complementary_prints')
@@ -144,11 +149,14 @@ def params(c):
                 'momentum_sigma', 'time_mult_cap', 'flow_mult', 'max_active', 'max_active_per_coin', 'lcb_alpha')
     fractions = ('vol_mix', 'probation_size_mult', 'fill_size_mult', 'soft_size_mult', 'fv_adverse_frac',
                  'depth_pull_frac', 'resize_ratio', 'min_quotable_share', 'min_tight_share', 'max_stale_share',
-                 'rebate_fee_rate', 'rebate_pool_fraction', 'fair_min', 'fair_max', 'fair_tol')
+                 'max_book_stale_share', 'min_quotable_share_5m', 'rebate_fee_rate', 'rebate_pool_fraction',
+                 'fair_min', 'fair_max', 'fair_tol')
     integers = ('bootstrap_iters', 'max_active', 'max_active_per_coin', 'min_markets', 'exit_min_markets',
-                'lookback_days', 'probation_days', 'exit_cooloff_days', 'sweep_levels')
+                'lookback_days', 'probation_days', 'exit_cooloff_days', 'sweep_levels',
+                'reentry_min_active', 'reentry_probation_days')
     if (any(getattr(p, k) <= 0 for k in positive) or any(getattr(p, k) > 1 for k in fractions)
             or any(getattr(p, k) != int(getattr(p, k)) for k in integers) or p.bootstrap_iters < 100
+            or p.reentry_probation_days < 1
             or not p.lcb_alpha < 1 or not p.fair_min < p.fair_max or not p.round_tol_ticks < 1
             or p.time_mult_cap < 1 or max(p.official_wait_binance_s, p.official_wait_chainlink_s) > p.settle_timeout_s):
         raise ValueError('bounds')
@@ -238,7 +246,8 @@ def new_row(market, spec, now, **values):
                a_start=None, cursor=[now, now], print_ids=[[], []], caught_up=[True, True], ring=[[], []],
                recent=[[], []], txs=[], persist=[None, None], cooldown=[0, 0], fill_until=[0, 0],
                flow_until=[0, 0], actions=[], flat=None, settled=False, pnl='0', filled='0', calib=[],
-               summary=dict(polls=0, stale=0, tight=0, open=0, quotable=0, taker_volume='0'),
+               summary=dict(polls=0, reason_polls=0, stale=0, **{reason: 0 for reason in DATA_FAULTS},
+                            tight=0, open=0, quotable=0, taker_volume='0'),
                decision=None, fair=None, phase=None)
     row.update(values)
     return row
@@ -334,8 +343,16 @@ def select(summaries, previous, p, now, recorded_cells=None):
                          stale_share=sum(s['stale'] for s, _ in rows) / polls if polls else 1.0,
                          quotable_share=sum(s['quotable'] for s, _ in rows) / opened if opened else 0.0,
                          recent_markets=len(recent), recent_mean=sum(recent) / len(recent) if recent else None)
+            # Legacy summaries have no reason counters. Never reinterpret missing as zero.
+            for reason in DATA_FAULTS:
+                counts = (s.get(reason, s['stale']) if s.get('reason_polls', s['polls']) == s['polls']
+                          else s['stale'] for s, _ in rows)
+                score[reason + '_share'] = sum(counts) / polls if polls else 1.0
+            score['stale_metric'] = p.stale_metric
+            score['min_quotable_share'] = p.min_quotable_share_5m if interval == '5m' else p.min_quotable_share
+            stale_limit = p.max_book_stale_share if p.stale_metric == 'book_stale' else p.max_stale_share
             score['filters'] = (score['median_taker_volume'] >= p.min_taker_volume and score['tight_share'] >= p.min_tight_share
-                                and score['stale_share'] < p.max_stale_share and score['quotable_share'] >= p.min_quotable_share)
+                                and score[p.stale_metric + '_share'] < stale_limit and score['quotable_share'] >= score['min_quotable_share'])
             score['admissible'] = bool(score['filters'] and lcb is not None and lcb > 0 and len(traded) >= p.min_markets
                                        and shares >= number(p.min_filled_shares) and score['as_edge_ratio'] is not None
                                        and score['as_edge_ratio'] <= p.as_edge_ratio_max)
@@ -357,6 +374,8 @@ def select(summaries, previous, p, now, recorded_cells=None):
         if entry.get('source') == 'admitted':
             leave = (all(x is not None and x < 0 for x in history[cell]) and len(history[cell]) == 2
                      or s['recent_markets'] >= p.exit_min_markets and s['recent_mean'] < 0)
+        elif entry.get('source') == 'reentry':
+            leave = key >= entry['probation_until'] and not s['admissible']
         else:  # Cold-start prior: once the sample is complete, evidence decides.
             leave = s['markets'] >= p.min_markets and not s['admissible']
         if leave or cell in breakers:
@@ -368,14 +387,30 @@ def select(summaries, previous, p, now, recorded_cells=None):
     def fits(cell):
         coin = cell.split(':')[0]
         return len(active) < p.max_active and sum(c.split(':')[0] == coin for c in active) < p.max_active_per_coin
-    ranked = sorted((c for c, s in scores.items() if s['admissible'] and c not in active and c not in cooloff),
+    ranked = sorted((c for c, s in scores.items() if s['admissible'] and c not in active and c not in cooloff and c not in breakers),
                     key=lambda c: (-(scores[c]['mean'] / scores[c]['std'] if scores[c]['std'] else math.inf), c))
     for cell in ranked:
         if fits(cell):
             active[cell] = dict(source='admitted', since=key, probation_until=until(p.probation_days), mode='full')
     for cell, mode in p.cold_start.items():
-        if cell in scores and cell not in active and cell not in cooloff and scores[cell]['markets'] < p.min_markets and fits(cell):
+        if cell in scores and cell not in active and cell not in cooloff and cell not in breakers and scores[cell]['markets'] < p.min_markets and fits(cell):
             active[cell] = dict(source='cold_start', since=key, mode=mode)
+    # Recovery is explicit, bounded and only within the actual recording scope.
+    if recorded_cells is not None and len(active) < p.reentry_min_active:
+        candidates = sorted(c for c, score in scores.items() if c in recorded_cells and c not in active
+                            and c not in cooloff and c not in breakers and score['markets'] >= p.min_markets)
+        for cell in candidates:
+            if len(active) >= p.reentry_min_active:
+                break
+            if fits(cell):
+                active[cell] = dict(source='reentry', since=key, mode='full',
+                                    probation_until=until(p.reentry_probation_days), reason='active_below_minimum')
+    # Explicit legacy preopen overrides cannot strand an observer with lookahead=0.
+    from .updown import setting
+    if setting('UPDOWN_LOOKAHEAD_SECONDS', 1800, 0, 86400) == 0:
+        for cell, entry in list(active.items()):
+            if entry['mode'] == 'preopen':
+                active[cell] = dict(entry, mode='full', reason='preopen_without_lookahead')
     return dict(reviewed=key, at=now, active=active, cooloff=cooloff, lcb_history=history, scores=scores, breakers={},
                 unavailable_cells=unavailable)
 
@@ -535,8 +570,9 @@ class Maker:
             self.state['selection'] = select([], {}, p, now, recorded_cells())
             self.state['selection']['reviewed'] = None  # Priors only; the dated review still runs.
         unreal, by_cell = self.unrealized()
-        daily = number(day['net_pnl']) + unreal
-        week = sum((number(d['net_pnl']) for k, d in self.state['days'].items()
+        baseline = self.state.get('risk_baseline', {})
+        daily = number(day['net_pnl']) - number(baseline.get(today, {}).get('net_pnl', '0')) + unreal
+        week = sum((number(d['net_pnl']) - number(baseline.get(k, {}).get('net_pnl', '0')) for k, d in self.state['days'].items()
                     if k >= day_key(now - 6 * 86400000) and d.get('strategy') == TAG), ZERO) + unreal
         if week <= -number(self.config['weekly_stop']) and not self.state['halt']:
             self.state['halt'] = dict(reason='weekly_stop', at=now, rolling_pnl=str(week))
@@ -549,15 +585,19 @@ class Maker:
         stopped = {}
         for cell, cs in day['cells'].items():
             reason = cs.get('stopped')
-            if not reason and number(cs['pnl']) + by_cell.get(cell, ZERO) <= -number(self.config['cell_daily_stop']):
+            prior = baseline.get(today, {}).get('cells', {}).get(cell, {})
+            cell_loss = number(cs['pnl']) - number(prior.get('pnl', '0')) + by_cell.get(cell, ZERO)
+            if not reason and cell_loss <= -number(self.config['cell_daily_stop']):
                 reason = 'cell_daily_stop'
-            if not reason and number(cs['as60_shares']) >= p.base_size * 2:
+            new_shares = number(cs['as60_shares']) - number(prior.get('as60_shares', '0'))
+            if not reason and new_shares >= p.base_size * 2:
                 history = [number(d['cells'][cell]['as60']) / number(d['cells'][cell]['as60_shares'])
                            for k, d in self.state['days'].items() if day_key(now - 7 * 86400000) <= k < today
                            and number(d.get('cells', {}).get(cell, {}).get('as60_shares', '0')) > 0]
                 if len(history) >= 3:
                     mean, std = statistics.mean(history), statistics.pstdev(history)
-                    if std and number(cs['as60']) / number(cs['as60_shares']) < mean - Decimal(repr(p.as_alert_sigma)) * std:
+                    new_as60 = number(cs['as60']) - number(prior.get('as60', '0'))
+                    if std and new_as60 / new_shares < mean - Decimal(repr(p.as_alert_sigma)) * std:
                         reason = 'as60_anomaly'
             if reason:
                 if not cs.get('stopped'):
@@ -1077,8 +1117,11 @@ class Maker:
         s = row['summary']
         if ctx['time_phase'] in (mm.WAIT, mm.FLAT):
             return
+        s['reason_polls'] = s.get('reason_polls', 0) + 1
         s['polls'] += 1
         s['stale'] += int(ctx['reason'] in DATA_FAULTS)
+        for reason in DATA_FAULTS:
+            s[reason] = s.get(reason, 0) + int(ctx['reason'] == reason)
         s['tight'] += int(bool(ctx.get('tight')))
         s['open'] += int(bool(ctx.get('ok')))
         s['quotable'] += int(bool(ctx.get('quotable')))
