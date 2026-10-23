@@ -96,6 +96,42 @@ class Account:
     def equity(self):
         return sum((number(self.state[k]) for k in ('free', 'locked', 'positions')), ZERO)
 
+    def reset_capital(self, now, *, reason='roc_approved_2026-10-23', clear_selection_blocks=True):
+        """Flat PAPER accounts only. Preserve evidence and return the audit detail."""
+        maker = self.state.get('maker', {})
+        if (self.state['holdings'] or self.state['pending']
+                or any(abs(number(self.state[k])) > number('.00000001') for k in ('locked', 'positions'))
+                or any(any(number(q) != 0 for q in row.get('qty', []))
+                       or any(o.get('kind') == 'live' for o in row.get('orders', []))
+                       for row in maker.get('markets', {}).values() if not row.get('settled'))):
+            raise ValueError('paper_capital_reset_not_flat: holdings/pending/balances/maker exposure')
+        snapshot = lambda: dict(**{k: self.state[k] for k in ('free', 'locked', 'positions')}, equity=str(self.equity()))
+        detail = dict(before=snapshot(), reason=reason, actor='ops_command',
+                      clear_selection_blocks=clear_selection_blocks, daily_before=copy.deepcopy(self.daily(now)))
+        self.state.update(free=str(self.config['initial_capital']), locked='0', positions='0')
+        day = self.daily(now)
+        day.update(start_equity=str(self.equity()), peak_equity=str(self.equity()), max_drawdown='0', loss_stop=False)
+        if maker:
+            detail['maker_blocks_before'] = copy.deepcopy(dict(halt=maker.get('halt'), selection=maker.get('selection', {})))
+            # Keep shadow/settlement statistics; risk starts a new accounting epoch.
+            maker['risk_baseline'] = {k: dict(net_pnl=d.get('net_pnl', '0'),
+                                            cells=copy.deepcopy(d.get('cells', {})))
+                                      for k, d in maker.get('days', {}).items()}
+            if clear_selection_blocks:
+                maker['halt'] = None
+                # Truthy selection avoids rebuilding sample-free cold priors before review.
+                maker['selection'] = dict(reviewed=None, active={}, cooloff={}, breakers={})
+                for key, d in maker.get('days', {}).items():
+                    if key != day_key(now):
+                        continue
+                    d.update(soft_stop=False, hard_stop=False)
+                    for cell in d.get('cells', {}).values():
+                        cell.pop('stopped', None)
+        detail['after'] = snapshot()
+        self.event('capital_reset', now)
+        self.state['events'][-1]['detail'] = copy.deepcopy(detail)
+        return detail
+
     def daily(self, now):
         key = day_key(now)
         if key not in self.state['days']:
@@ -308,6 +344,41 @@ class Store:
                 cur.execute('SELECT state FROM qd_polymarket_paper_accounts WHERE account_id=%s', (self.account_id,))
                 row = cur.fetchone()
                 return Account(config, row['state'] if row else None)
+            finally:
+                cur.close()
+
+    def reset_capital(self, config, now, *, reason='roc_approved_2026-10-23'):
+        """Dedicated transaction: no retention deletes, no trading or maker execution."""
+        if 'contaminated' in self.account_id.lower():
+            raise ValueError('paper_capital_reset_contaminated_account_forbidden')
+        with get_db_connection() as db:
+            cur = db.cursor()
+            try:
+                # Same key as Runtime.run; a writing worker makes this fail closed.
+                cur.execute('SELECT pg_try_advisory_xact_lock(%s) AS acquired', (202610115001,))
+                if not cur.fetchone()['acquired']:
+                    raise ValueError('paper_capital_reset_worker_active: stop polymarket-observer first')
+                cur.execute('SELECT state FROM qd_polymarket_paper_accounts WHERE account_id=%s FOR UPDATE', (self.account_id,))
+                row = cur.fetchone()
+                if row is None:
+                    raise ValueError('paper_capital_reset_account_not_found')
+                state = copy.deepcopy(row['state'])
+                days = copy.deepcopy(state['days'])
+                account = Account(config, state)
+                account.state['days'] = days  # Reset must not prune historical daily evidence.
+                detail = account.reset_capital(now, reason=reason)
+                cur.execute('UPDATE qd_polymarket_paper_accounts SET state=%s::jsonb,updated_at=NOW() WHERE account_id=%s',
+                            (json.dumps(public(account.state)), self.account_id))
+                cur.execute('INSERT INTO qd_polymarket_paper_ledger(account_id,observed_at,event,free,locked,positions,equity,detail) VALUES (%s,%s,%s,%s,%s,%s,%s,%s::jsonb)',
+                            (self.account_id, utc(now), 'capital_reset', account.state['free'], '0', '0',
+                             str(account.equity()), json.dumps(public(detail))))
+                cur.execute('INSERT INTO qd_polymarket_paper_daily(account_id,day,stats) VALUES (%s,%s,%s::jsonb) ON CONFLICT(account_id,day) DO UPDATE SET stats=EXCLUDED.stats',
+                            (self.account_id, day_key(now), json.dumps(public(account.daily(now)))))
+                db.commit()
+                return detail
+            except Exception:
+                db.rollback()
+                raise
             finally:
                 cur.close()
 

@@ -53,7 +53,7 @@ def test_defaults_follow_the_v3_parameter_table():
     # Replay-calibrated on recorded BTC/ETH 5m/15m books (deploy/pm_maker_v3_tuning_20261016.md).
     assert (c['k_tox'], c['gap_max'], c['fair_tol'], c['open_max_behind_ticks']) == ('1', '0.06', '0.03', '3')
     assert (c['depth_pull_frac'], c['depth_pull_cooldown_ms'], c['book_quiet_ms'], c['feed_stale_ms']) == ('1', '500', '60000', '2000')
-    assert c['cold_start'] == 'BTC:15m,ETH:15m,BTC:5m:preopen,ETH:5m:preopen'
+    assert c['cold_start'] == 'BTC:15m,ETH:15m,BTC:5m,ETH:5m'
     assert (c['place_latency_ms'], c['cancel_latency_ms'], c['complementary_prints']) == ('250', '250', 'verify')
 
 
@@ -150,16 +150,16 @@ def test_event_blackout_blocks_new_openings():
 def test_cold_start_priors_respect_coin_and_total_limits():
     s = select([], {}, P, NOW)
     assert s['active'] == {c: dict(source='cold_start', since=day_key(NOW), mode=mode) for c, mode in P.cold_start.items()}
-    assert s['active']['BTC:5m']['mode'] == 'preopen'
+    assert s['active']['BTC:5m']['mode'] == 'full'
     crowded = select([], {}, params(dict(DEFAULTS, cold_start='BTC:5m,BTC:15m,BTC:1h,BTC:4h,ETH:1h')), NOW)
     assert sorted(crowded['active']) == ['BTC:15m', 'BTC:1h', 'BTC:5m', 'ETH:1h']
     fresh = Maker(Account(), {})
     opened = market('47', start=NOW - 10000)
     warm(fresh, opened, NOW - 75000, NOW)
-    row = step(fresh)  # BTC:5m is pre-open only under the priors, at probation size.
+    row = step(fresh)  # Full mode, at probation size.
     assert [o['size'] for o in live(row)] == ['5.00', '5.00']
     row = step(fresh, opened)
-    assert row['phase'] == 'OPEN' and row['decision']['gates'] == ['preopen_only'] and not live(row)
+    assert row['phase'] == 'OPEN' and 'preopen_only' not in row['decision']['gates']
 
 
 def summaries(cell, days, per_day, pnl, edge=.05, as60=-.01, volume=5000, quotable=60, stale=0, start=0):

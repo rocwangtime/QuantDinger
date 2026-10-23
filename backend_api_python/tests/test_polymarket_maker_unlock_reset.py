@@ -93,3 +93,65 @@ def test_contaminated_account_rejected():
     from app.commands.polymarket_paper_capital_reset import validate_account_id
     with pytest.raises(ValueError, match='contaminated'):
         validate_account_id('global-contaminated-20261014')
+
+
+def test_reentry_quotes_full_mode_at_probation_size(monkeypatch):
+    from tests.test_polymarket_maker import live, market, warm
+    monkeypatch.setattr('app.services.polymarket.maker.recorded_cells', lambda: SCOPE)
+    _, maker = setup()
+    maker.state['selection'] = {}
+    maker.review(evidence(), NOW)
+    opened = market(start=NOW - 10000)
+    warm(maker, opened, NOW - 75000, NOW)
+    row = step(maker, opened)
+    assert row['phase'] == 'OPEN'
+    assert [o['size'] for o in live(row)] == ['5.00', '5.00']
+    event = next(e for e in maker.account.maker_changed if e['event'] == 'selection')
+    assert event['detail']['active']['BTC:5m']['source'] == 'reentry'
+
+
+def test_reset_does_not_rehalt_on_historical_daily_or_weekly_losses():
+    _, maker = setup()
+    day = maker.stats(NOW)
+    day.update(net_pnl='-300', hard_stop=True, soft_stop=True)
+    maker.state['halt'] = {'reason': 'weekly_stop'}
+    maker.account.reset_capital(NOW)
+    maker.begin(NOW)
+    assert maker.state['halt'] is None
+    assert not maker.risk['hard'] and not maker.risk['soft']
+    assert maker.risk['week'] == 0 and day['net_pnl'] == '-300'
+
+
+def test_reset_then_worker_begin_review_does_not_cooloff_all_mature_cells(monkeypatch):
+    monkeypatch.setattr('app.services.polymarket.maker.recorded_cells', lambda: SCOPE)
+    _, maker = setup()
+    maker.account.reset_capital(NOW)
+    maker.begin(NOW)
+    maker.review(evidence(), NOW)
+    assert maker.state['selection']['active']
+    assert not maker.state['selection']['cooloff']
+    assert all(e['source'] == 'reentry' for e in maker.state['selection']['active'].values())
+
+
+def test_reentry_caps_breakers_and_partial_counter_coverage():
+    rows = evidence()
+    p = params(dict(DEFAULTS, max_active='1', max_active_per_coin='1', reentry_min_active='4'))
+    result = select(rows, {'breakers': {'BTC:15m': 'stop'}}, p, NOW, SCOPE)
+    assert len(result['active']) == 1 and 'BTC:15m' not in result['active']
+    for row in rows:
+        row.update(book_stale=0, reason_polls=1)
+    score = select(rows, {}, p, NOW, SCOPE)['scores']['BTC:5m']
+    assert score['book_stale_share'] == .2  # Old in-flight rows have partial coverage.
+
+
+def test_5m_quotable_threshold_preserves_profitability_and_other_intervals():
+    rows = sum((summaries(c, 6, 30, lambda d, k: -.5, stale=20, quotable=7.9) for c in SCOPE), [])
+    for row in rows:
+        row.update({reason: 0 for reason in DATA_FAULTS})
+        row['book_missing'] = 20
+    result = select(rows, {}, params(DEFAULTS), NOW, SCOPE)
+    assert result['scores']['BTC:5m']['filters']
+    assert not result['scores']['BTC:5m']['admissible']  # Negative LCB is still fatal to admission.
+    assert not result['scores']['BTC:15m']['filters']  # 15m keeps the .20 minimum.
+    old_metric = select(rows, {}, params(dict(DEFAULTS, stale_metric='stale')), NOW, SCOPE)
+    assert not old_metric['scores']['BTC:5m']['filters']
