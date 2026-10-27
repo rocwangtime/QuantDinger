@@ -213,7 +213,7 @@ class Probe(Maker):
 
 
 def replay(data, config=None, cells=('BTC:5m', 'ETH:5m', 'BTC:15m', 'ETH:15m'), step_ms=250, start=None, end=None,
-           mode='full', queue='pessimistic', source='admitted'):
+           mode='full', queue='pessimistic', source='admitted', before_settle=None):
     """Run one Maker over the recorded period; returns aggregate metrics per cell and overall."""
     account = Account(dict(initial_capital='5000', trade_cap='1000'))
     m = Probe(account, config or {}, queue)
@@ -284,6 +284,8 @@ def replay(data, config=None, cells=('BTC:5m', 'ETH:5m', 'BTC:15m', 'ETH:15m'), 
                                 quoting['missing:' + str(why)] += 1
                 if now >= x['w']['end'] + 5000:
                     outcome = x['w']['outcome'] or proxy(data['spot'].get(x['w']['asset'], []), x['w'])
+                    if before_settle is not None and row is not None and not row['settled']:
+                        before_settle(row, outcome)
                     m.settle(identity, outcome, now)
             if identity not in m.state['markets'] and now >= x['w']['end'] + 60000 or (row is not None and row['settled']):
                 del loaded[identity]

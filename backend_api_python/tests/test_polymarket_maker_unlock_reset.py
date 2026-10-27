@@ -19,20 +19,24 @@ def evidence():
 def test_mature_failed_filters_reenter_full_only_when_enabled():
     rows = evidence()
     p = params(dict(DEFAULTS, reentry_min_active='0'))
-    assert select(rows, {}, p, NOW, SCOPE)['active'] == {}  # Previous behavior.
-    result = select(rows, {}, params(DEFAULTS), NOW, SCOPE)
+    assert select(rows, {}, p, NOW, SCOPE)['active'] == {}  # Count disabled.
+    quiet = select(rows, {}, params(DEFAULTS), NOW, SCOPE)
+    assert quiet['active'] == {}  # Negative LCB is not forced back on.
+    assert set(quiet['reentry_skipped']) == SCOPE
+    legacy = params(dict(DEFAULTS, reentry_negative_lcb='1'))
+    result = select(rows, {}, legacy, NOW, SCOPE)
     assert result['active']
     for cell, entry in result['active'].items():
         assert result['scores'][cell]['markets'] >= 150
         assert not result['scores'][cell]['filters']
         assert entry['source'] == 'reentry' and entry['mode'] == 'full'
         assert entry['probation_until'] > day_key(NOW)
-    blocked = select(rows, {'cooloff': {c: '2099-01-01' for c in SCOPE}}, params(DEFAULTS), NOW, SCOPE)
+    blocked = select(rows, {'cooloff': {c: '2099-01-01' for c in SCOPE}}, legacy, NOW, SCOPE)
     assert not blocked['active']
     assert not select(rows, {}, params(DEFAULTS), NOW, set())['active']
-    tomorrow = select(rows, result, params(DEFAULTS), NOW + 86400000, SCOPE)
+    tomorrow = select(rows, result, legacy, NOW + 86400000, SCOPE)
     assert tomorrow['active'] == result['active']  # Do not eject during probation.
-    expired = select(rows, result, params(DEFAULTS), NOW + 2 * 86400000, SCOPE)
+    expired = select(rows, result, legacy, NOW + 2 * 86400000, SCOPE)
     assert all(c not in expired['active'] and c in expired['cooloff'] for c in result['active'])
 
 
@@ -98,7 +102,7 @@ def test_contaminated_account_rejected():
 def test_reentry_quotes_full_mode_at_probation_size(monkeypatch):
     from tests.test_polymarket_maker import live, market, warm
     monkeypatch.setattr('app.services.polymarket.maker.recorded_cells', lambda: SCOPE)
-    _, maker = setup()
+    _, maker = setup({'reentry_negative_lcb': '1'})
     maker.state['selection'] = {}
     maker.review(evidence(), NOW)
     opened = market(start=NOW - 10000)
@@ -128,14 +132,14 @@ def test_reset_then_worker_begin_review_does_not_cooloff_all_mature_cells(monkey
     maker.account.reset_capital(NOW)
     maker.begin(NOW)
     maker.review(evidence(), NOW)
-    assert maker.state['selection']['active']
+    assert not maker.state['selection']['active']
     assert not maker.state['selection']['cooloff']
-    assert all(e['source'] == 'reentry' for e in maker.state['selection']['active'].values())
+    assert set(maker.state['selection']['reentry_skipped']) == SCOPE
 
 
 def test_reentry_caps_breakers_and_partial_counter_coverage():
     rows = evidence()
-    p = params(dict(DEFAULTS, max_active='1', max_active_per_coin='1', reentry_min_active='4'))
+    p = params(dict(DEFAULTS, max_active='1', max_active_per_coin='1', reentry_min_active='4', reentry_negative_lcb='1'))
     result = select(rows, {'breakers': {'BTC:15m': 'stop'}}, p, NOW, SCOPE)
     assert len(result['active']) == 1 and 'BTC:15m' not in result['active']
     for row in rows:
