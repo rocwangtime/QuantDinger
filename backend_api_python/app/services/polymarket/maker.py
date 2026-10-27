@@ -4,6 +4,10 @@ Edge comes from where fills sit relative to a conservative fair value, minus
 adverse selection; pairing Up+Down only removes variance and frees capital.
 Every virtual order obeys place/cancel latency and pessimistic queueing, and
 rebates are scenarios only: they never enter cash or PnL.
+
+touch_stable is a shadow measurement cohort (quiet touch, non-sweep, rested).
+It does not change live quotes unless touch_stable_live is explicitly enabled,
+and admission keeps using the eligible bucket unless admission_shadow says otherwise.
 """
 import copy
 import hashlib
@@ -40,13 +44,14 @@ DATA_FAULTS = ('book_missing', 'book_stale', 'updown_skew', 'crossed', 'spot_sta
 FEE_SOURCE = 'https://docs.polymarket.com/trading/fees'
 REBATE_SOURCE = 'https://docs.polymarket.com/programs/maker-rebates'
 TEXT = ('universe_assets', 'universe_intervals', 'cold_start', 'review_utc', 'preopen_windows', 'phases',
-        'event_times', 'complementary_prints', 'stale_metric')
+        'event_times', 'complementary_prints', 'stale_metric', 'admission_shadow')
 DEFAULTS = dict(
     # selection (shadow layer covers the whole universe; active layer <= max_active cells)
     universe_assets='BTC,ETH,SOL,XRP', universe_intervals='5m,15m,1h,4h,1d',
     # cold start only on cells the observer records by default (BTC/ETH 5m/15m); see pm_maker_v3_tuning_20261016.md
     cold_start='BTC:15m,ETH:15m,BTC:5m,ETH:5m',
-    reentry_min_active='2', reentry_probation_days='2', min_quotable_share_5m='.075',
+    reentry_min_active='2', reentry_probation_days='2', reentry_negative_lcb='0',
+    admission_shadow='eligible', min_quotable_share_5m='.075',
     stale_metric='book_stale', max_book_stale_share='.02',
     review_utc='00:05', lookback_days='7', halflife_days='3', min_markets='150', min_filled_shares='1000',
     as_edge_ratio_max='.7', max_active='6', max_active_per_coin='3', probation_days='3', probation_size_mult='.5',
@@ -78,6 +83,8 @@ DEFAULTS = dict(
     lock_market='100', lock_global='1000', daily_soft_stop='50', daily_hard_stop='100',
     cell_daily_stop='25', weekly_stop='200', as_alert_sigma='2',
     # simulator
+    # Shadow cohort only, unless touch_stable_live=1. See deploy/pm_maker_optimization_20261027.md.
+    touch_stable_ms='2000', touch_stable_rest_ms='1000', touch_stable_live='0',
     place_latency_ms='250', cancel_latency_ms='250', print_lag_ms='2000', complementary_prints='verify',
     settle_timeout_s='3600',
     # past the final print, wait this long for the official result before the Binance proxy
@@ -136,6 +143,9 @@ def params(c):
     p.complementary = c['complementary_prints']
     if p.complementary not in ('verify', 'count'):
         raise ValueError('complementary_prints')
+    p.admission_shadow = c['admission_shadow']
+    if p.admission_shadow not in ('eligible', 'touch_stable'):
+        raise ValueError('admission_shadow')
     for key in ('max_improve_ticks', 'hedge_max_behind_ticks', 'open_max_behind_ticks', 'base_size', 'max_order', 'n_cap', 'n_cap_coin_dir',
                 'n_cap_global_dir', 'worst_loss_market', 'worst_loss_global', 'lock_market', 'lock_global'):
         setattr(p, key + '_d', number(c[key]))
@@ -145,7 +155,7 @@ def params(c):
                 'vol_halflife_long_s', 'vol_scale', 'sigma_short_window_s', 'flow_window_s', 'sweep_window_s',
                 'lookback_days', 'halflife_days', 'probation_size_mult', 'fill_size_mult', 'soft_size_mult',
                 'max_actions_per_market_s', 'book_stale_ms', 'book_stale_ms_short', 'spot_stale_ms', 'jump_sigma',
-                'book_quiet_ms', 'feed_stale_ms',
+                'book_quiet_ms', 'feed_stale_ms', 'touch_stable_ms', 'touch_stable_rest_ms',
                 'momentum_sigma', 'time_mult_cap', 'flow_mult', 'max_active', 'max_active_per_coin', 'lcb_alpha')
     fractions = ('vol_mix', 'probation_size_mult', 'fill_size_mult', 'soft_size_mult', 'fv_adverse_frac',
                  'depth_pull_frac', 'resize_ratio', 'min_quotable_share', 'min_tight_share', 'max_stale_share',
@@ -153,10 +163,11 @@ def params(c):
                  'fair_min', 'fair_max', 'fair_tol')
     integers = ('bootstrap_iters', 'max_active', 'max_active_per_coin', 'min_markets', 'exit_min_markets',
                 'lookback_days', 'probation_days', 'exit_cooloff_days', 'sweep_levels',
-                'reentry_min_active', 'reentry_probation_days')
+                'reentry_min_active', 'reentry_probation_days', 'reentry_negative_lcb', 'touch_stable_live')
     if (any(getattr(p, k) <= 0 for k in positive) or any(getattr(p, k) > 1 for k in fractions)
             or any(getattr(p, k) != int(getattr(p, k)) for k in integers) or p.bootstrap_iters < 100
             or p.reentry_probation_days < 1
+            or int(p.reentry_negative_lcb) not in (0, 1) or int(p.touch_stable_live) not in (0, 1)
             or not p.lcb_alpha < 1 or not p.fair_min < p.fair_max or not p.round_tol_ticks < 1
             or p.time_mult_cap < 1 or max(p.official_wait_binance_s, p.official_wait_chainlink_s) > p.settle_timeout_s):
         raise ValueError('bounds')
@@ -185,6 +196,16 @@ def validate(config):
 
 def configuration():
     return validate({k: os.getenv('POLYMARKET_PAPER_MAKER_' + k.upper(), v) for k, v in DEFAULTS.items()})
+
+
+def qualifies_touch_stable(eligible, level, sweep, rest_ms, touch_age_ms, rest_min, touch_min):
+    """Level-0 eligible queue fill on a touch that was already quiet, and that rested.
+
+    Unknown sweep/rest/age does not qualify. This tags a shadow cohort; it is not a
+    live quote gate unless touch_stable_live is on.
+    """
+    return bool(eligible and level == 0 and sweep is False and rest_ms is not None and touch_age_ms is not None
+                and rest_ms >= rest_min and touch_age_ms >= touch_min)
 
 
 def rebate(quantity, price, fee_rate='.07', pool_fraction='.20'):
@@ -323,20 +344,31 @@ def select(summaries, previous, p, now, recorded_cells=None):
                 unavailable.append(cell)
                 continue
             rows = by_cell.get(cell, [])
-            traded = [(s, age) for s, age in rows if number(s['shadow']['eligible']['shares']) > 0]
-            samples = [(s['end'], float(s['shadow']['eligible']['pnl']), .5 ** (age / p.halflife_days)) for s, age in traded]
+            bucket_name = p.admission_shadow
+            traded = []
+            for summary, age in rows:
+                shadow = summary.get('shadow') or {}
+                if bucket_name in shadow:
+                    bucket = shadow[bucket_name]
+                elif bucket_name == 'eligible':
+                    bucket = shadow['eligible']
+                else:
+                    bucket = None
+                if bucket is not None and number(bucket.get('shares', '0')) > 0:
+                    traded.append((summary, age, bucket))
+            samples = [(summary['end'], float(bucket['pnl']), .5 ** (age / p.halflife_days)) for summary, age, bucket in traded]
             values = [(v, w) for _, v, w in samples]
             mean = mm.weighted_mean(values)
             std = math.sqrt(mm.weighted_mean([((v - mean) ** 2, w) for v, w in values])) if values else 0.0
             seed = int(hashlib.sha256((cell + today.isoformat()).encode()).hexdigest()[:8], 16)
             lcb = mm.cluster_bootstrap(samples, int(p.bootstrap_iters), p.lcb_alpha, seed) if samples else None
-            shares = sum((number(s['shadow']['eligible']['shares']) for s, _ in traded), ZERO)
-            edge = sum(float(s['shadow']['eligible']['edge']) for s, _ in traded)
-            as60 = sum(float(s['shadow']['eligible']['as60']) for s, _ in traded)
+            shares = sum((number(bucket['shares']) for _, _, bucket in traded), ZERO)
+            edge = sum(float(bucket['edge']) for _, _, bucket in traded)
+            as60 = sum(float(bucket['as60']) for _, _, bucket in traded)
             polls = sum(s['polls'] for s, _ in rows)
             opened = sum(s['open'] for s, _ in rows)
-            recent = [float(s['shadow']['eligible']['pnl']) for s, age in traded if age < 3]
-            score = dict(markets=len(traded), shares=str(shares), mean=mean, std=std, lcb=lcb,
+            recent = [float(bucket['pnl']) for _, age, bucket in traded if age < 3]
+            score = dict(markets=len(traded), shares=str(shares), mean=mean, std=std, lcb=lcb, admission_shadow=bucket_name,
                          as_edge_ratio=-as60 / edge if edge > 0 else None,
                          median_taker_volume=statistics.median([float(s['taker_volume']) for s, _ in rows]) if rows else 0.0,
                          tight_share=sum(s['tight'] for s, _ in rows) / polls if polls else 0.0,
@@ -384,6 +416,9 @@ def select(summaries, previous, p, now, recorded_cells=None):
         if entry.get('source') != 'admitted' and s['admissible']:
             entry = dict(source='admitted', since=key, probation_until=until(p.probation_days), mode='full')
         active[cell] = entry
+    # A cell that now clears the scored bucket is no longer kept dark by an older cooloff.
+    for cell in [c for c in list(cooloff) if scores.get(c, {}).get('admissible')]:
+        del cooloff[cell]
     def fits(cell):
         coin = cell.split(':')[0]
         return len(active) < p.max_active and sum(c.split(':')[0] == coin for c in active) < p.max_active_per_coin
@@ -395,16 +430,22 @@ def select(summaries, previous, p, now, recorded_cells=None):
     for cell, mode in p.cold_start.items():
         if cell in scores and cell not in active and cell not in cooloff and cell not in breakers and scores[cell]['markets'] < p.min_markets and fits(cell):
             active[cell] = dict(source='cold_start', since=key, mode=mode)
-    # Recovery is explicit, bounded and only within the actual recording scope.
+    # Legacy reentry ignores a negative shadow LCB and forces paper quotes of a book
+    # that has already failed admission. The default records those cells and leaves
+    # them inactive; REENTRY_NEGATIVE_LCB=1 restores the phase-1 bypass.
+    reentry_skipped = []
     if recorded_cells is not None and len(active) < p.reentry_min_active:
         candidates = sorted(c for c, score in scores.items() if c in recorded_cells and c not in active
                             and c not in cooloff and c not in breakers and score['markets'] >= p.min_markets)
-        for cell in candidates:
-            if len(active) >= p.reentry_min_active:
-                break
-            if fits(cell):
-                active[cell] = dict(source='reentry', since=key, mode='full',
-                                    probation_until=until(p.reentry_probation_days), reason='active_below_minimum')
+        if p.reentry_negative_lcb:
+            for cell in candidates:
+                if len(active) >= p.reentry_min_active:
+                    break
+                if fits(cell):
+                    active[cell] = dict(source='reentry', since=key, mode='full',
+                                        probation_until=until(p.reentry_probation_days), reason='active_below_minimum')
+        else:
+            reentry_skipped = candidates
     # Explicit legacy preopen overrides cannot strand an observer with lookahead=0.
     from .updown import setting
     if setting('UPDOWN_LOOKAHEAD_SECONDS', 1800, 0, 86400) == 0:
@@ -412,7 +453,7 @@ def select(summaries, previous, p, now, recorded_cells=None):
             if entry['mode'] == 'preopen':
                 active[cell] = dict(entry, mode='full', reason='preopen_without_lookahead')
     return dict(reviewed=key, at=now, active=active, cooloff=cooloff, lcb_history=history, scores=scores, breakers={},
-                unavailable_cells=unavailable)
+                unavailable_cells=unavailable, reentry_skipped=reentry_skipped)
 
 
 def recorded_cells():
@@ -823,6 +864,15 @@ class Maker:
         memory['values'].append(spread)
         ctx['spread_spike'] = len(memory['medians']) >= 6 and spread > self.p.spread_spike_mult * statistics.median(memory['medians'])
         ctx['tight'] = spread <= self.p.tight_spread_ticks
+        ctx['touch_age'] = {}
+        touches = self.memory.setdefault('touch', {})
+        for side, (bid, _ask) in enumerate(ctx['best']):
+            stamp = ctx['books'][side]['exchange_at']
+            key = (row['market']['id'], side)
+            prev = touches.get(key)
+            if prev is None or prev[0] != bid:
+                touches[key] = (bid, stamp)
+            ctx['touch_age'][side] = max(0, stamp - touches[key][1])
 
     def targets(self, row, ctx, now):
         p, market, ph = self.p, row['market'], ctx['phase']
@@ -845,6 +895,8 @@ class Maker:
                 reason = 'fair_range'
             elif not hedge and ctx.get('spread_spike'):
                 reason = 'spread_spike'
+            elif not hedge and p.touch_stable_live and ctx.get('touch_age', {}).get(side, 0) < p.touch_stable_ms:
+                reason = 'touch_unstable'
             if reason:
                 decision['sides'][side] = dict(reason=reason)
                 self.count(now, 'skip_reasons', reason)
@@ -938,6 +990,10 @@ class Maker:
         if reserve:
             self.account.transfer('free', -reserve)
             self.account.transfer('locked', reserve)
+        touch = (self.memory.get('touch') or {}).get((row['market']['id'], side))
+        tick = number(row['market']['tickSize'])
+        spread = ctx['best'][side][1] - ctx['best'][side][0]
+        spread_ticks = int((spread / tick).to_integral_value(rounding=ROUND_DOWN)) if tick else 0
         order = dict(id=self.next_id(row['market']['id']), kind=kind, side=side, level=level, price=str(price),
                      size=str(size), remaining=str(size), reserved=str(reserve), filled='0',
                      ahead=str(ahead) if ahead is not None else None, ahead_prop=str(ahead) if ahead is not None else None,
@@ -945,7 +1001,8 @@ class Maker:
                      queue0=str(ahead) if ahead is not None else None,
                      decided=now, live_from=now + p.place_latency_ms, cancel_at=None, accounted=None,
                      fair=ctx['fair'][side], improve=price > ctx['best'][side][0], eligible=eligible,
-                     z=ctx['Z'], tau=ctx['tau'])
+                     z=ctx['Z'], tau=ctx['tau'], spread_ticks=spread_ticks,
+                     touch_since=touch[1] if touch and touch[0] == ctx['best'][side][0] else None)
         row['orders'].append(order)
         self.changed(row)
         if kind == 'shadow':
@@ -1247,11 +1304,19 @@ class Maker:
         order['remaining'] = str(number(order['remaining']) - qty)
         order['filled'] = str(number(order['filled']) + qty)
         pre = self.pre_mid(row, side, exchange)
-        record = dict(side=side, qty=str(qty), price=str(price), at=exchange, pre=pre if pre is not None else float(price), marks={})
+        matched = number(pr['price']) if how != 'complementary' else 1 - number(pr['price'])
+        sweep = bool(matched < price)
+        rest_ms = None if exchange is None else exchange - order['live_from']
+        since = order.get('touch_since')
+        touch_age = None if since is None or exchange is None else max(0, exchange - since)
+        record = dict(side=side, qty=str(qty), price=str(price), at=exchange, pre=pre if pre is not None else float(price), marks={},
+                      sweep=sweep, rest_ms=rest_ms, touch_age_ms=touch_age, spread_ticks=order.get('spread_ticks'))
         if order['kind'] == 'shadow':
             ahead = order['queue0']
             record.update(level=order['level'], eligible=order['eligible'], tau=mm.bucket(order['tau'], TAU_EDGES),
-                          z=mm.bucket(order['z'], Z_EDGES), queue=mm.bucket(float(ahead), QUEUE_EDGES) if ahead is not None else None)
+                          z=mm.bucket(order['z'], Z_EDGES), queue=mm.bucket(float(ahead), QUEUE_EDGES) if ahead is not None else None,
+                          touch_stable=qualifies_touch_stable(order.get('eligible'), order.get('level'), sweep, rest_ms, touch_age,
+                                                              self.p.touch_stable_rest_ms, self.p.touch_stable_ms))
             row['shadow_fills'] = (row['shadow_fills'] + [record])[-300:]
             return
         self.changed(row)
@@ -1279,7 +1344,8 @@ class Maker:
         self.merge(row, exchange, now)
         self.account.event('maker_fill', now)
         self.audit('fill', row['market']['id'], now, dict(print=pr, order=order['id'], side=side, quantity=str(qty),
-                   price=str(price), how=how, pre_mid=pre, maker_fee='0'))
+                   price=str(price), how=how, pre_mid=pre, maker_fee='0', sweep=sweep, rest_ms=rest_ms,
+                   touch_age_ms=touch_age))
 
     def merge(self, row, exchange, now):
         """Merge complete sets at once: each Up+Down pair redeems for 1."""
@@ -1402,7 +1468,12 @@ class Maker:
         shadow = {}
         for record in row['shadow_fills']:
             parts = self.decompose(record, y, end)
-            for bucket in [str(record['level'])] + ['eligible'] * bool(record['eligible']):
+            buckets = [str(record['level'])]
+            if record.get('eligible'):
+                buckets.append('eligible')
+            if record.get('touch_stable'):
+                buckets.append('touch_stable')
+            for bucket in buckets:
                 for name, value in (('shares', parts['qty']), ('pnl', parts['pnl']), ('edge', parts['edge']), ('as60', parts['as_60'])):
                     add(f'shadow|{bucket}|{name}', value)
                     shadow[bucket] = shadow.get(bucket, ZERO) + (value if name == 'shares' else ZERO)
@@ -1471,9 +1542,11 @@ class Maker:
                 effects={o: effects if o == outcome else self.effects(row, y) for o, y in OUTCOMES.items()})
         if row['shadow_fills'] and outcome in OUTCOMES:
             y = OUTCOMES[outcome]
-            self.audit('shadow_fills', market_id, now, dict(fills=[
+            self.audit('shadow_fills', market_id, now, dict(cell=row['cell'], fills=[
                 [r['level'], r['side'], r['qty'], r['price'], r['pre'], *[r['marks'].get(str(h)) for h in HORIZONS],
-                 str(y if r['side'] == 0 else 1 - y), r['tau'], r['z'], r['queue'], r['eligible']] for r in row['shadow_fills']]))
+                 str(y if r['side'] == 0 else 1 - y), r['tau'], r['z'], r['queue'], r['eligible'],
+                 r.get('at'), r.get('rest_ms'), int(bool(r.get('sweep'))), r.get('spread_ticks'), r.get('touch_age_ms'),
+                 int(bool(r.get('touch_stable')))] for r in row['shadow_fills']]))
         self.changed(row)
         row['pnl'] = summary['pnl']
         row.update(settled=True, outcome=outcome, estimated=estimated, qty=['0', '0'], cost=['0', '0'], lots=[[], []],
@@ -1485,7 +1558,7 @@ class Maker:
     def summary(row, market_id, outcome, estimated, effects):
         value = lambda key: number(effects.get(key, '0'))
         shadow = {bucket: {name: str(value(f'shadow|{bucket}|{name}')) for name in ('shares', 'pnl', 'edge', 'as60')}
-                  for bucket in [str(level) for level in LEVELS] + ['eligible']}
+                  for bucket in [str(level) for level in LEVELS] + ['eligible', 'touch_stable']}
         return dict(strategy=TAG, market_id=market_id, cell=row['cell'], end=row['spec']['t1'] * 1000, outcome=outcome,
                     estimated=estimated, filled=row['filled'], pnl=str(number(row['pnl']) + value('market|pnl')),
                     edge=str(value('market|edge')), as60=str(value('market|as60')), shadow=shadow,
@@ -1575,14 +1648,20 @@ class Maker:
 
     def review(self, summaries, now):
         previous = self.state['selection']
+        # A new maker config must not inherit a cooloff earned by the previous one.
+        # Missing hash (state written before this field existed) keeps the cooloff.
+        if previous.get('config_hash') not in (None, self.hash):
+            previous = dict(previous, cooloff={})
         self.state['selection'] = select(summaries, previous, self.p, now, recorded_cells())
+        self.state['selection']['config_hash'] = self.hash
         skipped = self.state['selection']['unavailable_cells']
         if skipped:
             _LOG.warning('Polymarket paper selection skipped unrecorded cells=%s', ','.join(skipped))
             self.audit('selection_scope_warning', 'selection', now, dict(reason='observer_not_recording', cells=skipped))
         self.audit('selection', 'selection', now, dict(active=self.state['selection']['active'],
                                                        cooloff=self.state['selection']['cooloff'],
-                                                       scores=self.state['selection']['scores']))
+                                                       scores=self.state['selection']['scores'], config_hash=self.hash,
+                                                       reentry_skipped=self.state['selection'].get('reentry_skipped', [])))
 
     def report(self, now, current=True):
         stored = self.stats(now) if current else self.state['days'].get(day_key(now), {})
