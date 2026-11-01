@@ -303,6 +303,8 @@ services:
       start_period: 30s
 
   polymarket-observer:
+    # Paused by roc on 2026-11-01: opt-in only via `--profile polymarket`.
+    profiles: ["polymarket"]
     <<: *backend-runtime
     image: ${BACKEND_IMAGE:-ghcr.io/openbyteinc/quantdinger-backend}:${BACKEND_TAG:-${IMAGE_TAG:-latest}}
     pull_policy: always

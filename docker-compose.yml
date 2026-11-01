@@ -392,6 +392,8 @@ services:
       start_period: 30s
 
   polymarket-observer:
+    # Paused by roc on 2026-11-01: opt-in only via `--profile polymarket`.
+    profiles: ["polymarket"]
     <<: *backend-runtime
     build: *backend-build
     image: ${BACKEND_LOCAL_IMAGE:-quantdinger-backend:local}
